@@ -1479,6 +1479,15 @@ function showResume(b) {
    * ขั้นของงานที่ค้างมีบอกอยู่ในการ์ดอยู่แล้ว ไม่ต้องเอามาครองหัวจอ
    */
   setMacroStage('start');
+  /**
+   * ผูกรหัสโครงการไว้กับการ์ดเอง ไม่ใช่ฝากไว้กับตัวแปรรวมของหน้า
+   *
+   * ปุ่มบนการ์ดอ่านค่าจากตัวแปร book ซึ่งเป็นสถานะรวมของทั้งหน้า และมีหลายเส้นทาง
+   * ที่ล้างมันเป็น null ได้ระหว่างที่การ์ดยังแสดงอยู่ พอกดปุ่มจึงพังด้วย
+   * "Cannot read properties of null (reading 'job')" แล้วทั้งหน้าหยุดตอบสนอง
+   * การ์ดที่จำได้ว่าตัวเองพูดถึงโครงการไหน จะโหลดกลับมาเองได้โดยไม่ต้องพึ่งตัวแปรนั้น
+   */
+  $('resume').dataset.bookId = b.id || '';
   $('resumeTitle').textContent = b.outline?.title || b.topic || '(ยังไม่มีชื่อ)';
   const why =
     b.job?.status === 'rate_limited'
@@ -1509,6 +1518,25 @@ async function acceptCurrentPages() {
 }
 
 async function resumeGo() {
+  /**
+   * กู้เล่มกลับมาจากรหัสบนการ์ด ถ้าตัวแปรรวมของหน้าถูกล้างไปแล้ว
+   *
+   * ของเดิมอ่าน book.job ตรง ๆ พอ book เป็น null ก็โยน TypeError ออกมากลางทาง
+   * ปุ่มอื่นบนหน้าที่รอผลอยู่จึงค้างตามไปด้วย ผู้ใช้เห็นเป็น "กดอะไรก็ไม่ได้"
+   * ทั้งที่งานยังอยู่ครบใน IndexedDB และแค่โหลดกลับมาก็ทำต่อได้ทันที
+   */
+  if (!book?.job) {
+    const id = $('resume').dataset.bookId;
+    if (id) book = await db.loadBook(id).catch(() => null);
+  }
+  if (!book?.job) {
+    $('resume').classList.add('hidden');
+    status('ไม่พบงานค้างที่จะทำต่อ — เลือกจาก “ดูประวัติโครงการ” ด้านล่างได้เลย');
+    await loadProjectHistory();
+    $('projectList')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+
   $('resume').classList.add('hidden');
   $('start').classList.add('hidden');
   if (['gate_images', 'images'].includes(book?.job?.step)) {

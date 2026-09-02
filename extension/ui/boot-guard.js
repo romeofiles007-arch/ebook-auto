@@ -22,16 +22,58 @@
       (document.body || document.documentElement).appendChild(box);
     }
     box.textContent = `⚠ ${title}\n${detail}`.slice(0, 4000);
+    box.appendChild(rescueButton());
   };
+
+  /**
+   * ทางออกฉุกเฉินเมื่อหน้าจอถูกซ่อนหมดจนไม่เหลืออะไรให้กด
+   *
+   * ตัวจัดการปุ่มหลายตัวซ่อนหน้าจอปัจจุบันก่อนแล้วค่อยทำงานต่อ ถ้าพังกลางทาง
+   * หน้าจะเหลือแต่พื้นเปล่า ไม่มีปุ่มไหนให้กดเพื่อออกจากสภาพนั้นเลย
+   * ทางเดียวคือรีโหลดหน้า ซึ่งไม่มีใครบอกไว้ และดูเหมือนโปรแกรมพังไปทั้งตัว
+   * งานทั้งหมดอยู่ใน IndexedDB อยู่แล้ว การพากลับหน้าเริ่มต้นจึงไม่ทำให้เสียอะไร
+   */
+  const SCREENS = ['start', 'resume', 'progress', 'editor', 'imagePhase', 'done'];
+
+  function rescueButton() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'กลับหน้าเริ่มต้น';
+    btn.style.cssText =
+      'display:block;margin-top:10px;padding:8px 14px;border:0;border-radius:8px;' +
+      'background:#a1414f;color:#fff;font:600 13px system-ui,sans-serif;cursor:pointer';
+    btn.onclick = () => {
+      restoreStart();
+      document.getElementById('bootError')?.remove();
+    };
+    return btn;
+  }
+
+  function restoreStart() {
+    for (const id of SCREENS) document.getElementById(id)?.classList.add('hidden');
+    document.getElementById('start')?.classList.remove('hidden');
+    document.getElementById('start')?.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  /** ไม่มีหน้าจอไหนมองเห็นอยู่เลย = หน้าตายแล้ว ต้องพากลับเองโดยไม่ต้องรอผู้ใช้เดา */
+  function reviveIfBlank() {
+    const anyVisible = SCREENS.some((id) => {
+      const el = document.getElementById(id);
+      return el && !el.classList.contains('hidden');
+    });
+    if (!anyVisible) restoreStart();
+  }
 
   window.addEventListener('error', (e) => {
     const where = e.filename ? `${e.filename.split('/').pop()}:${e.lineno}` : '';
     show('เกิดข้อผิดพลาดในหน้า Studio', `${e.message || e.error || 'ไม่ทราบสาเหตุ'}\n${where}`);
+    reviveIfBlank();
   });
 
   window.addEventListener('unhandledrejection', (e) => {
     const r = e.reason;
     show('งานเบื้องหลังล้มเหลว', r?.stack || r?.message || String(r));
+    reviveIfBlank();
   });
 
   // module ที่โหลดไม่ผ่านจะไม่โยน error ที่จับได้เสมอไป จึงต้องเช็คว่ามันบูตจริงไหมด้วย
