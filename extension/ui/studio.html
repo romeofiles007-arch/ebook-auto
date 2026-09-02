@@ -8,15 +8,57 @@
 </head>
 <body><main class="app">
 
+<svg id="iconSprite" aria-hidden="true" style="display:none">
+  <defs>
+    <g id="s" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"></g>
+  </defs>
+  <symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19v14H5.5A1.5 1.5 0 0 0 4 18.5z"/><path d="M4 18.5A1.5 1.5 0 0 0 5.5 20H19v-3"/><path d="M8 7h7"/></g></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></g></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5c2.6 2.3 4 5.4 4 9v3.2l-1.6 2.3H9.6L8 14.7v-3.2c0-3.6 1.4-6.7 4-9Z"/><path d="M8 12.5 5.3 15.2v3.1l2.4-1.4M16 12.5l2.7 2.7v3.1l-2.4-1.4"/><circle cx="12" cy="9.3" r="1.6"/><path d="M10.8 20.5h2.4"/></g></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="m14.5 7.5 2 2"/></g></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 17 5-4.5 4 3.5 3-2.5 4 3.5"/></g></symbol>
+  <symbol id="i-dice" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="8.5" cy="8.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 13.6 9 19 10.5 13.6 12 12 17.5 10.4 12 5 10.5 10.4 9z"/><path d="M18 16.5 18.7 19l2.3.7-2.3.8L18 23l-.7-2.5-2.3-.8 2.3-.7z"/></g></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></g></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5a5.5 5.5 0 1 1 6 0V19H9z"/><path d="M10 21.5h4"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></g></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-5"/></g></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5 21 19.5H3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-error" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m9 9 6 6M15 9l-6 6"/></g></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></g></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5.5 18.5 12 8 18.5z"/></g></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></g></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></g></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></g></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10"/><path d="m7.5 10 4.5 4.5L16.5 10"/><path d="M4.5 19.5h15"/></g></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4.5"/><path d="M7.5 9 12 4.5 16.5 9"/><path d="M4.5 19.5h15"/></g></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h7l5 5V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M13 3.5V9h5"/><path d="M8.5 13h7M8.5 16.5h4"/></g></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8z"/><path d="m3.5 12.5 8.5 4.5 8.5-4.5"/></g></symbol>
+  <symbol id="i-money" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 12h.01M17.5 12h.01"/></g></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21"/><path d="M17.5 12v3M20 12v2"/></g></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/><path d="M12 8v4.5l3 1.8"/></g></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5h15"/><path d="M9.5 6.5V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/><path d="M6.5 6.5 7.4 19a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9l.9-12.5"/></g></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h8"/><path d="M4 16.5 15 5.5a2.1 2.1 0 0 1 3 3L7 19.5l-3.5.5z"/></g></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/></g></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6.5a1 1 0 0 1 1-1h4l2 2.5h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1z"/></g></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1.5"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4"/></g></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11M19 7h1M4 17h5M13 17h7"/><circle cx="17" cy="7" r="2"/><circle cx="11" cy="17" r="2"/></g></symbol>
+  <symbol id="i-robot" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M12 4.5V8"/><circle cx="12" cy="3.5" r="1.2"/><path d="M9 12.5h.01M15 12.5h.01"/><path d="M9.5 16h5"/></g></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5c0 3.9-3.8 7-8.5 7-1 0-2-.15-2.9-.42L4 19.5l1.3-3.4A6.6 6.6 0 0 1 3.5 11.5c0-3.9 3.8-7 8.5-7s8.5 3.1 8.5 7z"/></g></symbol>
+  <symbol id="i-pages" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3.5" width="13" height="17" rx="1.6"/><path d="M4 6.5v13a1.5 1.5 0 0 0 1.5 1.5H16"/><path d="M10.5 8.5h6M10.5 12h6M10.5 15.5h3.5"/></g></symbol>
+  <symbol id="i-doc-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h7l5 5v6"/><path d="M13 3.5V9h5"/><path d="M18 20.5H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1"/><path d="m14 18 2 2 4-4"/></g></symbol>
+</svg>
+
+
 <header>
   <div>
-    <div class="brand">📚 Ebook Auto</div>
+    <div class="brand"><svg class="i i-lg" aria-hidden="true"><use href="#i-book"/></svg> Ebook Auto</div>
     <div class="sub">Extension ↔ ChatGPT ↔ Typst</div>
   </div>
   <div class="headerRight">
     <div id="mode" class="mode hidden"></div>
     <div id="status" class="status">พร้อม</div>
-    <button id="newBook" type="button" class="inline">🔄 เล่มใหม่</button>
+    <button id="newBook" type="button" class="inline"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>เล่มใหม่</button>
   </div>
 </header>
 
@@ -29,17 +71,17 @@
   -->
   <ol id="stepGuide" class="stepGuide">
     <li data-step="setup"><b>1 · ตั้งค่าเล่มให้ครบก่อน</b><span>ผู้อ่าน · โทน · จำนวนหน้า · ภาษา · โหมดเนื้อหา — ทุกค่าถูกล็อกเข้าไปในสารบัญ</span></li>
-    <li data-step="title"><b>2 · ได้หัวข้อหรือชื่อหนังสือ</b><span>พิมพ์เอง หรือใช้ 🎲 สุ่มจากกระแส / ✨ ให้ ChatGPT คิดชื่อ</span></li>
-    <li data-step="outline"><b>3 · ได้สารบัญแล้วเลือก 1 ทาง</b><span>กด 🧭 เสนอสารบัญ 3 ทาง ให้ ChatGPT คิดให้ — หรือเปิด 💡 โหมดแรงบันดาลใจ ถ้ามีสารบัญของตัวเองอยู่แล้ว · ขั้นนี้ต้องมาหลังข้อ 1 เสมอ</span></li>
-    <li data-step="create"><b>4 · กด 🚀 เริ่มสร้าง Ebook</b><span>ตั้งแต่จุดนี้ระบบเดินยาวจนจบเนื้อหา</span></li>
+    <li data-step="title"><b>2 · ได้หัวข้อหรือชื่อหนังสือ</b><span>พิมพ์เอง หรือใช้ <svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>สุ่มจากกระแส / <svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT คิดชื่อ</span></li>
+    <li data-step="outline"><b>3 · ได้สารบัญแล้วเลือก 1 ทาง</b><span>กด <svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>เสนอสารบัญ 3 ทาง ให้ ChatGPT คิดให้ — หรือเปิด <svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg>โหมดแรงบันดาลใจ ถ้ามีสารบัญของตัวเองอยู่แล้ว · ขั้นนี้ต้องมาหลังข้อ 1 เสมอ</span></li>
+    <li data-step="create"><b>4 · กด <svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มสร้าง Ebook</b><span>ตั้งแต่จุดนี้ระบบเดินยาวจนจบเนื้อหา</span></li>
   </ol>
   <div class="stepWarn">แก้ค่าในข้อ 1 หลังจากเลือกสารบัญไปแล้ว = ต้องกดเสนอสารบัญใหม่ ระบบจะเตือนให้เองและไม่ปล่อยให้เริ่มเขียนด้วยสารบัญที่ขัดกับค่าใหม่</div>
   <div class="fullAutoBar">
     <div>
-      <b>🤖 โหมดอัตโนมัติเต็มรูปแบบ</b>
+      <b><svg class="i i-lg" aria-hidden="true"><use href="#i-robot"/></svg> โหมดอัตโนมัติเต็มรูปแบบ</b>
       <span>กดครั้งเดียวแล้วปล่อยยาว — คิดชื่อเรื่อง วางสารบัญ เขียนทั้งเล่ม สร้างภาพ แล้วส่งออกไฟล์ให้เอง โดยใช้ค่าที่ตั้งไว้ด้านล่างทั้งหมด ไม่ถามอะไรระหว่างทาง</span>
     </div>
-    <button id="fullAuto" type="button" class="primary">🚀 เริ่มอัตโนมัติทั้งเล่ม</button>
+    <button id="fullAuto" type="button" class="primary"><svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มอัตโนมัติทั้งเล่ม</button>
   </div>
 
   <!--
@@ -49,7 +91,7 @@
   <div class="apiBar">
     <div class="apiBarTop">
       <div>
-        <b>✍️ แหล่งเขียนเนื้อหา</b>
+        <b><svg class="i i-lg" aria-hidden="true"><use href="#i-pen"/></svg> แหล่งเขียนเนื้อหา</b>
         <span id="textSourceNote">ขับหน้าเว็บ ChatGPT ฟรีตามแพ็กเกจที่มีอยู่ แต่ช้ากว่าและมีลิมิตข้อความ</span>
       </div>
       <select id="textSource">
@@ -59,7 +101,7 @@
     </div>
     <div class="apiBarTop">
       <div>
-        <b>🖼 แหล่งสร้างภาพ</b>
+        <b><svg class="i i-lg" aria-hidden="true"><use href="#i-image"/></svg> แหล่งสร้างภาพ</b>
         <span>เลือกแยกจากงานเขียนได้ บัญชีที่สร้างภาพไม่ได้ก็ยังเขียนเนื้อหาได้ครบ</span>
       </div>
       <select id="imageSource">
@@ -81,11 +123,11 @@
           <option value="medium" selected>คุณภาพกลาง</option>
           <option value="high">คุณภาพสูง</option>
         </select>
-        <button id="testApiKey" type="button" class="inline">ทดสอบคีย์</button>
+        <button id="testApiKey" type="button" class="inline"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg>ทดสอบคีย์</button>
       </div>
       <div id="textApiRow" class="apiKeyRow" hidden>
         <select id="textApiModel"></select>
-        <button id="testTextApi" type="button" class="inline">ทดสอบโมเดลเขียน</button>
+        <button id="testTextApi" type="button" class="inline"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg>ทดสอบโมเดลเขียน</button>
       </div>
       <div id="textApiPrice" class="muted" hidden></div>
       <details id="priceEdit" class="more" hidden>
@@ -94,7 +136,7 @@
           <input id="priceIn" type="number" min="0" step="0.01" placeholder="ราคา input ต่อ 1M token (USD)">
           <input id="priceOut" type="number" min="0" step="0.01" placeholder="ราคา output ต่อ 1M token (USD)">
           <input id="usdThb" type="number" min="1" step="0.1" placeholder="บาทต่อดอลลาร์">
-          <button id="priceReset" type="button" class="inline">ใช้ราคาตั้งต้น</button>
+          <button id="priceReset" type="button" class="inline"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>ใช้ราคาตั้งต้น</button>
         </div>
         <div class="muted" style="margin-top:6px">
           ราคาตั้งต้นในโปรแกรมถูกจดไว้วันหนึ่ง แล้วราคาจริงเปลี่ยนได้ตลอด —
@@ -108,9 +150,9 @@
 
   <div class="row">
     <label for="title">หัวข้อหรือชื่อหนังสือ</label>
-    <button id="trendRandom" type="button">🎲 สุ่มจากกระแสตอนนี้</button>
-    <button id="titleIdeate" type="button">✨ ให้ ChatGPT คิดชื่อ</button>
-    <button id="outlineIdeate" type="button">🧭 เสนอสารบัญ 3 ทาง</button>
+    <button id="trendRandom" type="button"><svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>สุ่มจากกระแสตอนนี้</button>
+    <button id="titleIdeate" type="button"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT คิดชื่อ</button>
+    <button id="outlineIdeate" type="button"><svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>เสนอสารบัญ 3 ทาง</button>
   </div>
   <input id="title" autofocus placeholder="ใส่หัวข้อคร่าว ๆ เช่น การเงินสำหรับฟรีแลนซ์">
   <div id="trendIdeas" class="estimate hidden"></div>
@@ -123,7 +165,7 @@
     ใช้กล่องตัวเลือกสารบัญร่วมกับโหมดปกติ เพื่อให้ขั้นถัดไปเหมือนกันทั้งสองทาง
   -->
   <details class="more inspireBox" id="inspireBox">
-    <summary>💡 โหมดแรงบันดาลใจ — ฉันมีสารบัญของตัวเองอยู่แล้ว</summary>
+    <summary><svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg>โหมดแรงบันดาลใจ — ฉันมีสารบัญของตัวเองอยู่แล้ว</summary>
     <div class="muted inspireHint">ใส่ชื่อเรื่องด้านบน ตั้งจำนวนหน้าที่ต้องการ แล้วพิมพ์สารบัญของคุณบรรทัดละบท ChatGPT จะไม่คิดโครงใหม่ แต่จะตกแต่งของคุณให้เขียนเป็นหนังสือได้จริง แล้วเสนอ 3 ทางให้เลือก — ทาง A คือโครงเดิมของคุณเสมอ</div>
     <div class="field">
       <label for="inspireOutline">สารบัญของคุณ (บรรทัดละบท ใส่คำอธิบายหลัง — ได้)</label>
@@ -138,7 +180,7 @@
       <input id="inspireNote" placeholder="เช่น อยากให้มีเคสจริงทุกบท หรือ ห้ามเพิ่มบทใหม่">
     </div>
     <div class="trendActions">
-      <button type="button" id="inspirePolish" class="primary inline">🎨 ให้ ChatGPT ตกแต่งสารบัญของฉัน</button>
+      <button type="button" id="inspirePolish" class="primary inline"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT ตกแต่งสารบัญของฉัน</button>
     </div>
   </details>
 
@@ -262,7 +304,7 @@
       placeholder="เช่น&#10;ชื่อ อาชีพปัจจุบัน&#10;ทำงานด้านนี้มากี่ปี ผ่านอะไรมา&#10;ผลงานหรือประสบการณ์ที่เกี่ยวกับหนังสือเล่มนี้&#10;ช่องทางติดต่อ"></textarea>
     <div class="row" style="margin-top:8px">
       <span id="aboutState" class="muted"></span>
-      <button id="aboutPolish">ให้ ChatGPT ช่วยเรียบเรียง (ห้ามเพิ่มข้อมูล)</button>
+      <button id="aboutPolish"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT ช่วยเรียบเรียง (ห้ามเพิ่มข้อมูล)</button>
     </div>
   </details>
 
@@ -479,7 +521,7 @@
   <section class="projectArchive">
     <div class="row">
       <b>ประวัติโครงการหนังสือ</b>
-      <button id="refreshProjects">รีเฟรช</button>
+      <button id="refreshProjects"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>รีเฟรช</button>
     </div>
     <div id="projectList" class="projectList"><div class="muted">กำลังอ่านรายการ...</div></div>
   </section>
@@ -489,10 +531,10 @@
       <b id="resumeTitle"></b>
       <div id="resumeInfo" class="muted"></div>
     </div>
-    <button id="acceptPages" class="primary inline hidden">ยอมรับจำนวนหน้าปัจจุบัน</button>
-    <button id="resumeHistory">ดูประวัติโครงการ</button>
-    <button id="resumeGo" class="primary inline">ทำต่อจากที่ค้าง</button>
-    <button id="resumeDrop">ทิ้ง</button>
+    <button id="acceptPages" class="primary inline hidden"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>ยอมรับจำนวนหน้าปัจจุบัน</button>
+    <button id="resumeHistory"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>ดูประวัติโครงการ</button>
+    <button id="resumeGo" class="primary inline"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg>ทำต่อจากที่ค้าง</button>
+    <button id="resumeDrop"><svg class="i" aria-hidden="true"><use href="#i-trash"/></svg>ทิ้ง</button>
   </section>
 
   <div class="folderRow">
@@ -500,7 +542,7 @@
       <b>Shared Workspace + โฟลเดอร์ส่งออก</b>
       <div id="folderName" class="muted">เลือกโฟลเดอร์เดียวกันในทุก Chrome Profile เพื่อใช้ประวัติและ Phase 2 ร่วมกัน</div>
     </div>
-    <button id="folder">📁 เลือก Folder</button>
+    <button id="folder"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg>เลือก Folder</button>
   </div>
 
   <div class="folderRow">
@@ -508,14 +550,14 @@
       <b>เครื่องเรียงพิมพ์</b>
       <div id="typstState" class="muted">ยังไม่ได้ตรวจ</div>
     </div>
-    <button id="typstTest">ทดสอบ Typst</button>
+    <button id="typstTest"><svg class="i" aria-hidden="true"><use href="#i-ruler"/></svg>ทดสอบ Typst</button>
   </div>
 
-  <button id="create" class="primary">🚀 เริ่มสร้าง Ebook</button>
+  <button id="create" class="primary"><svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มสร้าง Ebook</button>
 
   <div class="testBar">
-    <label><input type="checkbox" id="testMode"> 🧪 โหมดทดสอบ — เดินด้วยข้อมูลปลอม ไม่ยิง ChatGPT และไม่เปลืองโควตา</label>
-    <button id="systemTest" type="button">ทดสอบระบบทั้งสาย (เล่มจิ๋ว 12 หน้า)</button>
+    <label><input type="checkbox" id="testMode"> <svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>โหมดทดสอบ — เดินด้วยข้อมูลปลอม ไม่ยิง ChatGPT และไม่เปลืองโควตา</label>
+    <button id="systemTest" type="button"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>ทดสอบระบบทั้งสาย (เล่มจิ๋ว 12 หน้า)</button>
   </div>
 </section>
 
@@ -530,7 +572,7 @@
   </div>
 
   <div class="card flow">
-    <div class="cardTitle">🔄 การรับส่งข้อมูลแบบสด</div>
+    <div class="cardTitle"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>การรับส่งข้อมูลแบบสด</div>
     <div id="feed" class="feed">
       <div class="empty">เมื่อเริ่มงาน จะเห็น Prompt ที่ส่งไปและคำตอบที่กลับมาที่นี่</div>
     </div>
@@ -538,10 +580,10 @@
 
   <div class="card">
     <div class="row">
-      <b>📋 ขั้นตอน</b>
-      <button id="phase2Back" class="hidden">กลับหน้า Image Phase 2</button>
-      <button id="chat">เปิดหน้าต่าง ChatGPT</button>
-      <button id="stop" class="danger">หยุด</button>
+      <b><svg class="i i-lg" aria-hidden="true"><use href="#i-layers"/></svg> ขั้นตอน</b>
+      <button id="phase2Back" class="hidden"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg>กลับหน้า Image Phase 2</button>
+      <button id="chat"><svg class="i" aria-hidden="true"><use href="#i-chat"/></svg>เปิดหน้าต่าง ChatGPT</button>
+      <button id="stop" class="danger"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg>หยุด</button>
     </div>
     <div id="steps" class="steps"></div>
   </div>
@@ -549,16 +591,16 @@
 
 <section id="editor" class="card hidden">
   <div class="row">
-    <b>✏️ ตรวจและแก้ก่อนส่งออก</b>
+    <b><svg class="i i-lg" aria-hidden="true"><use href="#i-edit"/></svg> ตรวจและแก้ก่อนส่งออก</b>
     <span id="editPages" class="muted"></span>
-    <button id="fillEmptySections" class="hidden">เขียนตอนที่ยังว่าง</button>
-    <button id="recount">นับหน้าใหม่</button>
+    <button id="fillEmptySections" class="hidden"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg>เขียนตอนที่ยังว่าง</button>
+    <button id="recount"><svg class="i" aria-hidden="true"><use href="#i-pages"/></svg>นับหน้าใหม่</button>
   </div>
   <div class="imgPanel">
     <div class="row">
-      <b>🖼 ภาพในเล่มและปก</b>
+      <b><svg class="i i-lg" aria-hidden="true"><use href="#i-image"/></svg> ภาพในเล่มและปก</b>
       <span id="imgSummary" class="muted"></span>
-      <button id="figPrompts">ส่งออก prompt ทั้งหมดเป็นไฟล์</button>
+      <button id="figPrompts"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>ส่งออก prompt ทั้งหมดเป็นไฟล์</button>
     </div>
     <div class="coverSlots">
       <div class="slot">
@@ -581,10 +623,10 @@
       </div>
     </div>
     <div class="row coverActions" id="coverActions">
-      <button id="coverRegenFront">สร้างปกหน้าใหม่</button>
-      <button id="coverRegenBack">สร้างปกหลังใหม่</button>
-      <button id="coverRethink">ให้ GPT คิดแนวปกใหม่ทั้งชุด</button>
-      <button id="editorToPhase2">← กลับหน้าสร้างภาพ</button>
+      <button id="coverRegenFront"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg>สร้างปกหน้าใหม่</button>
+      <button id="coverRegenBack"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg>สร้างปกหลังใหม่</button>
+      <button id="coverRethink"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ GPT คิดแนวปกใหม่ทั้งชุด</button>
+      <button id="editorToPhase2"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg>กลับหน้าสร้างภาพ</button>
     </div>
     <div id="coverActionsHint" class="muted"></div>
     <div id="figList" class="figList"></div>
@@ -596,8 +638,8 @@
       <b>แก้ในเวิร์ดก่อนทำ PDF</b>
       <div class="muted">ส่งออกเป็น .docx ไปแก้ให้พอใจ แล้วนำกลับเข้ามา ระบบจะเอาไปเรียงพิมพ์เป็น PDF ให้</div>
     </div>
-    <button id="docxOut">⬇ ส่งออก .docx</button>
-    <button id="docxIn">⬆ นำ .docx ที่แก้แล้วกลับเข้า</button>
+    <button id="docxOut"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>ส่งออก .docx</button>
+    <button id="docxIn"><svg class="i" aria-hidden="true"><use href="#i-upload"/></svg>นำ .docx ที่แก้แล้วกลับเข้า</button>
     <input type="file" id="docxFile" accept=".docx" hidden>
   </div>
   <div id="docxReport" class="muted"></div>
@@ -609,9 +651,9 @@
       <textarea id="secBody" spellcheck="false" placeholder="เนื้อหาของตอนที่เลือก"></textarea>
       <div class="row">
         <span id="secStat" class="muted"></span>
-        <button id="secHistory">ประวัติตอน</button>
-        <button id="secRegen">ให้ AI เขียนตอนนี้ใหม่</button>
-        <button id="secSave">บันทึกตอนนี้</button>
+        <button id="secHistory"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>ประวัติตอน</button>
+        <button id="secRegen"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg>ให้ AI เขียนตอนนี้ใหม่</button>
+        <button id="secSave"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>บันทึกตอนนี้</button>
       </div>
       <div id="historyPanel" class="historyPanel hidden"></div>
     </div>
@@ -619,20 +661,20 @@
 
   <div class="stepNav">
     <span class="muted">แก้ตอนไหนก็ได้ แล้วกดนับหน้าใหม่ พอใจแล้วค่อยไปต่อ</span>
-    <button id="proceed" class="primary inline next">ถัดไป: เตรียม Prompt ปกและ Phase 2 →</button>
+    <button id="proceed" class="primary inline next">ถัดไป: เตรียม Prompt ปกและ Phase 2 <svg class="i" aria-hidden="true"><use href="#i-right"/></svg></button>
   </div>
 </section>
 
 <section id="imagePhase" class="card hidden">
   <div class="p2Head">
     <div>
-      <b>🖼 Phase 2 — สร้างภาพ</b>
+      <b><svg class="i i-lg" aria-hidden="true"><use href="#i-image"/></svg> Phase 2 — สร้างภาพ</b>
       <div id="phase2Count" class="muted">กำลังอ่านรายการภาพ...</div>
     </div>
     <div class="p2HeadActions">
-      <button id="phase2Prompts" class="inline">ส่งออก Prompt ภาพทั้งหมด</button>
-      <button id="phase2Bulk" class="inline">อัปโหลดหลายรูปพร้อมกัน</button>
-      <button id="phase2Folder" class="inline" title="อ่านไฟล์รูปที่วางไว้ในโฟลเดอร์รับรูปของโครงการ แล้วใส่เข้าช่องตามชื่อไฟล์">📁 ดึงรูปจากโฟลเดอร์โครงการ</button>
+      <button id="phase2Prompts" class="inline"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>ส่งออก Prompt ภาพทั้งหมด</button>
+      <button id="phase2Bulk" class="inline"><svg class="i" aria-hidden="true"><use href="#i-upload"/></svg>อัปโหลดหลายรูปพร้อมกัน</button>
+      <button id="phase2Folder" class="inline" title="อ่านไฟล์รูปที่วางไว้ในโฟลเดอร์รับรูปของโครงการ แล้วใส่เข้าช่องตามชื่อไฟล์"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg>ดึงรูปจากโฟลเดอร์โครงการ</button>
       <input type="file" id="bulkImgFile" accept="image/*" multiple hidden>
     </div>
   </div>
@@ -668,21 +710,21 @@
   </div>
 
   <div class="actions">
-    <button id="coverConsultAgain" class="hidden">ให้ GPT คิดปกใหม่</button>
+    <button id="coverConsultAgain" class="hidden"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ GPT คิดปกใหม่</button>
   </div>
 
   <div class="stepNav">
     <div class="side">
-      <button id="phase2Edit" class="backLink">← กลับไปแก้เนื้อหา</button>
-      <button id="phase2Skip">ข้ามไปก่อน (ยังไม่สร้างภาพจริง)</button>
-      <button id="phase2Stop" class="danger hidden">หยุด</button>
+      <button id="phase2Edit" class="backLink"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg>กลับไปแก้เนื้อหา</button>
+      <button id="phase2Skip"><svg class="i" aria-hidden="true"><use href="#i-right"/></svg>ข้ามไปก่อน (ยังไม่สร้างภาพจริง)</button>
+      <button id="phase2Stop" class="danger hidden"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg>หยุด</button>
     </div>
-    <button id="phase2Start" class="primary inline next">เริ่ม Phase 2</button>
+    <button id="phase2Start" class="primary inline next"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg>เริ่ม Phase 2</button>
   </div>
 </section>
 
 <section id="done" class="card hidden">
-  <h2>🎉 สร้างเสร็จแล้ว</h2>
+  <h2><svg class="i i-lg" aria-hidden="true"><use href="#i-check-circle"/></svg> สร้างเสร็จแล้ว</h2>
   <p id="doneText"></p>
   <div id="imagesNotReadyBanner" class="banner warn hidden">
     <div class="icon">⚠</div>
@@ -690,15 +732,15 @@
       <div class="title">เล่มนี้ยังไม่มีภาพจริง</div>
       <div class="desc" id="imagesNotReadyDesc"></div>
       <div class="bannerActions">
-        <button id="imagesNotReadyGo">← กลับไปสร้างภาพ (Phase 2)</button>
+        <button id="imagesNotReadyGo"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg>กลับไปสร้างภาพ (Phase 2)</button>
       </div>
     </div>
   </div>
   <div id="preflight" class="preflight"></div>
   <div class="actions">
-    <button id="openHistory">แก้ไข / ประวัติเนื้อหา</button>
-    <button id="doneCoverRedo">แก้ / สร้างปกใหม่</button>
-    <button data-export="book" id="exportBookBtn" class="primary inline">PDF Ebook รวมปก + ภาพ</button>
+    <button id="openHistory"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg>แก้ไข / ประวัติเนื้อหา</button>
+    <button id="doneCoverRedo"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg>แก้ / สร้างปกใหม่</button>
+    <button data-export="book" id="exportBookBtn" class="primary inline"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>PDF Ebook รวมปก + ภาพ</button>
     <button data-export="screen">PDF ตรวจงาน</button>
     <button data-export="interior">PDF สำหรับพิมพ์</button>
     <button data-export="cover">PDF ปก</button>

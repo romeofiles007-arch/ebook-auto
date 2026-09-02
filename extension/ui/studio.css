@@ -209,3 +209,45 @@ textarea{width:100%;padding:12px 14px;border:1px solid #34435f;border-radius:10p
 
 .apiKeyRow #imageApiModel{flex:0 0 auto;width:170px}
 @media (max-width:620px){.apiKeyRow #imageApiModel{flex:1 1 auto;width:auto}}
+/**
+ * ไอคอน — ชุดเดียวทั้งระบบ วาดด้วยเส้น ไม่ใช่อีโมจิ
+ *
+ * อีโมจิดูต่างกันทุกเครื่องและมีสีของตัวเองที่คุมไม่ได้ ปนกันหลายชุดเมื่อไร
+ * หน้าจอจะกลายเป็นหน้าตาแบบ "เครื่องมือไทยรุ่นเก่า" ทันที ซึ่งเป็นสิ่งที่ต้องเลี่ยงที่สุด
+ * ไอคอนเส้นใช้ currentColor จึงเปลี่ยนสีตามข้อความที่มันอยู่ด้วยเสมอ
+ * ทั้งบนปุ่มปกติ ปุ่มอันตราย และแถบสถานะ โดยไม่ต้องเขียนสีซ้ำที่ไหนเลย
+ */
+.i {
+  width: 1.15em;
+  height: 1.15em;
+  flex: 0 0 auto;
+  /* ให้ตรงกับเส้นฐานของตัวหนังสือไทยซึ่งมีสระบนล่าง ไม่ใช่กึ่งกลางกล่อง */
+  vertical-align: -0.22em;
+  color: inherit;
+}
+.i-lg { width: 1.35em; height: 1.35em; vertical-align: -0.3em; }
+
+/* ปุ่มและหัวข้อที่มีไอคอน ต้องเว้นช่องระหว่างไอคอนกับคำเสมอ */
+button:has(.i),
+.brand:has(.i),
+.pf:has(.i) > div,
+b:has(.i) {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.pf:has(.i) { align-items: start; }
+.secItem:has(.i) { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+/* สถานะใช้สีเดียวกับกรอบของมัน ไอคอนจึงอ่านออกตั้งแต่ยังไม่อ่านข้อความ */
+.pf.ok .i { color: #63d5a5; }
+.pf.warn .i { color: #e8cf95; }
+.pf.fail .i { color: #ff9b9b; }
+.secItem.off .i { color: #e0b464; }
+
+/* รายการตอน: ไอคอนสถานะอยู่ซ้าย ข้อความจัดเป็นคอลัมน์ของตัวเอง */
+.secItem { display: flex; align-items: flex-start; gap: 8px; }
+.secItem .t { min-width: 0; flex: 1; }
+.secItem .i { margin-top: 2px; }
+.secItem .i { color: #63d5a5; }
+.secItem.off .i { color: #e0b464; }

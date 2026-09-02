@@ -279,7 +279,8 @@ function setMacroStage(key) {
   const idx = Math.max(0, MACRO_STAGES.findIndex((s) => s.key === key));
   $('macroSteps').innerHTML = MACRO_STAGES.map((s, i) => {
     const cls = i === idx ? 'active' : i < idx ? 'done' : '';
-    return `<div class="macroStep ${cls}"><div class="track"></div><div class="dot">${i < idx ? '✓' : i + 1}</div><div class="label">${esc(s.label)}</div></div>`;
+    const mark = i < idx ? '<svg class="i" aria-hidden="true"><use href="#i-check"/></svg>' : i + 1;
+    return `<div class="macroStep ${cls}"><div class="track"></div><div class="dot">${mark}</div><div class="label">${esc(s.label)}</div></div>`;
   }).join('');
 }
 
@@ -585,7 +586,7 @@ function resetOutlineDirection({ hide = true } = {}) {
     box.querySelector('[data-outline-stale]')?.remove();
     if (hide) box.classList.add('hidden');
   }
-  $('create').textContent = '🚀 เริ่มสร้าง Ebook';
+  setBtn('create', 'rocket', 'เริ่มสร้าง Ebook');
   renderStepGuide();
 }
 
@@ -607,7 +608,7 @@ function markOutlineStale(reason) {
   outlineDirection = null;
   box.dataset.ready = '0';
   box.classList.add('stale');
-  $('create').textContent = '🚀 เริ่มสร้าง Ebook';
+  setBtn('create', 'rocket', 'เริ่มสร้าง Ebook');
   renderStepGuide();
 
   let note = box.querySelector('[data-outline-stale]');
@@ -747,7 +748,7 @@ async function generateOutlineDirections() {
   const box = $('outlineDirections');
   button.disabled = true;
   outlineDirection = null;
-  $('create').textContent = '🚀 เริ่มสร้าง Ebook';
+  setBtn('create', 'rocket', 'เริ่มสร้าง Ebook');
   box.classList.remove('hidden');
   box.dataset.ready = '0';
   setMode('เสนอสารบัญ', { busy: true });
@@ -842,7 +843,7 @@ function renderOutlineChoices(directions, { title, origin = 'auto' }) {
       };
       box.querySelectorAll('.outlineChoice').forEach((card) => card.classList.remove('selected'));
       box.querySelector(`[data-outline-card="${i}"]`)?.classList.add('selected');
-      $('create').textContent = '🚀 สร้าง Ebook ตามสารบัญที่เลือก';
+      setBtn('create', 'rocket', 'สร้าง Ebook ตามสารบัญที่เลือก');
       renderStepGuide();
       status(`เลือกสารบัญ: ${outlineDirection.name}`);
     };
@@ -895,7 +896,7 @@ async function polishUserOutline() {
   const box = $('outlineDirections');
   button.disabled = true;
   outlineDirection = null;
-  $('create').textContent = '🚀 เริ่มสร้าง Ebook';
+  setBtn('create', 'rocket', 'เริ่มสร้าง Ebook');
   box.classList.remove('hidden', 'stale');
   box.querySelector('[data-outline-stale]')?.remove();
   box.dataset.ready = '0';
@@ -1616,7 +1617,7 @@ function showResume(b) {
     `${b.targetPages} หน้า · เขียนด้วย ${engine} · ใช้ไป ${b.job?.turnNo || 0} ${(b.textSource || 'web') === 'api' ? 'เทิร์น' : 'ข้อความ'} · ค้างที่ขั้น ${STEP_NAMES[b.job?.step] || b.job?.step || '-'}` +
     (seen ? ` · แตะล่าสุด${sinceText(seen)}` : '') +
     (why ? ` — ${why}` : '');
-  $('resumeGo').textContent = ['gate_images', 'images'].includes(b.job?.step) ? 'เปิด Image Phase 2' : 'ทำต่อจากที่ค้าง';
+  setBtn('resumeGo', ['gate_images', 'images'].includes(b.job?.step) ? 'image' : 'play', ['gate_images', 'images'].includes(b.job?.step) ? 'เปิด Image Phase 2' : 'ทำต่อจากที่ค้าง');
   const canAcceptPages =
     b.job?.step === 'fit' &&
     Number(b.lastCompile?.pages) > 0 &&
@@ -1732,7 +1733,7 @@ async function startNewBook() {
   ['progress', 'editor', 'imagePhase', 'done', 'error', 'resume'].forEach((id) => $(id).classList.add('hidden'));
   $('start').classList.remove('hidden');
   $('create').disabled = false;
-  $('create').textContent = '🚀 เริ่มสร้าง Ebook';
+  setBtn('create', 'rocket', 'เริ่มสร้าง Ebook');
   setMacroStage('start');
   status('พร้อม');
   $('start').scrollIntoView({ behavior: 'smooth' });
@@ -2052,7 +2053,18 @@ function renderSecList() {
     .map((s) => {
       const off = s.quota ? Math.round(((s.chars - s.quota) / s.quota) * 100) : 0;
       const bad = Math.abs(off) > 25 ? ' off' : '';
-      return `<button class="secItem${bad}${s.id === selected ? ' sel' : ''}" data-id="${s.id}">${esc(s.id)} ${esc(s.title)}<span class="n">${s.chars.toLocaleString()} หน่วย · ${off >= 0 ? '+' : ''}${off}% · ${s.status} · ประวัติ ${(s.history || []).length}</span></button>`;
+      /**
+       * สถานะของตอนต้องอ่านออกก่อนอ่านตัวหนังสือ
+       * รายการยาวหลายสิบตอน การไล่อ่านคำว่า blocked/draft ทีละบรรทัดคือการค้นหา ไม่ใช่การเห็น
+       */
+      const mark = !(s.md || '').trim()
+        ? s.status === 'blocked'
+          ? 'error'
+          : 'clock'
+        : Math.abs(off) > 25
+          ? 'alert'
+          : 'check-circle';
+      return `<button class="secItem${bad}${s.id === selected ? ' sel' : ''}" data-id="${s.id}"><svg class="i" aria-hidden="true"><use href="#i-${mark}"/></svg><span class="t">${esc(s.id)} ${esc(s.title)}<span class="n">${s.chars.toLocaleString()} หน่วย · ${off >= 0 ? '+' : ''}${off}% · ${s.status} · ประวัติ ${(s.history || []).length}</span></span></button>`;
     })
     .join('');
   $('secList')
@@ -3281,7 +3293,9 @@ async function finish() {
   $('preflight').innerHTML = pf.checks
     .map(
       (c) =>
-        `<div class="pf ${c.level}"><span>${c.level === 'ok' ? '✓' : c.level === 'warn' ? '!' : '✕'}</span><span>${esc(c.label)}${c.detail ? `<div class="d">${esc(c.detail)}</div>` : ''}</span></div>`,
+        `<div class="pf ${c.level}"><svg class="i" aria-hidden="true"><use href="#i-${
+          c.level === 'ok' ? 'check-circle' : c.level === 'warn' ? 'alert' : 'error'
+        }"/></svg><span>${esc(c.label)}${c.detail ? `<div class="d">${esc(c.detail)}</div>` : ''}</span></div>`,
     )
     .join('');
 
@@ -3543,6 +3557,19 @@ $('phase2Folder').onclick = pullImagesFromFolder;
 /** ราคาที่ผู้ใช้กรอกทับเอง มาก่อนตารางในโปรแกรมเสมอ */
 let customPrice = null;
 let usdThb = 36;
+
+/**
+ * ตั้งข้อความบนปุ่มที่มีไอคอน
+ *
+ * การเขียน textContent ทับปุ่มที่มี <svg> อยู่ข้างใน จะลบไอคอนทิ้งอย่างเงียบ ๆ
+ * ปุ่มเดียวกันจึงมีไอคอนตอนเปิดหน้ามา แล้วหายไปหลังกดใช้งานครั้งแรก
+ * ซึ่งดูเหมือนความผิดพลาดของโปรแกรมมากกว่าการออกแบบ
+ */
+function setBtn(id, icon, text) {
+  const el = $(id);
+  if (!el) return;
+  el.innerHTML = `<svg class="i" aria-hidden="true"><use href="#i-${icon}"/></svg>${esc(text)}`;
+}
 
 function renderModelOptions() {
   const sel = $('textApiModel');
