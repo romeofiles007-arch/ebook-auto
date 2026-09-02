@@ -1265,9 +1265,21 @@ function updateEstimate() {
  * มีไว้ไล่ดูว่าทุกขั้นตอนต่อกันครบไหมภายในไม่กี่วินาที แทนการรอของจริงเป็นชั่วโมง
  */
 const testing = () => (book ? !!book.testMode : on('testMode'));
-const useTextApi = () =>
-  !testing() && (book ? (book.textSource || 'web') === 'api' : val('textSource', 'web') === 'api');
-const transportKind = () => (testing() ? 'fake' : useTextApi() ? 'openai_api' : 'chatgpt_tab');
+/**
+ * เครื่องยนต์การเขียนมีสองบริบท และเอามาปนกันไม่ได้
+ *
+ *   งานของ "เล่มที่กำลังทำ"  → ใช้ค่าที่ล็อกไว้กับเล่มนั้น ห้ามสลับกลางเล่ม
+ *   งานบนหน้าเริ่มต้น         → ใช้ค่าที่ผู้ใช้เพิ่งเลือกไว้บนหน้าจอ
+ *
+ * ที่ต้องแยกเพราะหน้าเริ่มต้นมักมี "เล่มค้าง" ถูกโหลดไว้ในหน่วยความจำอยู่แล้ว
+ * ถ้าอ่านจากเล่มเสมอ ผู้ใช้ที่สลับเป็น API แล้วกดปุ่มคิดชื่อ/เสนอสารบัญ
+ * จะถูกพาไปหน้าเว็บตามค่าของเล่มเก่าที่ไม่เกี่ยวอะไรกับสิ่งที่เขากำลังจะทำเลย
+ */
+const bookUsesApi = (b) => (b?.textSource || 'web') === 'api';
+const uiUsesApi = () => val('textSource', 'web') === 'api';
+const useTextApi = (forBook = null) => !testing() && (forBook ? bookUsesApi(forBook) : uiUsesApi());
+const transportKind = (forBook = null) =>
+  testing() ? 'fake' : useTextApi(forBook) ? 'openai_api' : 'chatgpt_tab';
 
 /**
  * ตัวเลือกที่ transport ต้องใช้ รวมไว้ที่เดียว
@@ -1276,19 +1288,19 @@ const transportKind = () => (testing() ? 'fake' : useTextApi() ? 'openai_api' : 
  * ประกอบคีย์กับชื่อโมเดลเอง จะมีจุดที่ลืมส่งเสมอ แล้วโหมด API จะพังเป็นบางปุ่ม
  * ซึ่งเป็นอาการที่หาสาเหตุยากที่สุดแบบหนึ่ง
  */
-const transportOpts = (extra = {}) => ({
+const transportOpts = (extra = {}, forBook = null) => ({
   timeoutMs: 300000,
   onProgress: handleGptMessage,
   latencyMs: 60,
   apiKey: apiKeyValue,
-  model: book?.textApiModel || textApiModel(),
+  model: forBook?.textApiModel || textApiModel(),
   ...extra,
 });
 
 /** โหมดทดสอบไม่ต้องไปยุ่งกับแท็บ ChatGPT เลย */
-const focusChat = async () => {
+const focusChat = async (forBook = null) => {
   // ทาง API ไม่มีแท็บ ChatGPT ให้ต้องเรียกขึ้นมา การสลับหน้าต่างตอนนั้นมีแต่จะรบกวนคนใช้งาน
-  if (testing() || useTextApi()) return;
+  if (testing() || useTextApi(forBook)) return;
   await chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 };
 
@@ -1300,21 +1312,32 @@ function showRunningCost() {
   const u = book?.apiUsage;
   const el = $('runningCost');
   if (!el) return;
+  /**
+   * เล่มที่เขียนด้วยหน้าเว็บไม่มีค่าใช้จ่ายให้แสดง แต่ยังต้องบอกว่ากำลังใช้ทางไหนอยู่
+   * ไม่งั้นผู้ใช้ที่ตั้งค่าบนหน้าจอเป็น API แล้วเห็นระบบเปิดแท็บ ChatGPT
+   * จะไม่มีทางรู้เลยว่าเป็นเพราะเล่มนี้ถูกล็อกไว้เป็นหน้าเว็บตั้งแต่วันที่สร้าง
+   */
+  if (book && !bookUsesApi(book)) {
+    el.classList.remove('hidden');
+    el.textContent = 'เขียนด้วยหน้าเว็บ ChatGPT — ใช้โควตาข้อความของแพ็กเกจ ไม่มีค่าใช้จ่ายเป็นเงิน';
+    return;
+  }
   if (!u?.turns) {
-    el.classList.add('hidden');
+    el.classList.remove('hidden');
+    el.textContent = `เขียนด้วย OpenAI API · ${book?.textApiModel || textApiModel()} — ยังไม่มีเทิร์นที่คิดเงิน`;
     return;
   }
   const price = priceFor(u.model || textApiModel(), customPrice);
   const usd = costOf({ promptTokens: u.promptTokens, completionTokens: u.completionTokens, price });
   el.classList.remove('hidden');
   el.textContent =
-    `💵 เล่มนี้ใช้ API ไปแล้ว ${u.turns} เทิร์น · token เข้า ${u.promptTokens.toLocaleString()} · ออก ${u.completionTokens.toLocaleString()}` +
+    `เขียนด้วย OpenAI API · ${u.model || book?.textApiModel || textApiModel()} — ใช้ไปแล้ว ${u.turns} เทิร์น · token เข้า ${u.promptTokens.toLocaleString()} · ออก ${u.completionTokens.toLocaleString()}` +
     (usd != null ? ` · รวม ${formatCost(usd, usdThb)}` : '') +
     (u.charsPerToken ? ` · ภาษาไทยของเล่มนี้ ${u.charsPerToken} ตัวอักษรต่อ token` : '');
 }
 
 function makeMachine() {
-  const transport = makeTransport(transportKind(), transportOpts());
+  const transport = makeTransport(transportKind(book), transportOpts({}, book));
   machine = new Machine({ book, transport, onEvent: logMachine });
 }
 
@@ -1618,6 +1641,18 @@ function showResume(b) {
     (seen ? ` · แตะล่าสุด${sinceText(seen)}` : '') +
     (why ? ` — ${why}` : '');
   setBtn('resumeGo', ['gate_images', 'images'].includes(b.job?.step) ? 'image' : 'play', ['gate_images', 'images'].includes(b.job?.step) ? 'เปิด Image Phase 2' : 'ทำต่อจากที่ค้าง');
+  /**
+   * ถ้าผู้ใช้ตั้งค่าบนหน้าจอไว้อย่างหนึ่ง แต่เล่มนี้ล็อกไว้อีกอย่าง ต้องบอกและให้ทางเลือก
+   * ไม่ใช่เงียบแล้วทำตามเล่ม จนผู้ใช้สงสัยว่าทำไมเลือก API แล้วยังไปหน้าเว็บอยู่
+   */
+  const bookApi = (b.textSource || 'web') === 'api';
+  const mismatch = bookApi !== uiUsesApi();
+  const sw = $('resumeSwitchEngine');
+  sw.classList.toggle('hidden', !mismatch);
+  if (mismatch) {
+    setBtn('resumeSwitchEngine', 'refresh', `เปลี่ยนเป็น ${uiUsesApi() ? 'OpenAI API' : 'หน้าเว็บ ChatGPT'}`);
+  }
+
   const canAcceptPages =
     b.job?.step === 'fit' &&
     Number(b.lastCompile?.pages) > 0 &&
@@ -1634,6 +1669,32 @@ async function acceptCurrentPages() {
   await db.saveBook(book);
   addEvent('system', 'ยอมรับจำนวนหน้าปัจจุบัน', `${pages} หน้า${pages % 2 ? ' · ระบบจะเติมหน้าว่างเป็น ' + (pages + 1) + ' หน้า' : ''}`);
   return resumeGo();
+}
+
+
+/**
+ * เปลี่ยนแหล่งเขียนของเล่มที่ทำค้างไว้
+ *
+ * ปกติค่านี้ถูกล็อกไว้กับเล่มเพื่อไม่ให้สำนวนเปลี่ยนกลางเล่ม แต่บางครั้งผู้ใช้ตั้งใจเปลี่ยนจริง
+ * เช่นเจอว่าหน้าเว็บชนลิมิตแล้วอยากจ่ายเงินเดินต่อให้จบ จึงต้องมีทางออกที่บอกผลกระทบตรง ๆ
+ */
+async function switchBookEngine() {
+  if (!book?.id) return;
+  const toApi = uiUsesApi();
+  const label = toApi ? `OpenAI API (${textApiModel()})` : 'หน้าเว็บ ChatGPT';
+  if (!confirm(
+    `เปลี่ยนแหล่งเขียนของเล่มนี้เป็น ${label} หรือไม่?
+
+` +
+    'ตอนที่เขียนไปแล้วจะไม่ถูกแตะ แต่ตอนที่เหลือจะถูกเขียนด้วยโมเดลใหม่ ' +
+    'สำนวนอาจไม่ต่อเนื่องกับของเดิม ถ้ารับได้ให้กดตกลง'
+  )) return;
+  book.textSource = toApi ? 'api' : 'web';
+  book.textApiModel = textApiModel();
+  await db.saveBook(book);
+  await syncSharedProject(book.id);
+  showResume(book);
+  status(`เล่มนี้จะเขียนต่อด้วย ${label}`);
 }
 
 async function resumeGo() {
@@ -2209,9 +2270,9 @@ async function writeSectionWithAi(id, report = () => {}) {
 
   try {
     report(`กำลังให้ ChatGPT เขียนตอน ${id}...`);
-    await focusChat();
+    await focusChat(book);
     const res = await sendTurn(
-      makeTransport(transportKind(), transportOpts()),
+      makeTransport(transportKind(book), transportOpts({}, book)),
       sectionPrompt({
         book,
         outline,
@@ -3044,7 +3105,7 @@ async function startPhase2() {
 
   // ไม่ await ตรงนี้ เพราะถ้าการ focus หน้าต่าง ChatGPT ช้าหรือ browser กำลังสลับหน้าต่าง
   // Studio จะไม่ถูกทิ้งไว้ที่หน้า Progress ว่าง ๆ; transport ของเทิร์นแรกจะ ensure/focus ChatGPT ซ้ำให้อีกชั้น
-  if (!testing() && !useTextApi()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (!testing() && !useTextApi(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 
   showRunningCost();
   makeMachine();
@@ -3116,7 +3177,7 @@ async function rethinkCoverWithGpt() {
   renderSteps();
   setPhase('style', 'กำลังส่งข้อมูลทั้งเล่มให้ GPT Art Director คิดปกใหม่ 3 ทางและเลือกแนวที่แนะนำ');
   status('กำลังปรึกษา GPT เรื่องปก');
-  if (!testing() && !useTextApi()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (!testing() && !useTextApi(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
   showRunningCost();
   makeMachine();
   try {
@@ -4090,6 +4151,7 @@ $('resumeHistory').onclick = async () => {
   $('projectList').scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 $('acceptPages').onclick = acceptCurrentPages;
+$('resumeSwitchEngine').onclick = switchBookEngine;
 $('resumeDrop').onclick = async () => {
   if (book?.id) await db.deleteBook(book.id);
   book = null;
