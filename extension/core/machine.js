@@ -229,6 +229,28 @@ export class Machine {
   }
 
   /**
+   * เก็บ token ของภาพที่สร้างผ่าน API
+   *
+   * ราคาภาพคิดเป็น token ไม่ใช่ต่อรูป และเป็นค่าใช้จ่ายก้อนใหญ่กว่างานเขียนมากในหลายเล่ม
+   * ถ้านับแต่ฝั่งข้อความ ตัวเลข "เล่มนี้จ่ายไปเท่าไร" จะผิดจนเอาไปตั้งราคาขายไม่ได้
+   */
+  recordImageUsage(out) {
+    const u = out?.usage;
+    if (!u || u.outputTokens == null) return 0;
+    const img = (this.book.apiUsage ||= {}).image || ((this.book.apiUsage.image = {
+      images: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      model: '',
+    }));
+    img.images += 1;
+    img.inputTokens += Number(u.inputTokens) || 0;
+    img.outputTokens += Number(u.outputTokens) || 0;
+    img.model = out.model || img.model;
+    return (Number(u.inputTokens) || 0) + (Number(u.outputTokens) || 0);
+  }
+
+  /**
    * ยิงซ้ำได้เมื่อพลาดแบบชั่วคราว
    *
    * ระวังการทวีคูณ: หนึ่งเทิร์นที่ล้มเหลวเคยกลายเป็นสามข้อความจริงที่ ChatGPT ตอบไปแล้ว
@@ -1882,7 +1904,13 @@ export class Machine {
               quality: this.book.imageApiQuality || 'medium',
             });
             res = { status: 'ok', text: '', images: [], imageDataUrl: out.dataUrl, meta: { via: 'api', size: out.size } };
-            this.log('ok', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ได้ภาพจาก API แล้ว (${model} · ${out.size} · ${Math.round(out.bytes / 1024)} KB)`);
+            const spent = this.recordImageUsage(out);
+            this.log(
+              'ok',
+              `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ได้ภาพจาก API แล้ว (${model} · ${out.size} · ${Math.round(out.bytes / 1024)} KB` +
+                (spent ? ` · token ${spent.toLocaleString()}` : '') +
+                ')',
+            );
           } catch (e) {
             if (e instanceof RateLimited || e instanceof Halt) throw e;
             lastError = `เรียก API สร้างภาพไม่สำเร็จ: ${e?.message || e}`;

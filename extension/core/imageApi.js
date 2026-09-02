@@ -97,8 +97,22 @@ export async function generateImage({
   return {
     dataUrl: `data:image/png;base64,${b64}`,
     size,
+    model,
+    quality,
     // ประมาณขนาดไฟล์จากความยาว base64 พอให้รายงานได้ ไม่ต้องถอดรหัสทั้งก้อน
     bytes: Math.round((b64.length * 3) / 4),
+    /**
+     * จำนวน token ที่เซิร์ฟเวอร์คิดเงินจริงของภาพนี้
+     *
+     * ราคาภาพคิดเป็น token ไม่ใช่ต่อรูป และจำนวนขึ้นกับขนาดกับคุณภาพ
+     * การเดาจากตารางจึงคลาดเคลื่อนเสมอ ถ้าเซิร์ฟเวอร์บอกมาก็ใช้ของจริงไปเลย
+     */
+    usage: body?.usage
+      ? {
+          inputTokens: body.usage.input_tokens ?? null,
+          outputTokens: body.usage.output_tokens ?? null,
+        }
+      : null,
   };
 }
 

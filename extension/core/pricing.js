@@ -101,6 +101,52 @@ export function estimateCost({
   return { usd, inTokens, outTokens, price, charsPerToken: cpt };
 }
 
+/**
+ * ราคาภาพ — คิดเป็น token เหมือนงานข้อความ ไม่ใช่ต่อรูป
+ * ดอลลาร์ต่อหนึ่งล้าน token
+ */
+export const IMAGE_PRICES = {
+  'gpt-image-2': { in: 5.0, out: 30.0 },
+  'gpt-image-1': { in: 5.0, out: 40.0 },
+  'gpt-image-1-mini': { in: 2.0, out: 8.0 },
+};
+
+/**
+ * token ที่ภาพหนึ่งรูปกินโดยประมาณ แยกตามขนาดและคุณภาพ
+ *
+ * ใช้เฉพาะตอน "ประเมินก่อนสร้าง" เท่านั้น พอสร้างจริงแล้วเราอ่านค่าจาก usage
+ * ที่เซิร์ฟเวอร์ส่งกลับมาแทนทันที ตัวเลขชุดนี้จึงเป็นแค่จุดตั้งต้นให้เห็นภาพคร่าว ๆ
+ * ไม่ใช่ราคาที่รับประกัน
+ */
+const IMAGE_TOKENS = {
+  low: { square: 272, tall: 408 },
+  medium: { square: 1056, tall: 1584 },
+  high: { square: 4160, tall: 6240 },
+};
+
+/** ค่าใช้จ่ายจริงของภาพที่สร้างไปแล้ว จาก token ที่เซิร์ฟเวอร์รายงาน */
+export function costOfImages({ inputTokens = 0, outputTokens = 0, model = 'gpt-image-2', custom = null }) {
+  const price = custom || IMAGE_PRICES[model] || IMAGE_PRICES['gpt-image-2'];
+  return (Number(inputTokens) * price.in + Number(outputTokens) * price.out) / 1_000_000;
+}
+
+/**
+ * ประเมินค่าภาพทั้งเล่มก่อนสร้าง
+ * ปกหน้า/ปกหลังเป็นแนวตั้ง ส่วนภาพในเล่มส่วนใหญ่เป็นแนวนอนหรือจัตุรัส
+ */
+export function estimateImageCost({ covers = 2, figures = 0, quality = 'medium', model = 'gpt-image-2' }) {
+  const t = IMAGE_TOKENS[quality] || IMAGE_TOKENS.medium;
+  const outTokens = covers * t.tall + figures * t.square;
+  // คำสั่งภาพยาวราว 2,500 ตัวอักษร คิดคร่าว ๆ ที่ 700 token ต่อรูป
+  const inTokens = (covers + figures) * 700;
+  return {
+    images: covers + figures,
+    inTokens,
+    outTokens,
+    usd: costOfImages({ inputTokens: inTokens, outputTokens: outTokens, model }),
+  };
+}
+
 /** เขียนเป็นข้อความสั้น ๆ ที่อ่านแล้วรู้เรื่องทันที ทั้งดอลลาร์และบาท */
 export function formatCost(usd, usdToThb = 36) {
   if (usd == null || !Number.isFinite(usd)) return '-';

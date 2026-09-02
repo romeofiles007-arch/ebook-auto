@@ -14,6 +14,8 @@ import {
   priceFor,
   costOf,
   estimateCost,
+  estimateImageCost,
+  costOfImages,
   formatCost,
 } from '../core/pricing.js';
 import { TRIM_PRESETS, estimateTurns, targetPhysicalPages } from '../core/budget.js';
@@ -1371,12 +1373,16 @@ function showRunningCost() {
     return;
   }
   const price = priceFor(u.model || textApiModel(), customPrice);
-  const usd = costOf({ promptTokens: u.promptTokens, completionTokens: u.completionTokens, price });
+  const usd = costOf({ promptTokens: u.promptTokens, completionTokens: u.completionTokens, price }) || 0;
+  // ค่าภาพที่จ่ายไปแล้วต้องรวมอยู่ในยอดเดียวกัน ไม่งั้นตัวเลขนี้บอกความจริงแค่ครึ่งเดียว
+  const im = u.image;
+  const imgUsd = im ? costOfImages({ inputTokens: im.inputTokens, outputTokens: im.outputTokens, model: im.model }) : 0;
   el.classList.remove('hidden');
   el.textContent =
-    `เขียนด้วย OpenAI API · ${u.model || book?.textApiModel || textApiModel()} — ใช้ไปแล้ว ${u.turns} เทิร์น · token เข้า ${u.promptTokens.toLocaleString()} · ออก ${u.completionTokens.toLocaleString()}` +
-    (usd != null ? ` · รวม ${formatCost(usd, usdThb)}` : '') +
-    (u.charsPerToken ? ` · ภาษาไทยของเล่มนี้ ${u.charsPerToken} ตัวอักษรต่อ token` : '');
+    `เขียนด้วย OpenAI API · ${u.model || book?.textApiModel || textApiModel()} — ${u.turns} เทิร์น · ${formatCost(usd, usdThb)}` +
+    (im?.images ? ` · ภาพ ${im.images} รูป ${formatCost(imgUsd, usdThb)}` : '') +
+    ` · รวมเล่มนี้ ${formatCost(usd + imgUsd, usdThb)}` +
+    (u.charsPerToken ? ` · ไทย ${u.charsPerToken} ตัวอักษรต่อ token` : '');
 }
 
 function makeMachine() {
@@ -3730,13 +3736,36 @@ function renderTextPrice() {
       })
     : null;
 
+  /**
+   * ราคาต่อเล่มต้องรวมค่าภาพด้วย ไม่ใช่บอกแต่ค่าข้อความ
+   * ในเล่มบาง ๆ ค่าภาพแพงกว่าค่าเขียนทั้งเล่มด้วยซ้ำ ถ้าบอกแค่ครึ่งเดียว
+   * ผู้ใช้จะตั้งราคาขายจากตัวเลขที่ผิด
+   */
+  const imgApi = val('imageSource', 'web') === 'api';
+  const figures = Number(book?.figures?.filter?.((f) => f.kind === 'image')?.length) || 0;
+  const img = imgApi
+    ? estimateImageCost({
+        covers: ['none', 'upload'].includes(val('coverMode', 'prompt')) ? 0 : 2,
+        figures,
+        quality: val('imageApiQuality', 'medium'),
+        model: $('imageApiModel')?.value.trim() || 'gpt-image-2',
+      })
+    : null;
+  const total = (est?.usd || 0) + (img?.usd || 0);
+
   box.innerHTML =
-    `💵 <b>${esc(model)}</b> · $${price.in} เข้า / $${price.out} ออก ต่อ 1M token` +
+    `<b>${esc(model)}</b> · $${price.in} เข้า / $${price.out} ออก ต่อ 1M token` +
     (price.source === 'custom' ? ' (ราคาที่คุณกรอกเอง)' : ` (จดไว้ ${PRICE_CHECKED_AT})`) +
     (est
-      ? `<br>เล่มขนาดนี้คาดว่าจะจ่ายราว <b>${esc(formatCost(est.usd, usdThb))}</b> ` +
-        `— ส่งเข้าราว ${Math.round(est.inTokens / 1000).toLocaleString()}K token · เขียนออกราว ${Math.round(est.outTokens / 1000).toLocaleString()}K token`
+      ? `<br>ค่าเขียนทั้งเล่ม ราว <b>${esc(formatCost(est.usd, usdThb))}</b>` +
+        ` — ส่งเข้าราว ${Math.round(est.inTokens / 1000).toLocaleString()}K token · เขียนออกราว ${Math.round(est.outTokens / 1000).toLocaleString()}K token`
       : '') +
+    (img
+      ? `<br>ค่าภาพ ${img.images} รูป (ปก + ภาพในเล่ม) ราว <b>${esc(formatCost(img.usd, usdThb))}</b>` +
+        `<br><b>รวมทั้งเล่มราว ${esc(formatCost(total, usdThb))}</b>`
+      : est
+        ? `<br>ยังไม่รวมค่าภาพ เพราะเล่มนี้ตั้งให้สร้างภาพเอง ไม่ผ่าน API`
+        : '') +
     `<br>เป็นการประเมิน ไม่ใช่ราคาที่ตกลงไว้ — ตัวเลขจริงจะขึ้นให้เห็นทุกเทิร์นระหว่างทำงาน`;
 }
 
