@@ -123,5 +123,20 @@
     handle(msg).catch((err) => reply(msg.id, false, err?.message || err));
   });
 
-  parent.postMessage({ ready: true }, '*');
+  /**
+   * พิสูจน์ว่าห้องนี้เป็น sandbox จริงก่อนบอกว่าพร้อม
+   *
+   * ถ้าหน้านี้ไม่ได้รับ CSP ของ sandbox (เกิดได้เมื่อส่วนขยายถูกรีโหลดขณะหน้าแม่เปิดค้าง)
+   * ทุกอย่างจะดูปกติดี — โหลดได้ ส่งข้อความได้ — แล้วไปพังตอน typst.ts เรียก new Function
+   * ระหว่างโหลดฟอนต์ ซึ่งเป็นตอนที่หน้าแม่โหลด wasm 28 MB เสร็จไปแล้ว
+   * ทดสอบด้วยบรรทัดเดียวตรงนี้ ถูกกว่าและบอกได้ตรงกว่ามาก
+   */
+  let evalOk = false;
+  try {
+    evalOk = new Function('return 1')() === 1;
+  } catch {
+    evalOk = false;
+  }
+
+  parent.postMessage({ ready: true, evalOk }, '*');
 })();
