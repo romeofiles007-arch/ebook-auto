@@ -1,0 +1,8 @@
+# ให้ทุกคนได้ซอร์สแบบ LF เหมือนกัน ไม่ว่าจะพัฒนาบน Windows หรือ macOS/Linux
+* text=auto eol=lf
+
+# ไฟล์ไบนารี ห้ามแตะ
+*.ttf binary
+*.wasm binary
+*.png binary
+*.pdf binary

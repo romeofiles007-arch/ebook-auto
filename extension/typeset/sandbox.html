@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>typst sandbox</title>
+  </head>
+  <body>
+    <!--
+      หน้านี้ไม่มีอะไรให้ดู มันคือห้องแยกสำหรับรัน Typst โดยเฉพาะ
+
+      เหตุผลที่ต้องมี: ไลบรารี typst.ts มีบรรทัด new Function('m','return import(m)')
+      อยู่ในเส้นทางโหลดฟอนต์ ซึ่ง CSP ของหน้า extension ปกติห้ามไว้ (wasm-unsafe-eval
+      อนุญาตแค่ WebAssembly ไม่ได้อนุญาต new Function) หน้าที่ประกาศเป็น sandbox
+      จะได้ CSP ที่ผ่อนคลายกว่า จึงรันได้ แลกกับการที่เรียก chrome.* ไม่ได้
+      ทุกอย่างจึงคุยกันผ่าน postMessage และไบต์ทั้งหมดถูกส่งเข้ามาจากหน้าแม่
+    -->
+    <script src="sandbox.js"></script>
+  </body>
+</html>

@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ebook Auto — Studio</title>
+<link rel="stylesheet" href="studio.css">
+</head>
+<body><main class="app">
+
+<header>
+  <div>
+    <div class="brand">📚 Ebook Auto</div>
+    <div class="sub">Extension ↔ ChatGPT ↔ Typst</div>
+  </div>
+  <div class="headerRight">
+    <div id="mode" class="mode hidden"></div>
+    <div id="status" class="status">พร้อม</div>
+    <button id="newBook" type="button" class="inline">🔄 เล่มใหม่</button>
+  </div>
+</header>
+
+<nav id="macroSteps" class="macroSteps" aria-label="ขั้นตอนทั้งหมด"></nav>
+
+<section id="start" class="card hero">
+  <!--
+    ลำดับสำคัญกว่าที่เห็น: ปุ่ม "เสนอสารบัญ" อยู่บนสุด แต่ต้องกดเป็นขั้นที่ 3
+    ถ้ากดก่อนตั้งค่าเล่ม สารบัญจะถูกวางตามจำนวนหน้า/ผู้อ่านชุดเก่า พอแก้ทีหลังต้องเสนอใหม่ทั้งชุด
+  -->
+  <ol id="stepGuide" class="stepGuide">
+    <li data-step="setup"><b>1 · ตั้งค่าเล่มให้ครบก่อน</b><span>ผู้อ่าน · โทน · จำนวนหน้า · ภาษา · โหมดเนื้อหา — ทุกค่าถูกล็อกเข้าไปในสารบัญ</span></li>
+    <li data-step="title"><b>2 · ได้หัวข้อหรือชื่อหนังสือ</b><span>พิมพ์เอง หรือใช้ 🎲 สุ่มจากกระแส / ✨ ให้ ChatGPT คิดชื่อ</span></li>
+    <li data-step="outline"><b>3 · ได้สารบัญแล้วเลือก 1 ทาง</b><span>กด 🧭 เสนอสารบัญ 3 ทาง ให้ ChatGPT คิดให้ — หรือเปิด 💡 โหมดแรงบันดาลใจ ถ้ามีสารบัญของตัวเองอยู่แล้ว · ขั้นนี้ต้องมาหลังข้อ 1 เสมอ</span></li>
+    <li data-step="create"><b>4 · กด 🚀 เริ่มสร้าง Ebook</b><span>ตั้งแต่จุดนี้ระบบเดินยาวจนจบเนื้อหา</span></li>
+  </ol>
+  <div class="stepWarn">แก้ค่าในข้อ 1 หลังจากเลือกสารบัญไปแล้ว = ต้องกดเสนอสารบัญใหม่ ระบบจะเตือนให้เองและไม่ปล่อยให้เริ่มเขียนด้วยสารบัญที่ขัดกับค่าใหม่</div>
+  <div class="fullAutoBar">
+    <div>
+      <b>🤖 โหมดอัตโนมัติเต็มรูปแบบ</b>
+      <span>กดครั้งเดียวแล้วปล่อยยาว — คิดชื่อเรื่อง วางสารบัญ เขียนทั้งเล่ม สร้างภาพ แล้วส่งออกไฟล์ให้เอง โดยใช้ค่าที่ตั้งไว้ด้านล่างทั้งหมด ไม่ถามอะไรระหว่างทาง</span>
+    </div>
+    <button id="fullAuto" type="button" class="primary">🚀 เริ่มอัตโนมัติทั้งเล่ม</button>
+  </div>
+
+  <!--
+    แหล่งสร้างภาพอยู่หน้าหลัก ไม่ซ่อนในตารางตั้งค่าด้านล่าง
+    เพราะเป็นตัวเลือกที่ตัดสินว่าจะเจอปัญหาการขับหน้าเว็บหรือไม่ ต้องเห็นก่อนกดเริ่ม
+  -->
+  <div class="apiBar">
+    <div class="apiBarTop">
+      <div>
+        <b>🖼 แหล่งสร้างภาพ</b>
+        <span>การเขียนเนื้อหาใช้หน้าเว็บ ChatGPT เสมอ ตัวเลือกนี้มีผลกับภาพเท่านั้น</span>
+      </div>
+      <select id="imageSource">
+        <option value="web" selected>หน้าเว็บ ChatGPT</option>
+        <option value="api">OpenAI API</option>
+      </select>
+    </div>
+    <div id="apiKeyField" class="apiKeyBox" hidden>
+      <div class="apiKeyRow">
+        <input id="openaiApiKey" type="password" placeholder="วาง OpenAI API key ที่นี่ (sk-...)" autocomplete="off" spellcheck="false">
+        <input id="imageApiModel" list="imageModelOptions" value="gpt-image-2" placeholder="ชื่อโมเดล" autocomplete="off" spellcheck="false">
+        <datalist id="imageModelOptions">
+          <option value="gpt-image-2"></option>
+          <option value="gpt-image-1"></option>
+          <option value="gpt-image-1-mini"></option>
+        </datalist>
+        <select id="imageApiQuality">
+          <option value="low">คุณภาพต่ำ</option>
+          <option value="medium" selected>คุณภาพกลาง</option>
+          <option value="high">คุณภาพสูง</option>
+        </select>
+        <button id="testApiKey" type="button" class="inline">ทดสอบคีย์</button>
+      </div>
+      <div id="apiKeyNote" class="muted">คีย์ถูกบันทึกในเบราว์เซอร์เครื่องนี้เท่านั้น ใส่ครั้งเดียวจำไว้ให้ตลอด</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <label for="title">หัวข้อหรือชื่อหนังสือ</label>
+    <button id="trendRandom" type="button">🎲 สุ่มจากกระแสตอนนี้</button>
+    <button id="titleIdeate" type="button">✨ ให้ ChatGPT คิดชื่อ</button>
+    <button id="outlineIdeate" type="button">🧭 เสนอสารบัญ 3 ทาง</button>
+  </div>
+  <input id="title" autofocus placeholder="ใส่หัวข้อคร่าว ๆ เช่น การเงินสำหรับฟรีแลนซ์">
+  <div id="trendIdeas" class="estimate hidden"></div>
+  <div id="titleIdeas" class="estimate hidden"></div>
+  <div id="outlineDirections" class="estimate hidden"></div>
+
+  <!--
+    โหมดแรงบันดาลใจ — ผู้ใช้กำหนดชื่อเรื่อง สารบัญ และจำนวนหน้าเอง
+    แล้วให้ ChatGPT ตกแต่งเป็นตัวเลือกจนพอใจ ก่อนกดสร้าง
+    ใช้กล่องตัวเลือกสารบัญร่วมกับโหมดปกติ เพื่อให้ขั้นถัดไปเหมือนกันทั้งสองทาง
+  -->
+  <details class="more inspireBox" id="inspireBox">
+    <summary>💡 โหมดแรงบันดาลใจ — ฉันมีสารบัญของตัวเองอยู่แล้ว</summary>
+    <div class="muted inspireHint">ใส่ชื่อเรื่องด้านบน ตั้งจำนวนหน้าที่ต้องการ แล้วพิมพ์สารบัญของคุณบรรทัดละบท ChatGPT จะไม่คิดโครงใหม่ แต่จะตกแต่งของคุณให้เขียนเป็นหนังสือได้จริง แล้วเสนอ 3 ทางให้เลือก — ทาง A คือโครงเดิมของคุณเสมอ</div>
+    <div class="field">
+      <label for="inspireOutline">สารบัญของคุณ (บรรทัดละบท ใส่คำอธิบายหลัง — ได้)</label>
+      <textarea id="inspireOutline" rows="8" placeholder="1. ทำไมเรื่องนี้ถึงสำคัญกับคุณ — เปิดด้วยปัญหาที่ผู้อ่านเจอจริง
+2. พื้นฐานที่ต้องรู้ก่อน
+3. ลงมือทำขั้นแรก
+4. ข้อผิดพลาดที่คนส่วนใหญ่เจอ
+5. ทำต่อเนื่องอย่างไรไม่ให้เลิกกลางทาง"></textarea>
+    </div>
+    <div class="field">
+      <label for="inspireNote">อยากให้ตกแต่งไปทางไหน (ใส่หรือเว้นว่างก็ได้)</label>
+      <input id="inspireNote" placeholder="เช่น อยากให้มีเคสจริงทุกบท หรือ ห้ามเพิ่มบทใหม่">
+    </div>
+    <div class="trendActions">
+      <button type="button" id="inspirePolish" class="primary inline">🎨 ให้ ChatGPT ตกแต่งสารบัญของฉัน</button>
+    </div>
+  </details>
+
+  <div class="grid">
+    <div class="field">
+      <label for="audience">เขียนให้ใครอ่าน</label>
+      <input id="audience" list="audienceOptions" placeholder="เลือกจากรายการหรือพิมพ์กลุ่มผู้อ่านเอง">
+      <datalist id="audienceOptions">
+        <option value="ผู้อ่านทั่วไปที่ไม่มีพื้นฐานในเรื่องนี้"></option>
+        <option value="ผู้เริ่มต้นที่ต้องการคำอธิบายทีละขั้นและตัวอย่างที่ทำตามได้"></option>
+        <option value="นักเรียนและนักศึกษาที่ต้องการปูพื้นฐานอย่างเป็นระบบ"></option>
+        <option value="คนวัยทำงานอายุ 22–40 ปีที่มีเวลาจำกัดและต้องการนำไปใช้จริง"></option>
+        <option value="ฟรีแลนซ์และคนทำงานอิสระที่ต้องการแนวทางลงมือทำด้วยตัวเอง"></option>
+        <option value="เจ้าของธุรกิจขนาดเล็กและผู้เริ่มทำธุรกิจที่มีงบประมาณจำกัด"></option>
+        <option value="ครีเอเตอร์และผู้ขายสินค้าออนไลน์ที่ต้องการเพิ่มรายได้อย่างไม่ขายฝัน"></option>
+        <option value="ผู้มีพื้นฐานอยู่แล้วที่ต้องการเนื้อหาเชิงลึกและกรณีศึกษา"></option>
+        <option value="ผู้สูงอายุที่ต้องการภาษาง่าย ตัวอักษรอ่านสบาย และขั้นตอนไม่ซับซ้อน"></option>
+        <option value="ผู้ปกครองที่ต้องการคู่มือกระชับสำหรับนำไปใช้กับครอบครัว"></option>
+      </datalist>
+    </div>
+    <div class="field">
+      <label for="tone">โทนเสียง</label>
+      <input id="tone" value="เป็นกันเอง ตรงไปตรงมา มีตัวเลขจริง ไม่ขายฝัน">
+    </div>
+    <div class="field">
+      <label for="pages">จำนวนหน้าทั้งเล่ม</label>
+      <input id="pages" type="number" min="5" max="800" step="1" value="120">
+    </div>
+    <div class="field">
+      <label for="pageMode">จำนวนหน้านี้คือ</label>
+      <select id="pageMode">
+        <option value="soft" selected>เป้าหมายคร่าว ๆ — เนื้อหาดีแค่ไหนก็ปล่อยยาวได้ (เร็วกว่า)</option>
+        <option value="strict">ต้องเข้าเป้า — ยอมให้ AI ย่อ/ยืดเนื้อหาจนจำนวนหน้าตรง</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="trim">ขนาดเล่ม</label>
+      <select id="trim"></select>
+    </div>
+    <div class="field">
+      <label for="lang">ภาษา</label>
+      <select id="lang">
+        <option value="th" selected>ไทย</option>
+        <option value="en">อังกฤษ</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="author">ชื่อผู้เขียน</label>
+      <input id="author" placeholder="ใส่หรือเว้นว่างก็ได้">
+    </div>
+    <div class="field">
+      <label for="pagePattern">ลวดลายพื้นหลังทั้งเล่ม</label>
+      <select id="pagePattern">
+        <option value="none" selected>ไม่มี — พื้นขาวสะอาด</option>
+        <option value="soft">จางมาก (4%) — เห็นเป็นเนื้อกระดาษ</option>
+        <option value="medium">จาง (7%) — เห็นลายชัดขึ้นแต่ยังอ่านสบาย</option>
+        <option value="strong">ค่อนข้างเห็น (10%) — สำหรับเล่มที่เน้นงานออกแบบ</option>
+      </select>
+      <div class="muted">ChatGPT จะวาดลายตามแนวของเล่ม แล้วระบบลดความเข้มให้เองก่อนพิมพ์ใต้ตัวหนังสือทุกหน้า</div>
+    </div>
+    <div class="field">
+      <label for="contentMode">ชนิดของเนื้อหา</label>
+      <select id="contentMode">
+        <option value="prose" selected>ร้อยแก้ว — บท ตอน เนื้อหาต่อเนื่อง</option>
+        <option value="fiction">นิยาย — บท ฉาก ตัวละคร และเส้นเรื่องต่อเนื่อง</option>
+        <option value="items">รายชิ้น — คำคม กลอน ข้อคิด</option>
+      </select>
+    </div>
+  </div>
+
+  <details class="more" id="itemOpts" hidden>
+    <summary>ตั้งค่าหนังสือรายชิ้น</summary>
+    <div class="grid">
+      <div class="field">
+        <label for="itemKind">ประเภทชิ้น</label>
+        <select id="itemKind"></select>
+        <div id="itemKindNote" class="muted"></div>
+      </div>
+      <div class="field">
+        <label for="itemsPerPage">ชิ้นต่อหน้า</label>
+        <select id="itemsPerPage">
+          <option value="1" selected>1 — หน้าละชิ้น เว้นที่ว่างมาก</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4 — แน่นที่สุด</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="itemAlign">การวางในหน้า</label>
+        <select id="itemAlign">
+          <option value="center" selected>กลางหน้าแนวตั้ง</option>
+          <option value="top">ชิดบน</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="themeCount">จำนวนหมวด</label>
+        <input id="themeCount" type="number" min="1" max="20" value="5">
+      </div>
+      <div class="field">
+        <label for="itemSizePt">ขนาดตัวอักษร (pt)</label>
+        <input id="itemSizePt" type="number" min="12" max="48" step="1" value="26">
+      </div>
+      <div class="field">
+        <label for="itemAttribution">ที่มาใต้ชิ้น</label>
+        <select id="itemAttribution">
+          <option value="off" selected>ไม่ใส่</option>
+          <option value="on">ใส่ถ้ามี</option>
+        </select>
+      </div>
+    </div>
+    <div id="itemPlanNote" class="estimate"></div>
+  </details>
+
+  <details class="more">
+    <summary>เกี่ยวกับผู้เขียน — ระบบจะไม่แต่งข้อมูลนี้เอง</summary>
+    <p class="muted" style="margin:10px 0 0">
+      หน้านี้เป็นหน้าเดียวในเล่มที่เป็นข้อเท็จจริงเกี่ยวกับคนจริง ระบบจึงไม่เขียนให้เอง
+      พิมพ์เองที่นี่ แล้วจะให้ ChatGPT ช่วยเรียบเรียงถ้อยคำก็ได้ โดยห้ามเพิ่มข้อมูลใหม่
+    </p>
+    <textarea id="aboutAuthor" style="min-height:130px;margin-top:10px"
+      placeholder="เช่น&#10;ชื่อ อาชีพปัจจุบัน&#10;ทำงานด้านนี้มากี่ปี ผ่านอะไรมา&#10;ผลงานหรือประสบการณ์ที่เกี่ยวกับหนังสือเล่มนี้&#10;ช่องทางติดต่อ"></textarea>
+    <div class="row" style="margin-top:8px">
+      <span id="aboutState" class="muted"></span>
+      <button id="aboutPolish">ให้ ChatGPT ช่วยเรียบเรียง (ห้ามเพิ่มข้อมูล)</button>
+    </div>
+  </details>
+
+  <details class="more" id="fictionOpts" hidden>
+    <summary>ตั้งค่านิยาย — แนวเรื่อง มุมมอง และตอนจบ</summary>
+    <div class="grid">
+      <div class="field">
+        <label for="fictionGenre">แนวนิยาย</label>
+        <select id="fictionGenre">
+          <option value="romance">โรแมนติก</option>
+          <option value="fantasy" selected>แฟนตาซี</option>
+          <option value="scifi">ไซไฟ</option>
+          <option value="mystery">สืบสวน</option>
+          <option value="thriller">ทริลเลอร์</option>
+          <option value="horror">สยองขวัญ</option>
+          <option value="drama">ดราม่า</option>
+          <option value="adventure">ผจญภัย</option>
+          <option value="comingofage">Coming of Age</option>
+          <option value="literary">วรรณกรรมร่วมสมัย</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fictionPov">มุมมองการเล่า</label>
+        <select id="fictionPov">
+          <option value="first">บุคคลที่ 1 — ฉัน/ผม</option>
+          <option value="third-limited" selected>บุคคลที่ 3 จำกัดมุมมอง</option>
+          <option value="omniscient">ผู้เล่ารู้รอบ</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fictionEnding">ลักษณะตอนจบ</label>
+        <select id="fictionEnding">
+          <option value="auto" selected>ให้เรื่องเป็นตัวกำหนด</option>
+          <option value="happy">สุขสมหวัง</option>
+          <option value="bittersweet">หวานขม</option>
+          <option value="tragic">โศกนาฏกรรม</option>
+          <option value="open">ปลายเปิด</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fictionRomance">ระดับเส้นเรื่องความรัก</label>
+        <select id="fictionRomance">
+          <option value="none">ไม่มี</option>
+          <option value="subplot" selected>เป็นเส้นเรื่องรอง</option>
+          <option value="main">เป็นเส้นเรื่องหลัก</option>
+        </select>
+      </div>
+    </div>
+    <div class="muted">ระบบจะสร้าง Story Bible เก็บตัวละคร ความสัมพันธ์ กฎของโลก ไทม์ไลน์ และปมที่ยังไม่คลี่คลาย เพื่อกันเรื่องหลุดระหว่างบท</div>
+  </details>
+
+  <details class="more" id="proseOpts">
+    <summary>ตัวเลือกเพิ่มเติม — รูปเล่ม ภาพ และวิธีคุยกับ ChatGPT</summary>
+    <div class="grid">
+      <div class="field nonfictionOnly">
+        <label for="genre">แนวหนังสือ</label>
+        <select id="genre">
+          <option value="how-to">คู่มือลงมือทำ (How-to)</option>
+          <option value="explainer">อธิบายเรื่องยากให้เข้าใจ</option>
+          <option value="case">เล่าเรื่องและกรณีศึกษา</option>
+          <option value="self">พัฒนาตัวเอง</option>
+          <option value="textbook">ตำรา/วิชาการ มีอ้างอิง</option>
+          <option value="workbook">เวิร์กบุ๊ก มีแบบฝึก</option>
+          <option value="business">ธุรกิจและการตลาด</option>
+        </select>
+      </div>
+      <div class="field nonfictionOnly">
+        <label for="depth">ระดับความลึก</label>
+        <select id="depth">
+          <option value="beginner">เริ่มจากศูนย์ อธิบายทุกคำ</option>
+          <option value="mixed" selected>ปานกลาง มีทั้งพื้นฐานและลึก</option>
+          <option value="advanced">สำหรับคนมีพื้นแล้ว ลงลึก</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="writeMode">วิธีเขียน</label>
+        <select id="writeMode">
+          <option value="section" selected>ทีละตอน — คุณภาพดีที่สุด</option>
+          <option value="batch">รวมหลายตอนต่อข้อความ — เร็วกว่า ใช้ข้อความน้อยกว่า</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="secLen">ความยาวตอน</label>
+        <select id="secLen">
+          <option value="short">สั้น อ่านจบเร็ว (ตอนเยอะ)</option>
+          <option value="auto" selected>อัตโนมัติตามจำนวนหน้า</option>
+          <option value="long">ยาว ลงรายละเอียด (ตอนน้อย)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="threadMode">วิธีคุยกับ ChatGPT</label>
+        <select id="threadMode">
+          <option value="single" selected>แชทเดียวทั้งเล่ม (ทำต่อได้ง่าย)</option>
+          <option value="reuse">ใช้แชทที่เปิดค้างอยู่ ไม่เปิดใหม่</option>
+          <option value="chapter">เปิดแชทใหม่ทุกบท</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="bodyFont">ฟอนต์เนื้อความ</label>
+        <select id="bodyFont">
+          <option value="Sarabun" selected>Sarabun (มีหัว อ่านสบาย)</option>
+          <option value="IBM Plex Sans Thai">IBM Plex Sans Thai</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="headFont">ฟอนต์หัวเรื่อง</label>
+        <select id="headFont">
+          <option value="IBM Plex Sans Thai" selected>IBM Plex Sans Thai</option>
+          <option value="Sarabun">Sarabun</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="sizePt">ขนาดตัวอักษร (pt)</label>
+        <input id="sizePt" type="number" min="9" max="22" step="0.5" value="14">
+      </div>
+      <div class="field">
+        <label for="lineHeight">ระยะบรรทัด</label>
+        <input id="lineHeight" type="number" min="1.2" max="2.2" step="0.02" value="1.55">
+      </div>
+      <div class="field">
+        <label for="margins">ขอบกระดาษ</label>
+        <select id="margins">
+          <option value="tight">แน่น ตัวหนังสือเยอะ</option>
+          <option value="normal" selected>ปกติ</option>
+          <option value="airy">โปร่ง อ่านสบาย</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="paper">กระดาษเนื้อใน</label>
+        <select id="paper">
+          <option value="white" selected>ปอนด์ขาว</option>
+          <option value="cream">ถนอมสายตา</option>
+          <option value="color">พิมพ์สี</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="justify">การจัดบรรทัด</label>
+        <select id="justify">
+          <option value="off" selected>ชิดซ้าย (แนะนำสำหรับไทย)</option>
+          <option value="on">ชิดขอบสองข้าง</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="illus">ภาพประกอบในเล่ม</label>
+        <select id="illus">
+          <option value="none" selected>ไม่มี</option>
+          <option value="light">พอประมาณ (1 ภาพต่อ 2-3 ตอน)</option>
+          <option value="rich">เยอะ (ราว 1 ภาพต่อตอน)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="figureColor">สีของภาพในเล่ม</label>
+        <select id="figureColor">
+          <option value="color" selected>ภาพสี — เหมาะกับ PDF/EPUB ที่อ่านบนจอ</option>
+          <option value="mono">ขาวดำ — เหมาะกับส่งโรงพิมพ์เนื้อในขาวดำ</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="figureStyle">รูปแบบภาพในเล่ม</label>
+        <select id="figureStyle"></select>
+        <div id="figureStyleNote" class="muted"></div>
+      </div>
+      <div class="field">
+        <label for="figureMode">ไฟล์ภาพในเล่มมาจากไหน</label>
+        <select id="figureMode">
+          <option value="prompt" selected>เว้นช่องพร้อม Prompt ในเล่ม — ผมไปสร้างและวางเอง</option>
+          <option value="upload">ผมมีภาพอยู่แล้ว จะอัปโหลดเอง</option>
+          <option value="auto">2 Phase — วาง Prompt ตอนนี้ แล้วเปลี่ยนบัญชีให้ระบบสร้างและแทรกอัตโนมัติ</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="coverMode">ปกหน้า–ปกหลัง</label>
+        <select id="coverMode">
+          <option value="prompt" selected>ระบบเขียน prompt ให้ — ผมไปสร้างเอง</option>
+          <option value="upload">ผมมีปกอยู่แล้ว จะอัปโหลดเอง</option>
+          <option value="auto">2 Phase — เตรียม Prompt ตอนนี้ แล้วเปลี่ยนบัญชีให้ ChatGPT สร้างให้</option>
+          <option value="none">ไม่ทำปก เอาแต่เนื้อใน</option>
+        </select>
+        <label class="muted"><input type="checkbox" id="authorPhotoCover"> เพิ่มรูปผู้เขียนบนปกหลัง (อัปโหลดรูปจริงภายหลัง)</label>
+      </div>
+      <div class="field">
+        <label for="authorVoice">มุมของผู้เขียน</label>
+        <select id="authorVoice">
+          <option value="auto" selected>ให้ ChatGPT คิดให้จากสารบัญจริง (แนะนำ)</option>
+          <option value="off">ไม่ใช้ — เขียนแบบอธิบายกลาง ๆ</option>
+        </select>
+        <textarea id="authorVoiceText" rows="3" placeholder="อยากกำหนดเอง พิมพ์ตรงนี้ เช่น ครูปฐมวัยที่สอนมา 12 ปี เคยตะคอกเด็กว่าดื้อแล้วมารู้ทีหลังว่าเขาไม่ได้ยิน · ไม่เชื่อว่ารางวัลกับการลงโทษคือคำตอบหลัก"></textarea>
+        <div class="muted">เว้นว่าง = ให้ ChatGPT คิดให้ · ถ้าพิมพ์เอง ระบบจะใช้ของคุณและไม่เปลืองข้อความถาม ChatGPT</div>
+      </div>
+      <div class="field">
+        <label for="coverTextMode">ตัวหนังสือบนปก</label>
+        <select id="coverTextMode">
+          <option value="baked" selected>ให้ ChatGPT วาดมาในภาพเลย — ปกกลมกลืนสวยกว่า</option>
+          <option value="typeset">ให้ระบบพิมพ์ทับภาพ — ตัวอักษรคมและสะกดถูกเสมอ</option>
+        </select>
+        <div class="muted">แบบวาดในภาพได้ปกที่ดูเป็นหนังสือจริงมากกว่า แต่ภาษาไทยอาจสะกดเพี้ยนและแก้คำทีหลังไม่ได้ ต้องสร้างรูปใหม่</div>
+      </div>
+    </div>
+
+    <div class="checkRow">
+      <b>ส่วนหน้าและส่วนท้ายเล่ม</b>
+      <label><input type="checkbox" id="fm_toc" checked> สารบัญ</label>
+      <label><input type="checkbox" id="fm_copyright" checked> หน้าลิขสิทธิ์</label>
+      <label><input type="checkbox" id="fm_foreword" checked> คำนำ</label>
+      <label><input type="checkbox" id="bm_glossary"> อภิธานศัพท์</label>
+      <label><input type="checkbox" id="bm_references"> บรรณานุกรม</label>
+      <label><input type="checkbox" id="bm_about"> เกี่ยวกับผู้เขียน</label>
+      <label><input type="checkbox" id="opt_consistency" checked> ตรวจความต่อเนื่องรายบท (กันเนื้อหาซ้ำข้ามบท ใช้ข้อความเพิ่ม 1 ต่อบท)</label>
+    </div>
+  </details>
+
+  <div id="estimate" class="estimate"></div>
+
+  <section class="projectArchive">
+    <div class="row">
+      <b>ประวัติโครงการหนังสือ</b>
+      <button id="refreshProjects">รีเฟรช</button>
+    </div>
+    <div id="projectList" class="projectList"><div class="muted">กำลังอ่านรายการ...</div></div>
+  </section>
+
+  <section id="resume" class="resumeBar hidden">
+    <div>
+      <b id="resumeTitle"></b>
+      <div id="resumeInfo" class="muted"></div>
+    </div>
+    <button id="acceptPages" class="primary inline hidden">ยอมรับจำนวนหน้าปัจจุบัน</button>
+    <button id="resumeHistory">ดูประวัติโครงการ</button>
+    <button id="resumeGo" class="primary inline">ทำต่อจากที่ค้าง</button>
+    <button id="resumeDrop">ทิ้ง</button>
+  </section>
+
+  <div class="folderRow">
+    <div>
+      <b>Shared Workspace + โฟลเดอร์ส่งออก</b>
+      <div id="folderName" class="muted">เลือกโฟลเดอร์เดียวกันในทุก Chrome Profile เพื่อใช้ประวัติและ Phase 2 ร่วมกัน</div>
+    </div>
+    <button id="folder">📁 เลือก Folder</button>
+  </div>
+
+  <div class="folderRow">
+    <div>
+      <b>เครื่องเรียงพิมพ์</b>
+      <div id="typstState" class="muted">ยังไม่ได้ตรวจ</div>
+    </div>
+    <button id="typstTest">ทดสอบ Typst</button>
+  </div>
+
+  <button id="create" class="primary">🚀 เริ่มสร้าง Ebook</button>
+
+  <div class="testBar">
+    <label><input type="checkbox" id="testMode"> 🧪 โหมดทดสอบ — เดินด้วยข้อมูลปลอม ไม่ยิง ChatGPT และไม่เปลืองโควตา</label>
+    <button id="systemTest" type="button">ทดสอบระบบทั้งสาย (เล่มจิ๋ว 12 หน้า)</button>
+  </div>
+</section>
+
+<section id="progress" class="hidden">
+  <div class="card now">
+    <div class="nowTitle">กำลังทำอะไรอยู่</div>
+    <div id="phase">รอเริ่ม...</div>
+    <div class="bar"><i id="bar"></i></div>
+    <div id="detail" class="muted"></div>
+    <div id="pagestat" class="pagestat hidden"></div>
+  </div>
+
+  <div class="card flow">
+    <div class="cardTitle">🔄 การรับส่งข้อมูลแบบสด</div>
+    <div id="feed" class="feed">
+      <div class="empty">เมื่อเริ่มงาน จะเห็น Prompt ที่ส่งไปและคำตอบที่กลับมาที่นี่</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <b>📋 ขั้นตอน</b>
+      <button id="phase2Back" class="hidden">กลับหน้า Image Phase 2</button>
+      <button id="chat">เปิดหน้าต่าง ChatGPT</button>
+      <button id="stop" class="danger">หยุด</button>
+    </div>
+    <div id="steps" class="steps"></div>
+  </div>
+</section>
+
+<section id="editor" class="card hidden">
+  <div class="row">
+    <b>✏️ ตรวจและแก้ก่อนส่งออก</b>
+    <span id="editPages" class="muted"></span>
+    <button id="fillEmptySections" class="hidden">เขียนตอนที่ยังว่าง</button>
+    <button id="recount">นับหน้าใหม่</button>
+  </div>
+  <div class="imgPanel">
+    <div class="row">
+      <b>🖼 ภาพในเล่มและปก</b>
+      <span id="imgSummary" class="muted"></span>
+      <button id="figPrompts">ส่งออก prompt ทั้งหมดเป็นไฟล์</button>
+    </div>
+    <div class="coverSlots">
+      <div class="slot">
+        <div class="slotHead">ปกหน้า</div>
+        <button type="button" id="coverFrontPreviewButton" class="assetPreviewButton hidden" title="คลิกเพื่อดูภาพเต็ม"><img id="coverFrontPreview" class="assetPreview cover" alt="ภาพปกหน้า"></button>
+        <div id="coverFrontState" class="muted">ยังไม่มีไฟล์</div>
+        <button data-cover="cover-front">เลือกไฟล์</button>
+      </div>
+      <div class="slot">
+        <div class="slotHead">ปกหลัง</div>
+        <button type="button" id="coverBackPreviewButton" class="assetPreviewButton hidden" title="คลิกเพื่อดูภาพเต็ม"><img id="coverBackPreview" class="assetPreview cover" alt="ภาพปกหลัง"></button>
+        <div id="coverBackState" class="muted">ยังไม่มีไฟล์</div>
+        <button data-cover="cover-back">เลือกไฟล์</button>
+      </div>
+      <div class="slot" id="authorPhotoSlot">
+        <div class="slotHead">รูปผู้เขียน (ตัวเลือก)</div>
+        <button type="button" id="authorPhotoPreviewButton" class="assetPreviewButton hidden" title="คลิกเพื่อดูภาพเต็ม"><img id="authorPhotoPreview" class="assetPreview cover" alt="รูปผู้เขียน"></button>
+        <div id="authorPhotoState" class="muted">ยังไม่มีไฟล์</div>
+        <button data-cover="author-photo">เลือกรูป</button>
+      </div>
+    </div>
+    <div class="row coverActions" id="coverActions">
+      <button id="coverRegenFront">สร้างปกหน้าใหม่</button>
+      <button id="coverRegenBack">สร้างปกหลังใหม่</button>
+      <button id="coverRethink">ให้ GPT คิดแนวปกใหม่ทั้งชุด</button>
+      <button id="editorToPhase2">← กลับหน้าสร้างภาพ</button>
+    </div>
+    <div id="coverActionsHint" class="muted"></div>
+    <div id="figList" class="figList"></div>
+    <input type="file" id="imgFile" accept="image/*" hidden>
+  </div>
+
+  <div class="docxRow">
+    <div>
+      <b>แก้ในเวิร์ดก่อนทำ PDF</b>
+      <div class="muted">ส่งออกเป็น .docx ไปแก้ให้พอใจ แล้วนำกลับเข้ามา ระบบจะเอาไปเรียงพิมพ์เป็น PDF ให้</div>
+    </div>
+    <button id="docxOut">⬇ ส่งออก .docx</button>
+    <button id="docxIn">⬆ นำ .docx ที่แก้แล้วกลับเข้า</button>
+    <input type="file" id="docxFile" accept=".docx" hidden>
+  </div>
+  <div id="docxReport" class="muted"></div>
+
+  <div class="editSplit">
+    <div id="secList" class="secList"></div>
+    <div class="secPane">
+      <div id="secTitle" class="cardTitle">เลือกตอนทางซ้ายเพื่อแก้</div>
+      <textarea id="secBody" spellcheck="false" placeholder="เนื้อหาของตอนที่เลือก"></textarea>
+      <div class="row">
+        <span id="secStat" class="muted"></span>
+        <button id="secHistory">ประวัติตอน</button>
+        <button id="secRegen">ให้ AI เขียนตอนนี้ใหม่</button>
+        <button id="secSave">บันทึกตอนนี้</button>
+      </div>
+      <div id="historyPanel" class="historyPanel hidden"></div>
+    </div>
+  </div>
+
+  <div class="stepNav">
+    <span class="muted">แก้ตอนไหนก็ได้ แล้วกดนับหน้าใหม่ พอใจแล้วค่อยไปต่อ</span>
+    <button id="proceed" class="primary inline next">ถัดไป: เตรียม Prompt ปกและ Phase 2 →</button>
+  </div>
+</section>
+
+<section id="imagePhase" class="card hidden">
+  <div class="p2Head">
+    <div>
+      <b>🖼 Phase 2 — สร้างภาพ</b>
+      <div id="phase2Count" class="muted">กำลังอ่านรายการภาพ...</div>
+    </div>
+    <div class="p2HeadActions">
+      <button id="phase2Prompts" class="inline">ส่งออก Prompt ภาพทั้งหมด</button>
+      <button id="phase2Bulk" class="inline">อัปโหลดหลายรูปพร้อมกัน</button>
+      <button id="phase2Folder" class="inline" title="อ่านไฟล์รูปที่วางไว้ในโฟลเดอร์รับรูปของโครงการ แล้วใส่เข้าช่องตามชื่อไฟล์">📁 ดึงรูปจากโฟลเดอร์โครงการ</button>
+      <input type="file" id="bulkImgFile" accept="image/*" multiple hidden>
+    </div>
+  </div>
+
+  <div class="bar p2Bar"><i id="phase2Bar"></i></div>
+
+  <div id="phase2Alert" class="p2Alert hidden"></div>
+  <div id="phase2Live" class="p2Live hidden"></div>
+
+  <div id="phase2List" class="p2List"></div>
+
+  <details id="phase2Help" class="p2Help">
+    <summary>ก่อนเริ่ม: ใช้บัญชี ChatGPT ที่สร้างภาพได้</summary>
+    <p>เปิดหรือคลิกหน้าต่าง ChatGPT ของบัญชีที่สร้างภาพได้อย่างน้อย 1 ครั้ง แล้วกลับมากดเริ่มที่หน้านี้
+       ระบบจะใช้หน้าต่าง ChatGPT ที่แตะล่าสุด สร้างเฉพาะรูปที่ยังขาด บันทึกทีละรูปทันทีที่ผ่านตรวจ
+       แล้วแทรกกลับเข้าช่องเดิมให้เอง กดหยุดกลางทางได้ รูปที่บันทึกไปแล้วจะไม่ถูกสร้างซ้ำ</p>
+    <div id="coverConsultSummary" class="muted"></div>
+  </details>
+
+  <div id="coverDirections" class="p2Dirs hidden"></div>
+
+  <div id="coverPreviewWrap" class="coverPreviewWrap hidden">
+    <div>
+      <div class="slotHead">ตัวอย่างปกจริงหลังใส่ข้อความ</div>
+      <div class="muted">ภาพที่ ChatGPT สร้างเป็น artwork ชั้นล่างเท่านั้น ตัวอย่างนี้คือสิ่งที่ระบบจะประกอบใน PDF</div>
+    </div>
+    <div id="coverMock" class="coverMock">
+      <img id="coverPreviewImg" alt="ตัวอย่างปกหน้า">
+      <div id="coverPreviewTitle" class="coverOverlayText"></div>
+      <div id="coverPreviewSubtitle" class="coverOverlayText"></div>
+      <div id="coverPreviewAuthor" class="coverOverlayText"></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="coverConsultAgain" class="hidden">ให้ GPT คิดปกใหม่</button>
+  </div>
+
+  <div class="stepNav">
+    <div class="side">
+      <button id="phase2Edit" class="backLink">← กลับไปแก้เนื้อหา</button>
+      <button id="phase2Skip">ข้ามไปก่อน (ยังไม่สร้างภาพจริง)</button>
+      <button id="phase2Stop" class="danger hidden">หยุด</button>
+    </div>
+    <button id="phase2Start" class="primary inline next">เริ่ม Phase 2</button>
+  </div>
+</section>
+
+<section id="done" class="card hidden">
+  <h2>🎉 สร้างเสร็จแล้ว</h2>
+  <p id="doneText"></p>
+  <div id="imagesNotReadyBanner" class="banner warn hidden">
+    <div class="icon">⚠</div>
+    <div class="body">
+      <div class="title">เล่มนี้ยังไม่มีภาพจริง</div>
+      <div class="desc" id="imagesNotReadyDesc"></div>
+      <div class="bannerActions">
+        <button id="imagesNotReadyGo">← กลับไปสร้างภาพ (Phase 2)</button>
+      </div>
+    </div>
+  </div>
+  <div id="preflight" class="preflight"></div>
+  <div class="actions">
+    <button id="openHistory">แก้ไข / ประวัติเนื้อหา</button>
+    <button id="doneCoverRedo">แก้ / สร้างปกใหม่</button>
+    <button data-export="book" id="exportBookBtn" class="primary inline">PDF Ebook รวมปก + ภาพ</button>
+    <button data-export="screen">PDF ตรวจงาน</button>
+    <button data-export="interior">PDF สำหรับพิมพ์</button>
+    <button data-export="cover">PDF ปก</button>
+    <button data-export="epub">EPUB</button>
+    <button data-export="prompts">Prompt ภาพปก</button>
+    <button data-export="project">Project JSON</button>
+  </div>
+  <div id="exportLog" class="muted"></div>
+</section>
+
+<section id="error" class="card error hidden"></section>
+
+</main><script src="boot-guard.js"></script><script type="module" src="studio.js"></script></body></html>

@@ -1,0 +1,1484 @@
+<title>โรงพิมพ์อัตโนมัติ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..600&family=Noto+Serif+Thai:wght@400..700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --paper:#EFF1F4;
+  --surface:#FFFFFF;
+  --surface-2:#E3E7ED;
+  --ink:#10151C;
+  --ink-2:#48525F;
+  --ink-3:#78838F;
+  --rule:#CBD3DC;
+  --rule-strong:#A9B4C1;
+  --cyan:#00728F;
+  --cyan-soft:#DCEEF3;
+  --magenta:#B3134F;
+  --magenta-soft:#F8E1E9;
+  --yellow:#8A6300;
+  --yellow-soft:#F6EBD4;
+  --shadow:0 1px 2px rgba(16,21,28,.06), 0 8px 24px -12px rgba(16,21,28,.18);
+
+  --font-display:"Newsreader","Noto Serif Thai",Georgia,serif;
+  --font-body:"IBM Plex Sans","IBM Plex Sans Thai",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono","IBM Plex Sans Thai",ui-monospace,monospace;
+
+  --s--1:.8125rem;
+  --s-0:1.0625rem;
+  --s-1:1.1875rem;
+  --s-2:1.45rem;
+  --s-3:1.8rem;
+  --s-4:2.35rem;
+  --s-5:3.2rem;
+
+  --text-col:min(46rem,100%);
+  --wide-col:min(64rem,100%);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0C1015;
+    --surface:#131A21;
+    --surface-2:#1B242D;
+    --ink:#E7ECF2;
+    --ink-2:#A6B1BE;
+    --ink-3:#727E8C;
+    --rule:#28323C;
+    --rule-strong:#3A4855;
+    --cyan:#4FC9E8;
+    --cyan-soft:#10303B;
+    --magenta:#FF7BAA;
+    --magenta-soft:#3A1526;
+    --yellow:#E7B655;
+    --yellow-soft:#33280F;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0C1015;
+  --surface:#131A21;
+  --surface-2:#1B242D;
+  --ink:#E7ECF2;
+  --ink-2:#A6B1BE;
+  --ink-3:#727E8C;
+  --rule:#28323C;
+  --rule-strong:#3A4855;
+  --cyan:#4FC9E8;
+  --cyan-soft:#10303B;
+  --magenta:#FF7BAA;
+  --magenta-soft:#3A1526;
+  --yellow:#E7B655;
+  --yellow-soft:#33280F;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto} *{animation:none!important;transition:none!important}}
+
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--font-body);
+  font-size:var(--s-0);
+  line-height:1.72;
+  -webkit-font-smoothing:antialiased;
+}
+
+.shell{max-width:84rem;margin:0 auto;padding:0 1.25rem}
+@media (min-width:68rem){
+  .shell{display:grid;grid-template-columns:13.5rem minmax(0,1fr);gap:3.5rem;padding:0 2rem}
+}
+
+nav.rail{display:none}
+@media (min-width:68rem){
+  nav.rail{
+    display:block;position:sticky;top:0;align-self:start;
+    max-height:100vh;overflow-y:auto;padding:3.5rem 0 3rem;
+    border-right:1px solid var(--rule);
+  }
+  nav.rail ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.1rem}
+  nav.rail a{
+    display:grid;grid-template-columns:1.9rem 1fr;gap:.35rem;
+    text-decoration:none;color:var(--ink-2);
+    font-size:var(--s--1);line-height:1.4;padding:.34rem .9rem .34rem 0;
+    border-left:2px solid transparent;margin-left:-2px;
+  }
+  nav.rail a:hover{color:var(--ink);border-left-color:var(--rule-strong)}
+  nav.rail a .n{font-family:var(--font-mono);font-size:.7rem;color:var(--ink-3);letter-spacing:.02em;padding-top:.14em}
+  nav.rail a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+  nav.rail .rail-title{
+    font-family:var(--font-mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink-3);margin:0 0 1rem;
+  }
+}
+
+main{
+  display:grid;
+  grid-template-columns:[full-start] 1fr [text-start] var(--text-col) [text-end] 1fr [full-end];
+  padding-bottom:6rem;
+}
+main > *{grid-column:text}
+main > .wide{grid-column:full;justify-self:center;width:var(--wide-col)}
+
+h1,h2,h3,h4{font-family:var(--font-display);font-weight:500;text-wrap:balance;line-height:1.18;margin:0}
+h1{font-size:var(--s-5);letter-spacing:-.02em}
+h2{font-size:var(--s-4);letter-spacing:-.015em}
+h3{font-size:var(--s-2);letter-spacing:-.008em;margin-top:2.6rem}
+h4{font-size:var(--s-1);font-family:var(--font-body);font-weight:600;margin-top:1.9rem}
+p{margin:0 0 1.05rem}
+a{color:var(--cyan)}
+strong{font-weight:600;color:var(--ink)}
+code{font-family:var(--font-mono);font-size:.86em;background:var(--surface-2);padding:.1em .35em;border-radius:3px}
+ul,ol{margin:0 0 1.15rem;padding-left:1.25rem}
+li{margin-bottom:.4rem}
+li::marker{color:var(--ink-3)}
+hr{border:0;border-top:1px solid var(--rule);margin:3.5rem 0}
+
+.eyebrow{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin:0 0 .6rem}
+.lede{font-size:var(--s-1);color:var(--ink-2);line-height:1.65}
+.note{font-size:var(--s--1);color:var(--ink-3);line-height:1.6}
+
+section{padding-top:3.6rem;scroll-margin-top:1.5rem}
+section > h2{
+  padding-bottom:.6rem;border-bottom:1px solid var(--rule);margin-bottom:1.5rem;
+  display:flex;align-items:baseline;gap:.85rem;
+}
+section > h2 .n{font-family:var(--font-mono);font-size:.78rem;font-weight:500;color:var(--cyan);letter-spacing:.06em;flex:none}
+
+header.hero{grid-column:full;position:relative;padding:5.5rem 0 3rem;margin-bottom:.5rem}
+header.hero .inner{max-width:var(--text-col);margin:0 auto}
+.hero h1{margin-bottom:1.1rem}
+.hero .kicker{
+  display:inline-flex;align-items:center;gap:.5rem;
+  font-family:var(--font-mono);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--magenta);margin-bottom:1.4rem;
+}
+.hero .kicker::before{content:"";width:1.6rem;height:1px;background:var(--magenta)}
+.crop{position:absolute;width:16px;height:16px;pointer-events:none}
+.crop::before,.crop::after{content:"";position:absolute;background:var(--rule-strong)}
+.crop::before{width:100%;height:1px}
+.crop::after{height:100%;width:1px}
+.crop.tl{top:1.4rem;left:0}
+.crop.tr{top:1.4rem;right:0}
+.crop.tr::after{right:0}
+.crop.bl{bottom:.4rem;left:0}
+.crop.bl::before{bottom:0}
+.crop.br{bottom:.4rem;right:0}
+.crop.br::before{bottom:0}
+.crop.br::after{right:0}
+
+.io{
+  display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;
+  font-family:var(--font-mono);font-size:var(--s--1);color:var(--ink-2);
+  margin-top:1.9rem;padding-top:1.4rem;border-top:1px solid var(--rule);
+}
+.io b{font-weight:500;color:var(--ink);background:var(--surface);border:1px solid var(--rule);padding:.28rem .55rem;border-radius:4px}
+.io span{color:var(--cyan)}
+
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:1.3rem 1.4rem;box-shadow:var(--shadow);margin:0 0 1.2rem}
+.card h4{margin-top:0}
+.card p:last-child,.card ul:last-child,.card ol:last-child{margin-bottom:0}
+
+.callout{border-left:3px solid var(--cyan);background:var(--cyan-soft);padding:1rem 1.2rem;border-radius:0 5px 5px 0;margin:0 0 1.3rem;font-size:var(--s--1);line-height:1.65}
+.callout.warn{border-left-color:var(--yellow);background:var(--yellow-soft)}
+.callout.key{border-left-color:var(--magenta);background:var(--magenta-soft)}
+.callout p:last-child{margin-bottom:0}
+.callout .tag{display:block;font-family:var(--font-mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;margin-bottom:.35rem;color:var(--cyan)}
+.callout.warn .tag{color:var(--yellow)}
+.callout.key .tag{color:var(--magenta)}
+
+.scroll{overflow-x:auto;margin:0 0 1.4rem;border:1px solid var(--rule);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:var(--s--1);line-height:1.5}
+th,td{text-align:left;padding:.62rem .85rem;border-bottom:1px solid var(--rule);vertical-align:top}
+thead th{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:500;background:var(--surface-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.num,th.num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+td code{background:transparent;padding:0;color:var(--cyan)}
+
+pre{margin:0 0 1.4rem;padding:1.05rem 1.15rem;overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:6px;font-family:var(--font-mono);font-size:.79rem;line-height:1.62;color:var(--ink);tab-size:2}
+pre .c{color:var(--ink-3)}
+pre .k{color:var(--magenta)}
+pre .s{color:var(--cyan)}
+
+.filename{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);margin:0 0 .45rem;display:flex;align-items:center;gap:.5rem}
+.filename::after{content:"";flex:1;height:1px;background:var(--rule)}
+
+.pipe{display:flex;flex-direction:column;gap:0;margin:0 0 1.6rem}
+.stage{display:grid;grid-template-columns:2.6rem 1fr;gap:1rem;padding:.95rem 0;border-bottom:1px solid var(--rule);position:relative}
+.stage:last-child{border-bottom:0}
+.stage .num{font-family:var(--font-mono);font-size:.78rem;color:var(--ink-3);padding-top:.2em;font-variant-numeric:tabular-nums}
+.stage .t{font-weight:600;font-size:var(--s-0);margin:0 0 .2rem}
+.stage .d{font-size:var(--s--1);color:var(--ink-2);margin:0;line-height:1.6}
+.stage.gate{background:linear-gradient(90deg,var(--magenta-soft),transparent 70%);margin:0 -1rem;padding-left:1rem;padding-right:1rem;border-radius:4px}
+.stage.gate .num{color:var(--magenta)}
+.stage .chip{display:inline-block;font-family:var(--font-mono);font-size:.64rem;letter-spacing:.1em;text-transform:uppercase;padding:.12rem .42rem;border-radius:3px;margin-left:.5rem;border:1px solid currentColor;color:var(--magenta);vertical-align:.12em}
+.stage .chip.auto{color:var(--ink-3)}
+.stage .chip.gpt{color:var(--cyan)}
+.loop{display:flex;align-items:center;gap:.6rem;margin:.2rem 0 0 2.6rem;padding:.55rem .8rem;border:1px dashed var(--cyan);border-radius:5px;background:var(--cyan-soft);font-family:var(--font-mono);font-size:.7rem;color:var(--cyan);letter-spacing:.04em}
+
+.grid2{display:grid;gap:1.1rem;margin:0 0 1.4rem}
+@media (min-width:44rem){.grid2{grid-template-columns:1fr 1fr}}
+
+.arch{display:grid;gap:.9rem;margin:0 0 1.5rem}
+@media (min-width:52rem){.arch{grid-template-columns:repeat(3,1fr);gap:1rem}}
+.proc{border:1px solid var(--rule);border-radius:6px;background:var(--surface);padding:1rem 1.05rem;box-shadow:var(--shadow)}
+.proc .h{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--cyan);margin:0 0 .1rem}
+.proc .n{font-weight:600;font-size:var(--s-0);margin:0 0 .55rem;line-height:1.35}
+.proc ul{margin:0;padding-left:1.05rem;font-size:var(--s--1);line-height:1.55;color:var(--ink-2)}
+.proc li{margin-bottom:.28rem}
+.proc.brain{border-color:var(--cyan);border-width:1.5px}
+.proc.brain .h{color:var(--magenta)}
+
+.flow{list-style:none;margin:0 0 1.5rem;padding:0;display:grid;gap:.35rem;counter-reset:f}
+.flow li{
+  display:grid;grid-template-columns:1.6rem 1fr;gap:.6rem;margin:0;
+  font-size:var(--s--1);line-height:1.6;padding:.42rem .7rem;border-radius:4px;background:var(--surface);
+  border:1px solid var(--rule);
+}
+.flow li::before{counter-increment:f;content:counter(f);font-family:var(--font-mono);font-size:.7rem;color:var(--ink-3);padding-top:.18em}
+.flow b{font-family:var(--font-mono);font-size:.72rem;font-weight:500;color:var(--cyan);letter-spacing:.02em}
+
+.check{list-style:none;padding:0;margin:0 0 1.3rem;display:grid;gap:.45rem}
+.check li{display:grid;grid-template-columns:1.4rem 1fr;gap:.5rem;margin:0;font-size:var(--s--1);line-height:1.55}
+.check li::before{content:"";width:.78rem;height:.78rem;border:1.5px solid var(--rule-strong);border-radius:2px;margin-top:.36em}
+
+figure{margin:0 0 1.5rem}
+figcaption{font-size:var(--s--1);color:var(--ink-3);margin-top:.7rem;line-height:1.55}
+svg{max-width:100%;height:auto;display:block}
+
+footer{grid-column:full;border-top:1px solid var(--rule);margin-top:4rem;padding-top:1.6rem;font-size:var(--s--1);color:var(--ink-3)}
+footer a{color:var(--ink-2)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:2px}
+</style>
+
+<div class="shell">
+<nav class="rail" aria-label="สารบัญ">
+  <p class="rail-title">สารบัญ</p>
+  <ol>
+    <li><a href="#survey"><span class="n">01</span><span>ของที่มีอยู่แล้ว</span></a></li>
+    <li><a href="#arch"><span class="n">02</span><span>สถาปัตยกรรมส่วนขยาย</span></a></li>
+    <li><a href="#bridge"><span class="n">03</span><span>สะพานเชื่อม ChatGPT</span></a></li>
+    <li><a href="#pipeline"><span class="n">04</span><span>สายการผลิต</span></a></li>
+    <li><a href="#spec"><span class="n">05</span><span>ไฟล์สเปกหนังสือ</span></a></li>
+    <li><a href="#pages"><span class="n">06</span><span>คุมจำนวนหน้า</span></a></li>
+    <li><a href="#outline"><span class="n">07</span><span>สารบัญและเนื้อหา</span></a></li>
+    <li><a href="#layout"><span class="n">08</span><span>เรียงพิมพ์ใน WASM</span></a></li>
+    <li><a href="#thai"><span class="n">09</span><span>งานภาษาไทย</span></a></li>
+    <li><a href="#fail"><span class="n">10</span><span>เมื่อระบบพัง</span></a></li>
+    <li><a href="#edit"><span class="n">11</span><span>โหมดแก้ไข</span></a></li>
+    <li><a href="#preflight"><span class="n">12</span><span>Preflight + ส่งออก</span></a></li>
+    <li><a href="#cover"><span class="n">13</span><span>คณิตศาสตร์ปก</span></a></li>
+    <li><a href="#prompts"><span class="n">14</span><span>Prompt ภาพปก</span></a></li>
+    <li><a href="#limits"><span class="n">15</span><span>ข้อจำกัดของระบบ</span></a></li>
+    <li><a href="#build"><span class="n">16</span><span>ลงมือสร้าง</span></a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header class="hero">
+  <span class="crop tl"></span><span class="crop tr"></span>
+  <span class="crop bl"></span><span class="crop br"></span>
+  <div class="inner">
+    <p class="kicker">System design · Chrome Extension · Ebook Auto</p>
+    <h1>โรงพิมพ์อัตโนมัติ</h1>
+    <p class="lede">ส่วนขยาย Chrome ที่รับ “หัวข้อ” หนึ่งบรรทัด แล้วขับหน้าเว็บ ChatGPT ทีละเทิร์นจนได้เนื้อหาครบเล่ม เรียงพิมพ์ในเบราว์เซอร์เอง วัดจำนวนหน้าจริง วนแก้จนตรงเป้า แล้วส่งออกเป็น PDF พร้อมพิมพ์ — โดยไม่มีเซิร์ฟเวอร์และไม่มีค่า API</p>
+    <div class="io">
+      <b>Studio tab</b><span>→</span><b>ฉีด prompt</b><span>→</span><b>ChatGPT tab</b>
+      <span>→</span><b>ดึงเนื้อหากลับ</b><span>→</span><b>Typst WASM</b><span>→</span><b>นับหน้า</b>
+      <span>↺</span><b>interior.pdf</b>
+    </div>
+
+    <div class="callout key" style="margin-top:1.6rem">
+      <span class="tag">สถานะ · สร้างแล้ว</span>
+      <p>เอกสารนี้ไม่ใช่แผนที่ยังไม่ได้ลงมือ ส่วนขยายถูกเขียนจริงและอยู่ในโฟลเดอร์ <code>extension/</code> ติดตั้งได้ผ่าน chrome://extensions → Load unpacked · Typst WASM ถูกทดสอบในเบราว์เซอร์จริงแล้ว (เรียงพิมพ์ไทย นับหน้า ออก PDF ผ่านครบ) · ลูปนับหน้าทดสอบด้วยคอมไพเลอร์ Typst จริง ลู่เข้าใน 1–3 รอบแม้ตั้งค่าเริ่มต้นผิดไป ±33% · จุดที่เอกสารฉบับก่อนเขียนผิด ถูกแก้ไว้ในหัวข้อ 06 และ 08 พร้อมเหตุผล</p>
+    </div>
+  </div>
+</header>
+
+<section id="survey">
+  <h2><span class="n">01</span>ของที่มีอยู่แล้ว</h2>
+  <p>ผมสำรวจสองฝั่ง — ฝั่งที่เขียนหนังสือด้วย AI และฝั่งที่ขับหน้าเว็บ ChatGPT ด้วยส่วนขยาย ผลคือมีของให้ลอกอยู่ทั้งสองฝั่ง แต่ <strong>ยังไม่มีใครเอามาต่อกัน</strong></p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>โปรเจกต์</th><th>จุดที่ควรลอก</th><th>จุดที่ยังขาด</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><a href="https://github.com/Myriad-Dreamin/typst.ts">Myriad-Dreamin/<br>typst.ts</a><br><span class="note">ตัวเปิดทาง</span></td>
+          <td>คอมไพเลอร์ Typst ทั้งตัวรันเป็น WASM ในเบราว์เซอร์ ผ่าน <code>@myriaddreamin/typst-ts-web-compiler</code> — <strong>นี่คือสิ่งที่ทำให้สถาปัตยกรรมไร้เซิร์ฟเวอร์เป็นไปได้</strong> ลูปวัดจำนวนหน้ารันในแท็บได้เลย</td>
+          <td>ต้องแนบไฟล์ฟอนต์เข้าไปเอง เพราะ WASM ไม่เห็นฟอนต์ของระบบ</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/Mapaor/typst-online-editor">Mapaor/<br>typst-online-editor</a></td>
+          <td>ตัวอย่างการต่อ typst.ts จริง: คอมไพล์ฝั่งไคลเอนต์ล้วน พรีวิว PDF เอง มี debounce ระหว่างพิมพ์ — ก๊อปโครงมาใช้เป็นชั้นเรียงพิมพ์ได้เลย</td>
+          <td>ไม่ใช่ส่วนขยาย ต้องปรับ CSP ของ MV3 เอง</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/alexeygrigorev/ai-book-generator">alexeygrigorev/<br>ai-book-generator</a></td>
+          <td>โครงหนังสือฝั่งการพิมพ์ที่สมบูรณ์ที่สุดที่เจอ: interior 6×9 พร้อม mirror margin และ gutter · คำนวณความหนาสันจากจำนวนหน้า · แยกโหมดเขียนรายตอน 800–1,200 คำ กับรายบท 3,000–5,000 คำ</td>
+          <td>เดาจำนวนคำ ไม่วัดหน้าจริง · ไม่มีลูปป้อนกลับ · ไม่มีขั้นแก้ไข</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/wesleyscholl/book-generator">wesleyscholl/<br>book-generator</a></td>
+          <td>ครบวงจร outline → chapter → QC → appendix → compile → export หลายฟอร์แมต · มีตัวจัดการยืด/เขียนใหม่รายบท ซึ่งเป็นตรรกะเดียวกับที่ลูปนับหน้าต้องใช้</td>
+          <td>bash ล้วน · คุมความยาวระดับคำ · ปกใช้ ImageMagick พื้นฐาน</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/alexiskirke/long-ebook-generator-ai">alexiskirke/<br>long-ebook-generator-ai</a></td>
+          <td>โครงสร้างซ้อนสี่ชั้น บท → ตอน → หัวข้อย่อย → ย่อหน้า วิธีคุมความยาวหนังสือยาวที่ได้ผลกว่าการสั่ง “เขียนให้ยาว” — และเข้ากับโมเดลเทิร์นละตอนพอดี</td>
+          <td>ผูก OpenAI API ตัวเดียว ไม่มีชั้นการพิมพ์</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/3choff/ChatGPT_ReadAloud">3choff/<br>ChatGPT_ReadAloud</a> · <a href="https://github.com/kayuling/chat-organizer-extension">kayuling/<br>chat-organizer-extension</a></td>
+          <td>ส่วนขยายที่แตะ DOM ของ chatgpt.com จริงและยังดูแลอยู่ — ใช้อ่านว่าเขาจับ turn ของผู้ช่วยและปุ่มต่าง ๆ ด้วยตัวเลือกอะไร ทั้งสองตัวยอมรับตรง ๆ ว่า <strong>selector พังเมื่อ ChatGPT เปลี่ยนหน้าตา</strong> จึงแยกไฟล์ selector ออกมาให้แก้ง่าย — ลอกแนวคิดนี้มาทั้งดุ้น</td>
+          <td>เป็นแค่ปุ่มเสริม ไม่ได้ขับบทสนทนาเป็นร้อยเทิร์นแบบมีสถานะ</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/arbab-ml/ChatGPT-Browser-Automation">arbab-ml/<br>ChatGPT-Browser-Automation</a></td>
+          <td>ขับ ChatGPT ด้วย Selenium — อ่านเอาไอเดียเรื่องจังหวะรอและการตรวจจับว่าตอบจบ</td>
+          <td>ต้องมี Python + WebDriver ข้างนอก ซึ่งขัดกับโจทย์ที่อยากได้ส่วนขยายล้วน</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">แถวที่เปิดอ่านหน้า repo จริงคือสองแถวของ ai-book-generator และ book-generator ที่เหลือสรุปจากคำอธิบาย repo ควรเปิดยืนยันก่อน fork · <code>martinshkreli/bookgen</code> ถูก archive ไปเมื่อ 30 เม.ย. 2025</p>
+
+  <div class="callout key">
+    <span class="tag">ช่องว่างที่โปรเจกต์นี้ยึด</span>
+    <p><strong>(1)</strong> ขับ ChatGPT ผ่าน UI เป็นร้อยเทิร์นแบบมีสถานะ กู้คืนได้ ไม่ใช่ยิงทีละคำถาม <strong>(2)</strong> ลูปที่วัดจำนวนหน้าจาก PDF จริงแล้ววนแก้จนตรงเป้า <strong>(3)</strong> เรียงพิมพ์และแก้ไขจบในเบราว์เซอร์ ไม่มีเซิร์ฟเวอร์ <strong>(4)</strong> งานเรียงพิมพ์ภาษาไทยที่ถูกต้อง ซึ่งไม่มีตัวไหนแตะเลย</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">ข้อควรรู้ก่อนตัดสินใจ</span>
+    <p>การใช้สคริปต์ขับหน้าเว็บ ChatGPT ขัดกับเงื่อนไขการใช้บริการของ OpenAI ที่กำหนดให้เข้าถึงแบบอัตโนมัติผ่าน API เท่านั้น ความเสี่ยงคือบัญชีถูกจำกัดหรือระงับ และการเปลี่ยนหน้าตาเว็บทำให้ระบบพังโดยไม่เตือนล่วงหน้า — นี่เป็นการตัดสินใจของคุณ ผมออกแบบให้ตามที่สั่ง แต่จะวาง <strong>ชั้น transport ที่สลับได้</strong> ไว้ให้ (หัวข้อ 03) เพื่อให้ย้ายไปใช้ API หรือโมเดลโลคัลได้ในภายหลังโดยไม่ต้องรื้อระบบ และเพื่อให้ทดสอบส่วนอื่นได้โดยไม่ต้องยิง ChatGPT ทุกครั้ง</p>
+  </div>
+</section>
+
+<section id="arch">
+  <h2><span class="n">02</span>สถาปัตยกรรมส่วนขยาย</h2>
+  <p>ระบบมีสามกระบวนการที่คุยกันผ่านข้อความ ประเด็นสำคัญที่สุดของการออกแบบนี้คือ <strong>สมองอยู่ที่ไหน</strong></p>
+
+  <div class="callout key">
+    <span class="tag">การตัดสินใจที่สำคัญที่สุดของสถาปัตยกรรม</span>
+    <p><strong>ห้ามวางตัวควบคุมงานไว้ใน service worker</strong> เพราะ Manifest V3 ฆ่า service worker เมื่อไม่มีงานประมาณ 30 วินาที การผลิตหนังสือหนึ่งเล่มใช้เวลาเป็นชั่วโมงและมีช่วงรอนาน ๆ ระหว่างเทิร์น ถ้าวางไว้ที่นั่น งานจะตายกลางทางแบบสุ่มและหาสาเหตุยากมาก ให้วางสมองไว้ที่ <strong>Studio tab</strong> ซึ่งเป็นหน้าเว็บของส่วนขยายที่เปิดค้างไว้ตลอดงาน — มันไม่ถูกฆ่า มี IndexedDB มี DOM รัน WASM ได้ และเป็น UI อยู่แล้ว ส่วน service worker ลดบทบาทเหลือแค่ตัวส่งต่อข้อความและตัวปลุกงานเมื่อแท็บถูกปิด</p>
+  </div>
+
+  <div class="arch wide">
+    <div class="proc brain">
+      <p class="h">สมอง · ไม่ถูกฆ่า</p>
+      <p class="n">Studio tab<br><code style="font-size:.72em">studio.html</code></p>
+      <ul>
+        <li>เครื่องสถานะของงานทั้งเล่ม</li>
+        <li>คิวเทิร์น + ตรรกะลองใหม่</li>
+        <li>Book Bible + สารบัญ + ต้นฉบับ</li>
+        <li>IndexedDB (unlimitedStorage)</li>
+        <li>Typst WASM คอมไพล์ + นับหน้า</li>
+        <li>พรีวิว PDF + หน้าจอแก้ไข</li>
+        <li>ประกอบปก + ส่งออกไฟล์</li>
+      </ul>
+    </div>
+    <div class="proc">
+      <p class="h">ตัวส่งต่อ · ตายได้ ไม่เป็นไร</p>
+      <p class="n">Service worker<br><code style="font-size:.72em">sw.js</code></p>
+      <ul>
+        <li>ต่อพอร์ตระหว่างสองแท็บ</li>
+        <li>เปิด/ค้นหาแท็บ ChatGPT</li>
+        <li>ฉีด content script เมื่อจำเป็น</li>
+        <li><code>chrome.downloads</code> ตอนส่งออก</li>
+        <li><code>chrome.alarms</code> ปลุกงานที่ค้าง</li>
+        <li>ไม่เก็บสถานะใดในหน่วยความจำ</li>
+      </ul>
+    </div>
+    <div class="proc">
+      <p class="h">มือ · เปราะที่สุด</p>
+      <p class="n">Content script<br><code style="font-size:.72em">adapter/chatgpt.js</code></p>
+      <ul>
+        <li>ฉีดข้อความลงช่องพิมพ์</li>
+        <li>กดส่ง</li>
+        <li>เฝ้าดูจนตอบจบ</li>
+        <li>ดึงข้อความดิบกลับ</li>
+        <li>ตรวจจับลิมิต/ข้อผิดพลาด</li>
+        <li>ทุก selector อยู่ในไฟล์นี้ไฟล์เดียว</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>หน้าตาของส่วนขยาย: ใช้ทั้งสามพื้นผิว</h3>
+  <p>Chrome ให้ที่วาง UI สามแบบ และคำตอบไม่ใช่การเลือกอันเดียว แต่คือ <strong>ใช้ทั้งสามแบบตามหน้าที่</strong> เพราะงานนี้มีสองโหมดที่ต้องการพื้นที่ต่างกันมาก — โหมดเฝ้าดูตอนเครื่องเดิน กับโหมดแก้ไขตอนคนทำงาน</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>พื้นผิว</th><th>อายุ</th><th>พื้นที่</th><th>ใช้ทำอะไรในระบบนี้</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Popup</strong><br><span class="note">กดที่ไอคอน</span></td>
+          <td>ตายทันทีที่คลิกที่อื่น</td>
+          <td>เล็กมาก</td>
+          <td>เป็นแค่ปุ่มเปิด — สถานะย่อสามบรรทัด + ปุ่ม “เปิด Studio” และ “หยุด” <strong>ห้ามวางอะไรที่มีสถานะไว้ที่นี่เด็ดขาด</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Side panel</strong><br><span class="note">แถบข้าง · แนะนำให้มี</span></td>
+          <td>อยู่ได้ตราบที่ผู้ใช้ไม่ปิด · <strong>สลับแท็บไปมาไม่รีโหลด ไม่รีเซ็ตสถานะ</strong></td>
+          <td>แคบ ราว 320–500 px ลากขยายได้บ้าง</td>
+          <td><strong>จอเฝ้างาน</strong> — เปิดคู่ไปกับแท็บ ChatGPT เพื่อดูว่ากำลังเขียนตอนไหน เทิร์นที่เท่าไร เหลืออีกกี่ตอน หน้าที่ได้เทียบเป้า พร้อมปุ่มหยุด/ทำต่อ/ข้ามตอนนี้ — เป็นหน้าจอล้วน ไม่ถือสถานะเอง</td>
+        </tr>
+        <tr>
+          <td><strong>Tab เต็ม</strong><br><span class="note">Studio · ปักหมุดไว้</span></td>
+          <td>อยู่จนกว่าจะปิด</td>
+          <td>เต็มจอ</td>
+          <td><strong>สมองและโต๊ะทำงาน</strong> — เครื่องสถานะ ฐานข้อมูล Typst WASM และหน้าจอแก้ไขสองบานคู่</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout key">
+    <span class="tag">ทำไมสมองต้องอยู่ในแท็บ ไม่ใช่ในแถบข้าง</span>
+    <p>แถบข้างน่าใช้กว่ามากในแง่การเฝ้างาน แต่มีสองอย่างที่ตัดสิทธิ์ไม่ให้เป็นสมอง: <strong>ผู้ใช้ปิดมันได้ด้วยคลิกเดียว</strong> ซึ่งจะทำให้งานที่เดินอยู่หยุดกลางคัน และ <strong>กว้างไม่พอสำหรับหน้าจอแก้ไข</strong> — โหมดแก้ไขคือต้นฉบับข้างหนึ่ง หน้ากระดาษจริงอีกข้างหนึ่ง ยัดลงพื้นที่ 400 px ไม่ได้ ให้เปิด Studio เป็นแท็บที่ <strong>ปักหมุด</strong> ไว้ (ปิดยากโดยไม่ตั้งใจ) แล้วให้แถบข้างเป็นแค่หน้าต่างมองเข้าไปในงานที่แท็บนั้นทำอยู่ ทั้งสองคุยกันผ่าน service worker เหมือนกับ content script</p>
+  </div>
+
+  <p class="note">รายละเอียดที่ต้องรู้ตอนเขียน: side panel ต้องขอสิทธิ์ <code>"sidePanel"</code> และประกาศ <code>"side_panel": { "default_path": "panel.html" }</code> ใน manifest · ใช้ได้ตั้งแต่ Chrome 114 · เปิดด้วยโค้ดได้เฉพาะเมื่อผู้ใช้เพิ่งกดอะไรสักอย่าง ไม่ใช่เปิดเองตามใจ · ตั้ง <code>setPanelBehavior({ openPanelOnActionClick: true })</code> แล้วกดไอคอนส่วนขยายจะเปิดแถบข้างแทน popup ซึ่งอาจเป็นทางเลือกที่ดีกว่ามี popup แยก</p>
+
+  <div class="callout warn">
+    <span class="tag">แท็บที่ปักหมุดก็ยังถูกทิ้งได้</span>
+    <p>Chrome ทิ้งแท็บพื้นหลังได้เมื่อหน่วยความจำตึง (Memory Saver) แท็บปักหมุดโดนน้อยกว่าแต่ไม่ปลอดภัยร้อยเปอร์เซ็นต์ ทางกันคือกลไกเดียวกับที่ออกแบบไว้แล้วในหัวข้อ 10 — เขียนผลทุกเทิร์นลง IndexedDB ก่อนไปต่อ แล้วให้ service worker ใช้ <code>chrome.alarms</code> ตรวจเป็นระยะว่าแท็บ Studio ยังอยู่ไหม ถ้าหายให้เปิดใหม่แล้วทำต่อจากเทิร์นล่าสุดโดยอัตโนมัติ ผู้ใช้แทบไม่รู้ว่าเกิดอะไรขึ้น</p>
+  </div>
+
+  <h4>ทางเดินของข้อความหนึ่งเทิร์น</h4>
+  <ol class="flow">
+    <li><b>studio → sw</b> ขอเทิร์นถัดไป พร้อมข้อความที่ประกอบเสร็จแล้ว และรหัสตอนที่คาดหวัง</li>
+    <li><b>sw → tab</b> หาแท็บ chatgpt.com ที่เปิดอยู่ ถ้าไม่มีให้เปิดใหม่ในหน้าต่างแยก</li>
+    <li><b>sw → content</b> ส่งงานผ่านพอร์ตที่ค้างไว้</li>
+    <li><b>content</b> โฟกัสช่องพิมพ์ → ใส่ข้อความ → กดส่ง → ตั้ง MutationObserver</li>
+    <li><b>content</b> เมื่อปุ่มหยุดหายไปและ DOM นิ่งครบ 1.5 วินาที ถือว่าจบเทิร์น</li>
+    <li><b>content → studio</b> ส่งข้อความดิบกลับ พร้อมสถานะ (ปกติ / ถูกตัด / ชนลิมิต / ปฏิเสธ)</li>
+    <li><b>studio</b> แกะ sentinel ตรวจรหัสตอน นับอักษร เขียนลง IndexedDB ทันที</li>
+    <li><b>studio</b> ตัดสินใจ: ไปตอนถัดไป / สั่งเขียนต่อ / ลองใหม่ / หยุดรอคน</li>
+  </ol>
+
+  <p class="filename">manifest.json — จุดที่พลาดบ่อย</p>
+<pre>{
+  <span class="s">"manifest_version"</span>: 3,
+  <span class="s">"name"</span>: <span class="s">"Ebook Auto"</span>,
+  <span class="s">"permissions"</span>: [<span class="s">"storage"</span>, <span class="s">"unlimitedStorage"</span>, <span class="s">"downloads"</span>,
+                   <span class="s">"tabs"</span>, <span class="s">"scripting"</span>, <span class="s">"alarms"</span>, <span class="s">"sidePanel"</span>],
+  <span class="s">"host_permissions"</span>: [<span class="s">"https://chatgpt.com/*"</span>, <span class="s">"https://chat.openai.com/*"</span>],
+  <span class="s">"background"</span>: { <span class="s">"service_worker"</span>: <span class="s">"sw.js"</span>, <span class="s">"type"</span>: <span class="s">"module"</span> },
+  <span class="s">"side_panel"</span>: { <span class="s">"default_path"</span>: <span class="s">"panel.html"</span> },   <span class="c">// จอเฝ้างาน</span>
+  <span class="s">"action"</span>: { <span class="s">"default_title"</span>: <span class="s">"Ebook Auto"</span> },        <span class="c">// ไม่ตั้ง popup</span>
+  <span class="s">"content_scripts"</span>: [{
+    <span class="s">"matches"</span>: [<span class="s">"https://chatgpt.com/*"</span>],
+    <span class="s">"js"</span>: [<span class="s">"adapter/chatgpt.js"</span>],
+    <span class="s">"run_at"</span>: <span class="s">"document_idle"</span>
+  }],
+  <span class="c">// ⬇ ไม่มีบรรทัดนี้ Typst WASM จะโหลดไม่ขึ้น และ error จะไม่บอกสาเหตุ</span>
+  <span class="s">"content_security_policy"</span>: {
+    <span class="s">"extension_pages"</span>: <span class="s">"script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"</span>
+  },
+  <span class="s">"web_accessible_resources"</span>: [{
+    <span class="s">"resources"</span>: [<span class="s">"wasm/*"</span>, <span class="s">"fonts/*"</span>],
+    <span class="s">"matches"</span>: [<span class="s">"https://chatgpt.com/*"</span>]
+  }]
+}
+</pre>
+
+  <p class="filename">โครงไฟล์</p>
+<pre>ebook-auto/
+├─ manifest.json
+├─ sw.js                     <span class="c"># ส่งต่อข้อความ ไม่มีสถานะ</span>
+├─ studio.html / studio.js   <span class="c"># สมอง + โต๊ะทำงาน (แท็บปักหมุด)</span>
+├─ panel.html  / panel.js    <span class="c"># จอเฝ้างาน (แถบข้าง) ไม่ถือสถานะ</span>
+├─ core/
+│  ├─ machine.js             <span class="c"># เครื่องสถานะของงาน</span>
+│  ├─ budget.js              <span class="c"># แปลงหน้า → อักษร (หัวข้อ 06)</span>
+│  ├─ bible.js               <span class="c"># ความจำข้ามตอน</span>
+│  ├─ prompts.js             <span class="c"># ตัวประกอบ prompt ทุกชนิด</span>
+│  ├─ extract.js             <span class="c"># แกะ sentinel + ตรวจความครบ</span>
+│  └─ db.js                  <span class="c"># IndexedDB</span>
+├─ transport/
+│  ├─ index.js               <span class="c"># อินเทอร์เฟซกลาง send(prompt)</span>
+│  ├─ chatgpt-tab.js         <span class="c"># ผ่านแท็บ ChatGPT</span>
+│  ├─ api.js                 <span class="c"># ผ่าน API (ทางหนี)</span>
+│  └─ fake.js                <span class="c"># ข้อความปลอม ใช้ทดสอบลูปนับหน้า</span>
+├─ adapter/
+│  ├─ chatgpt.js             <span class="c"># content script</span>
+│  └─ selectors.json         <span class="c"># ⬅ ทุก selector อยู่ที่นี่ที่เดียว</span>
+├─ typeset/
+│  ├─ compiler.js            <span class="c"># หุ้ม typst.ts</span>
+│  ├─ book.typ               <span class="c"># เทมเพลตหลัก</span>
+│  └─ profiles/*.json        <span class="c"># ขนาดเล่มแต่ละแบบ</span>
+├─ wasm/                     <span class="c"># typst-ts-web-compiler</span>
+└─ fonts/                    <span class="c"># Sarabun, IBM Plex Sans Thai, ...</span>
+</pre>
+
+  <div class="callout warn">
+    <span class="tag">การถูกหน่วงของแท็บพื้นหลัง</span>
+    <p>Chrome หน่วงตัวจับเวลาในแท็บที่ไม่ได้อยู่หน้าสุดเหลือประมาณนาทีละครั้ง ถ้าเขียนตัวตรวจจับ “ตอบจบหรือยัง” ด้วย <code>setInterval</code> ระบบจะช้าลงสิบเท่าทันทีที่ผู้ใช้สลับไปทำอย่างอื่น <strong>ให้ใช้ MutationObserver ล้วน</strong> ซึ่งไม่ถูกหน่วง และให้เปิดแท็บ ChatGPT ไว้ในหน้าต่างแยกที่ไม่ย่อลง จะเสถียรที่สุด (หน้าต่างที่ย่อลงถูกหน่วงหนักกว่า)</p>
+  </div>
+</section>
+
+<section id="bridge">
+  <h2><span class="n">03</span>สะพานเชื่อม ChatGPT</h2>
+  <p>ส่วนนี้คือหัวใจของโจทย์ และเป็นส่วนที่เปราะที่สุดของระบบ หลักการออกแบบมีข้อเดียว: <strong>ทำให้ทุกอย่างที่ต้องพึ่งหน้าตาเว็บของคนอื่น อยู่รวมกันในไฟล์เดียวที่แก้ได้ใน 5 นาที</strong></p>
+
+  <h3>ก. ชั้น transport ที่สลับได้</h3>
+  <p>ส่วนอื่นของระบบทั้งหมดรู้จักแค่ฟังก์ชันเดียว ทำให้ทดสอบลูปนับหน้าได้โดยไม่ต้องยิง ChatGPT เลย และย้ายไป API ได้วันไหนก็ได้</p>
+<pre><span class="c">// transport/index.js — ทุกตัวทำสัญญานี้เหมือนกัน</span>
+<span class="k">export</span> <span class="k">async</span> <span class="k">function</span> send(prompt, { expectId, maxContinues = 3 }) {
+  <span class="c">// คืน { text, status, meta }</span>
+  <span class="c">// status: "ok" | "truncated" | "rate_limited" | "refused" | "error"</span>
+}
+</pre>
+
+  <h3>ข. ฉีดข้อความลงช่องพิมพ์</h3>
+  <p>ช่องพิมพ์ของ ChatGPT เป็น contenteditable ที่ควบคุมด้วย ProseMirror ไม่ใช่ <code>&lt;textarea&gt;</code> การเซ็ต <code>textContent</code> ตรง ๆ จะดูเหมือนได้ผลบนหน้าจอ แต่ตัวเว็บจะไม่รู้ว่ามีข้อความ แล้วปุ่มส่งจะยังเป็นสีเทา</p>
+<pre><span class="k">async function</span> inject(text) {
+  <span class="k">const</span> box = document.querySelector(S.composer);   <span class="c">// "#prompt-textarea"</span>
+  box.focus();
+  <span class="c">// เคลียร์ของเก่าให้หมดก่อน ไม่งั้นข้อความจะต่อท้ายกัน</span>
+  document.execCommand(<span class="s">"selectAll"</span>, <span class="k">false</span>, <span class="k">null</span>);
+  <span class="c">// execCommand ยิง beforeinput/input ที่ ProseMirror ฟังอยู่ จึงได้ผลจริง</span>
+  document.execCommand(<span class="s">"insertText"</span>, <span class="k">false</span>, text);
+
+  <span class="k">await</span> nextFrame();
+  <span class="k">const</span> send = document.querySelector(S.sendButton);
+  <span class="k">if</span> (!send || send.disabled) <span class="k">throw</span> <span class="k">new</span> Error(<span class="s">"composer_not_ready"</span>);
+  send.click();
+}
+</pre>
+  <p class="note">อย่ากด Enter ด้วยการ dispatch KeyboardEvent — เว็บสมัยใหม่มักไม่เชื่อ event ที่ <code>isTrusted</code> เป็นเท็จ การคลิกปุ่มส่งด้วย <code>.click()</code> ทำงานได้เพราะเป็นการเรียกฟังก์ชันตรง ไม่ใช่การจำลอง event</p>
+
+  <h3>ค. รู้ได้อย่างไรว่าตอบจบแล้ว</h3>
+  <p>วิธีที่คนทำกันคือดูว่าข้อความหยุดเปลี่ยน ซึ่งพลาดบ่อยเพราะสตรีมมิงมีช่วงสะดุด ให้ใช้สัญญาณสามชั้นซ้อนกัน</p>
+<pre><span class="k">function</span> waitForTurnEnd(turnEl) {
+  <span class="k">return new</span> Promise((resolve) =&gt; {
+    <span class="k">let</span> quiet;
+    <span class="k">const</span> obs = <span class="k">new</span> MutationObserver(() =&gt; {
+      <span class="c">// ชั้น 1 (หลัก) ปุ่มหยุดหายไป = โมเดลหยุดพ่นแล้ว</span>
+      <span class="k">const</span> streaming = document.querySelector(S.stopButton);
+      <span class="k">if</span> (streaming) { clearTimeout(quiet); <span class="k">return</span>; }
+
+      <span class="c">// ชั้น 2 DOM ต้องนิ่งต่ออีก 1.5 วินาที กัน re-render ท้ายสตรีม</span>
+      clearTimeout(quiet);
+      quiet = setTimeout(() =&gt; {
+        <span class="c">// ชั้น 3 ต้องมีแถบปุ่มใต้ข้อความ (คัดลอก/อ่านออกเสียง) จึงจะจบจริง</span>
+        <span class="k">if</span> (turnEl.querySelector(S.copyButton)) {
+          obs.disconnect(); resolve();
+        }
+      }, 1500);
+    });
+    obs.observe(turnEl, { childList: <span class="k">true</span>, subtree: <span class="k">true</span>,
+                          characterData: <span class="k">true</span> });
+  });
+}
+</pre>
+
+  <h3>ง. ดึงเนื้อหากลับแบบไม่เพี้ยน</h3>
+  <div class="callout key">
+    <span class="tag">กลไกที่ทำให้ระบบนี้เชื่อถือได้</span>
+    <p>อย่าอ่าน HTML ที่ ChatGPT เรนเดอร์แล้วแปลงกลับเป็น markdown เพราะจะเสียโครงสร้าง เสียอักขระพิเศษ และพังทุกครั้งที่หน้าเว็บเปลี่ยน <strong>ให้บังคับให้โมเดลตอบในบล็อกโค้ดเดียว</strong> แล้วอ่าน <code>textContent</code> ของ <code>pre code</code> ตรง ๆ — ได้ markdown ดิบเป๊ะ ๆ ไม่ผ่านการแปลงใด ๆ และเป็นตัวเลือก DOM ที่ ChatGPT ไม่มีเหตุผลจะเปลี่ยน</p>
+  </div>
+  <p>ประกบด้วย sentinel เพื่อให้ตรวจได้ว่าได้ของถูกตอน และได้ครบไม่ถูกตัดกลางคัน</p>
+<pre><span class="c">ท้าย prompt ทุกอัน ต่อบล็อกนี้เสมอ:</span>
+
+รูปแบบคำตอบ — สำคัญมาก ห้ามผิด:
+ตอบกลับมาเป็นบล็อกโค้ดเดียว ขึ้นต้นด้วย ```markdown เท่านั้น
+บรรทัดแรกในบล็อกคือ  &lt;&lt;&lt;SEC 1.2 BEGIN&gt;&gt;&gt;
+บรรทัดสุดท้ายในบล็อกคือ &lt;&lt;&lt;SEC 1.2 END&gt;&gt;&gt;
+ห้ามเขียนอะไรนอกบล็อกโค้ด ห้ามทักทาย ห้ามสรุปท้าย ห้ามถามกลับ
+</pre>
+<pre><span class="c">// core/extract.js</span>
+<span class="k">const</span> RE = /&lt;&lt;&lt;SEC ([\d.]+) BEGIN&gt;&gt;&gt;([\s\S]*?)&lt;&lt;&lt;SEC \1 END&gt;&gt;&gt;/;
+
+<span class="k">export function</span> extract(rawText, expectId) {
+  <span class="k">const</span> m = rawText.match(RE);
+  <span class="k">if</span> (!m)                    <span class="k">return</span> { status: <span class="s">"truncated"</span> };  <span class="c">// ไม่เจอ END</span>
+  <span class="k">if</span> (m[1] !== expectId)     <span class="k">return</span> { status: <span class="s">"wrong_section"</span> };
+  <span class="k">const</span> body = m[2].trim();
+  <span class="k">if</span> (body.length &lt; 200)     <span class="k">return</span> { status: <span class="s">"refused"</span> };      <span class="c">// สั้นผิดปกติ</span>
+  <span class="k">return</span> { status: <span class="s">"ok"</span>, body, chars: countThaiGraphemes(body) };
+}
+</pre>
+
+  <h3>จ. บริบท: อย่าพึ่งความจำของเธรด</h3>
+  <p>สัญชาตญาณแรกคือคุยในเธรดเดียวยาว ๆ แล้วให้ ChatGPT จำเอง อย่าทำ เพราะสามเหตุผล: เธรดยาวทำให้ตอบช้าลงเรื่อย ๆ จนช้ามากตอนบทท้าย ๆ · โมเดลจะเริ่ม drift และวนพูดซ้ำของเดิม · และถ้าเธรดเสียหายก็เสียทั้งเล่ม</p>
+  <div class="grid2">
+    <div class="card">
+      <h4>กฎการจัดการเธรด</h4>
+      <ul style="margin-bottom:0">
+        <li><strong>หนึ่งเธรดต่อหนึ่งบท</strong> ประมาณ 4–6 เทิร์น ยาวกำลังดี</li>
+        <li>เปิดเธรดใหม่ด้วย <strong>primer</strong> หนึ่งข้อความ: thesis ของเล่ม + voice card + สรุปเรื่องที่ผ่านมา + ศัพท์ที่ตกลงแล้ว</li>
+        <li>เทิร์นถัดไปในเธรดเดียวกันส่งแค่โครงตอน + โควตา เพราะบริบทอยู่ในเธรดแล้ว</li>
+        <li>ความจริงทั้งหมดอยู่ใน IndexedDB ฝั่งเรา เธรดเป็นแค่ที่ทำงานชั่วคราวที่ทิ้งได้</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>จังหวะการยิง</h4>
+      <ul style="margin-bottom:0">
+        <li>หน่วงสุ่ม 4–9 วินาทีระหว่างเทิร์น ไม่ใช่ค่าคงที่</li>
+        <li>หน่วงยาวขึ้น 20–40 วินาทีเมื่อขึ้นเธรดใหม่</li>
+        <li>เพดานต่อชั่วโมงที่ตั้งเองได้ และหยุดเมื่อถึง</li>
+        <li>ปุ่มหยุดที่หยุดได้จริงภายในเทิร์นปัจจุบัน ไม่ใช่รอจนจบเล่ม</li>
+        <li>บันทึกทุกเทิร์นลงดิสก์ก่อนยิงเทิร์นถัดไป เสมอ</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>ฉ. Selector ทั้งหมดอยู่ที่เดียว</h3>
+  <p class="filename">adapter/selectors.json</p>
+<pre>{
+  <span class="s">"composer"</span>:      <span class="s">"#prompt-textarea"</span>,
+  <span class="s">"sendButton"</span>:    <span class="s">"[data-testid='send-button']"</span>,
+  <span class="s">"stopButton"</span>:    <span class="s">"[data-testid='stop-button']"</span>,
+  <span class="s">"assistantTurn"</span>: <span class="s">"[data-message-author-role='assistant']"</span>,
+  <span class="s">"messageId"</span>:     <span class="s">"[data-message-id]"</span>,
+  <span class="s">"codeBlock"</span>:     <span class="s">"pre code"</span>,
+  <span class="s">"copyButton"</span>:    <span class="s">"[data-testid='copy-turn-action-button']"</span>,
+  <span class="s">"modelBadge"</span>:    <span class="s">"[data-testid='model-switcher-dropdown-button']"</span>,
+  <span class="s">"regenerate"</span>:    <span class="s">"[data-testid='regenerate-thread-error-button']"</span>
+}
+</pre>
+  <div class="callout warn">
+    <span class="tag">ค่าเหล่านี้จะพัง ไม่ใช่ถ้า แต่เมื่อไหร่</span>
+    <p>ตัวเลือกข้างบนเป็นค่าตั้งต้นที่ต้อง <strong>เปิด DevTools บน chatgpt.com ยืนยันเองในวันที่ลงมือ</strong> — อย่าเชื่อเอกสารนี้ ChatGPT ใช้คลาสที่สุ่มชื่อ จึงต้องยึด <code>data-testid</code> และ <code>data-message-author-role</code> ซึ่งเปลี่ยนน้อยกว่ามาก ทางแก้เชิงระบบมีสองอย่าง: เก็บไฟล์นี้ไว้ใน <code>chrome.storage</code> ให้ผู้ใช้แก้เองได้โดยไม่ต้องอัปเดตส่วนขยาย และเขียน <strong>healthcheck</strong> ที่ยิงคำถามสั้น ๆ ว่า “ตอบกลับมาว่า OK เฉย ๆ” แล้วไล่ตรวจทุก selector ก่อนเริ่มงานจริงทุกครั้ง ถ้าไม่ผ่านให้หยุดทันทีพร้อมบอกว่าตัวไหนหาย ดีกว่าปล่อยให้พังกลางเล่มที่ตอนที่ 31</p>
+  </div>
+</section>
+
+<section id="pipeline">
+  <h2><span class="n">04</span>สายการผลิต</h2>
+  <p>ป้ายกำกับบอกว่าใครทำ: <span style="color:var(--cyan);font-family:var(--font-mono);font-size:.8em">GPT</span> คือเทิร์นที่ต้องไปคุยกับ ChatGPT · <span style="color:var(--ink-3);font-family:var(--font-mono);font-size:.8em">AUTO</span> คือส่วนขยายทำเองในเครื่อง · <span style="color:var(--magenta);font-family:var(--font-mono);font-size:.8em">HUMAN</span> คือประตูที่คุณต้องอนุมัติ</p>
+
+  <div class="pipe">
+    <div class="stage">
+      <div class="num">00</div>
+      <div><p class="t">รับสเปก<span class="chip auto">auto</span></p><p class="d">หัวข้อ กลุ่มผู้อ่าน โทน ภาษา จำนวนหน้าเป้าหมาย ขนาดเล่ม ระดับภาพประกอบ → บันทึกเป็น <code>book.yaml</code> ใน IndexedDB</p></div>
+    </div>
+    <div class="stage">
+      <div class="num">01</div>
+      <div><p class="t">Healthcheck + calibration<span class="chip auto">auto</span></p><p class="d">ตรวจ selector ทุกตัวด้วยเทิร์นทดสอบสั้น ๆ แล้วเรียงพิมพ์ข้อความตัวอย่างเพื่อหาอักษรต่อหน้าของโปรไฟล์เล่มนี้ — ทั้งสองอย่างต้องผ่านก่อนถึงเริ่มงานจริง</p></div>
+    </div>
+    <div class="stage">
+      <div class="num">02</div>
+      <div><p class="t">ร่างสารบัญ<span class="chip gpt">gpt</span></p><p class="d">หนึ่งเทิร์น ตอบเป็น JSON ในบล็อกโค้ด: บท → ตอน → จังหวะการเล่า พร้อมน้ำหนักความยาวรายบท ถ้า JSON ไม่ผ่าน schema ให้ยิงซ้ำพร้อมแนบข้อผิดพลาด</p></div>
+    </div>
+    <div class="stage gate">
+      <div class="num">03</div>
+      <div><p class="t">ประตูที่ 1 — อนุมัติสารบัญ<span class="chip">human</span></p><p class="d">แก้ชื่อบท สลับลำดับ ลบ/เพิ่มตอน ล็อกตอนที่ห้ามแตะ ปรับน้ำหนัก ระบบคำนวณโควตาอักษรใหม่ทันที — นี่คือจุดที่แก้ทิศทางได้ถูกที่สุด</p></div>
+    </div>
+    <div class="stage">
+      <div class="num">04</div>
+      <div><p class="t">เขียนเนื้อหา ตอนละเทิร์น<span class="chip gpt">gpt</span></p><p class="d">วนทีละตอน เปิดเธรดใหม่ทุกบทพร้อม primer · แกะ sentinel · นับอักษร · เขียนลงดิสก์ทันที · แถบสถานะเดินให้เห็นว่าอยู่ตอนที่เท่าไรจากทั้งหมด</p></div>
+    </div>
+    <div class="stage">
+      <div class="num">05</div>
+      <div><p class="t">ตรวจความสอดคล้อง<span class="chip gpt">gpt</span></p><p class="d">เทิร์นละบท: ส่งสรุปทุกตอนในบทไปให้ตรวจว่าซ้ำกับบทก่อนไหม ศัพท์ตรงกันไหม คำสัญญาที่ให้ไว้จ่ายคืนครบไหม แล้วเขียนบทเชื่อมหัว–ท้ายบท</p></div>
+    </div>
+    <div class="stage">
+      <div class="num">06</div>
+      <div><p class="t">เรียงพิมพ์ → นับหน้าจริง<span class="chip auto">auto</span></p><p class="d">Typst WASM คอมไพล์ทั้งเล่มในแท็บ อ่านจำนวนหน้าจาก PDF ที่ได้ ไม่ใช่จากการประมาณ ใช้เวลาไม่ถึงวินาที</p></div>
+    </div>
+    <div class="loop">↺ หน้าไม่ตรงเป้า → กลับไปขั้น 04 เฉพาะตอนที่ปลดล็อกไว้ สูงสุด 3 รอบ</div>
+    <div class="stage gate">
+      <div class="num">07</div>
+      <div><p class="t">ประตูที่ 2 — แก้ไข/จัดหน้า<span class="chip">human</span></p><p class="d">อ่านต้นฉบับคู่กับหน้ากระดาษจริง สั่งเขียนตอนใดตอนหนึ่งใหม่ ย้ายภาพ แก้บรรทัดหลุด เปลี่ยนฟอนต์/ระยะบรรทัด คอมไพล์ใหม่ทันทีทุกครั้ง</p></div>
+    </div>
+    <div class="stage">
+      <div class="num">08</div>
+      <div><p class="t">ปกและภาพ<span class="chip gpt">gpt</span></p><p class="d">ให้ ChatGPT เขียน style token ของเล่ม → ประกอบ prompt ปกหน้า/ปกหลัง → สร้างภาพในแท็บเดียวกัน → ดึงภาพกลับเก็บลง IndexedDB (ดูข้อจำกัดความละเอียดในหัวข้อ 13)</p></div>
+    </div>
+    <div class="stage">
+      <div class="num">09</div>
+      <div><p class="t">Preflight + ส่งออก<span class="chip auto">auto</span></p><p class="d">ตรวจ 14 ข้อ แล้วดาวน์โหลด <code>interior.pdf</code> · <code>cover.pdf</code> · <code>book.epub</code> · <code>cover-prompts.md</code></p></div>
+    </div>
+  </div>
+</section>
+
+<section id="spec">
+  <h2><span class="n">05</span>ไฟล์สเปกหนังสือ</h2>
+  <p>ทุกอย่างตัดสินใจจากออบเจ็กต์เดียวนี้ เก็บใน IndexedDB และส่งออกเป็นไฟล์ได้ เพื่อให้ย้ายเครื่อง สำรอง และแชร์โปรเจกต์ได้</p>
+
+  <p class="filename">book.yaml</p>
+<pre><span class="c"># ---- สิ่งที่ผู้ใช้กรอก ----</span>
+<span class="k">topic</span>: <span class="s">"การเงินส่วนบุคคลสำหรับฟรีแลนซ์ไทย"</span>
+<span class="k">audience</span>: <span class="s">"ฟรีแลนซ์อายุ 25–40 รายได้ไม่สม่ำเสมอ ไม่มีพื้นฐานการเงิน"</span>
+<span class="k">language</span>: <span class="s">th</span>            <span class="c"># th | en — มีผลถึงตัวตัดคำและฟอนต์</span>
+<span class="k">tone</span>: <span class="s">"เป็นกันเอง ตรงไปตรงมา มีตัวเลขจริง ไม่ขายฝัน"</span>
+<span class="k">target_pages</span>: <span class="s">200</span>
+<span class="k">page_tolerance</span>: <span class="s">2</span>
+<span class="k">illustration_level</span>: <span class="s">light</span>
+
+<span class="c"># ---- โปรไฟล์เล่ม: ตัวกำหนดทุกอย่างของการจัดหน้า ----</span>
+<span class="k">trim</span>: { <span class="k">preset</span>: <span class="s">a5</span>, <span class="k">width_mm</span>: <span class="s">148</span>, <span class="k">height_mm</span>: <span class="s">210</span>, <span class="k">bleed_mm</span>: <span class="s">3</span> }
+<span class="k">typography</span>:
+  <span class="k">body_font</span>: <span class="s">"IBM Plex Sans Thai"</span>   <span class="c"># ต้องมีไฟล์อยู่ใน fonts/</span>
+  <span class="k">head_font</span>: <span class="s">"Noto Serif Thai"</span>
+  <span class="k">size_pt</span>: <span class="s">15</span>                     <span class="c"># ไทยต้องใหญ่กว่าอังกฤษ 2–3 pt</span>
+  <span class="k">leading</span>: <span class="s">1.62</span>                   <span class="c"># เผื่อวรรณยุกต์สองชั้น</span>
+  <span class="k">margins_mm</span>: { <span class="k">inner</span>: <span class="s">18</span>, <span class="k">outer</span>: <span class="s">14</span>, <span class="k">top</span>: <span class="s">16</span>, <span class="k">bottom</span>: <span class="s">18</span> }
+  <span class="k">chapter_starts</span>: <span class="s">recto</span>
+
+<span class="k">front_matter</span>: [half_title, title, copyright, toc, foreword]
+<span class="k">back_matter</span>:  [glossary, references, about_author]
+
+<span class="c"># ---- การขับ ChatGPT ----</span>
+<span class="k">transport</span>:
+  <span class="k">kind</span>: <span class="s">chatgpt_tab</span>          <span class="c"># chatgpt_tab | api | fake</span>
+  <span class="k">thread_per</span>: <span class="s">chapter</span>         <span class="c"># chapter | book | section</span>
+  <span class="k">delay_ms</span>: [<span class="s">4000</span>, <span class="s">9000</span>]      <span class="c"># หน่วงสุ่มระหว่างเทิร์น</span>
+  <span class="k">max_turns_per_hour</span>: <span class="s">45</span>
+  <span class="k">expected_model</span>: <span class="s">"GPT-5.2"</span>   <span class="c"># หยุดถ้าเว็บสลับโมเดลเอง</span>
+
+<span class="c"># ---- ค่าที่ระบบเติมเอง ----</span>
+<span class="k">calibration</span>: { <span class="k">chars_per_page</span>: <span class="s">1780</span>, <span class="k">profile_hash</span>: <span class="s">"a5-plexthai-15-162"</span> }
+</pre>
+
+  <p class="filename">โครงข้อมูลใน IndexedDB</p>
+<pre>books/{id}         <span class="c"># สเปก + สถานะงาน + คิวเทิร์นที่เหลือ</span>
+outline/{id}       <span class="c"># สารบัญ + โควตาอักษรรายตอน</span>
+sections/{id}/{sid} <span class="c"># { md, chars, status, locked, history[] }</span>
+bible/{id}         <span class="c"># ศัพท์ ตัวอย่างที่ใช้ไปแล้ว คำสัญญาค้างจ่าย</span>
+turns/{id}/{n}     <span class="c"># บันทึกดิบทุกเทิร์น: prompt, raw, สถานะ, เวลา</span>
+assets/{id}/{k}    <span class="c"># Blob ของภาพปกและภาพประกอบ</span>
+</pre>
+  <p class="note">เก็บ <code>turns</code> ดิบไว้ทุกเทิร์น อย่าเสียดายที่ — เวลาระบบทำตัวแปลก บันทึกดิบคือสิ่งเดียวที่บอกได้ว่า ChatGPT ตอบอะไรมาจริง ๆ และเป็นสิ่งที่ทำให้ resume ได้โดยไม่ต้องยิงซ้ำ</p>
+</section>
+
+<section id="pages">
+  <h2><span class="n">06</span>คุมจำนวนหน้าให้ตรงจริง</h2>
+  <p>นี่คือส่วนที่ไม่มีโปรเจกต์ไหนทำได้ ปัญหาคือจำนวนหน้าไม่ใช่คุณสมบัติของข้อความ แต่เป็นผลลัพธ์ของข้อความ × ฟอนต์ × ขนาด × ระยะบรรทัด × ขอบ × ภาพ × กฎการขึ้นหน้าใหม่ วิธีเดียวที่ได้ผลคือ <strong>ประมาณ → เรียงพิมพ์ → วัด → แก้ → เรียงพิมพ์ใหม่</strong> ซึ่งเป็นไปได้เพราะ Typst WASM คอมไพล์เสร็จในเสี้ยววินาที</p>
+
+  <h3>ก. Calibration ครั้งเดียวต่อโปรไฟล์</h3>
+  <p>ก่อนเขียนเนื้อหาแม้แต่ตัวเดียว ให้เรียงพิมพ์ข้อความตัวอย่างที่รู้จำนวนอักษรแน่นอน (แนะนำ 20,000 อักษรจากเนื้อหาแนวเดียวกัน ไม่ใช่ lorem เพราะความยาวคำมีผล) ด้วยโปรไฟล์จริง แล้วหาร</p>
+<pre>chars_per_page = chars_sample / pages_measured
+</pre>
+  <p>เก็บผลใต้ hash ของโปรไฟล์ ถ้าผู้ใช้เปลี่ยนขนาดฟอนต์หรือขนาดเล่ม hash เปลี่ยน ระบบ calibrate ใหม่เองอัตโนมัติ</p>
+
+  <div class="callout warn">
+    <span class="tag">อย่านับ “คำ” กับภาษาไทย</span>
+    <p>ไทยไม่เว้นวรรคระหว่างคำ การนับคำจึงต้องพึ่งตัวตัดคำและคลาดเคลื่อนเป็นสิบเปอร์เซ็นต์ ให้ตั้งงบเป็น <strong>จำนวนอักษร</strong> สำหรับ <code>th</code> และจำนวนคำสำหรับ <code>en</code> แล้วเก็บเป็นหน่วยกลางชื่อ <em>content units</em> เพื่อไม่ให้โค้ดสองภาษาแยกทางกัน</p>
+  </div>
+
+  <h3>ข. แปลงจำนวนหน้าเป็นงบเนื้อหา</h3>
+<pre><span class="c">// 1) หักหน้าที่ไม่ใช่เนื้อหา</span>
+front = 6                          <span class="c">// ปกใน ชื่อเรื่อง ลิขสิทธิ์ คำนำ + หน้าว่างคู่</span>
+toc   = Math.ceil(entries / 34)    <span class="c">// สารบัญยาวตามจำนวนหัวข้อ</span>
+back  = 6
+bodyPages = targetPages - front - toc - back
+
+<span class="c">// 2) หักที่ว่างเชิงโครงสร้าง — จุดที่ทุกโปรเจกต์ลืม</span>
+<span class="c">//    หัวบทเริ่มต่ำลง ~1/3 หน้า + ท้ายบทเหลือหน้าไม่เต็มเฉลี่ยครึ่งหน้า</span>
+<span class="c">//    + บทขึ้นหน้าขวาเสมอ ทำให้เกิดหน้าว่างเฉลี่ย 0.5 หน้า/บท</span>
+textPages = bodyPages - chapters * 1.3
+
+<span class="c">// 3) หักพื้นที่ภาพ</span>
+textPages -= figures.reduce((s, f) =&gt; s + f.heightRatio, 0)
+
+<span class="c">// 4) กระจายตามน้ำหนักบท</span>
+budget = textPages * charsPerPage
+quota[s] = budget * weight[s] / totalWeight
+</pre>
+
+  <div class="card">
+    <h4>ตัวอย่างเดินตัวเลขจริง</h4>
+    <p style="margin-bottom:.6rem">A5 · 15pt · leading 1.62 · <code>chars_per_page = 750</code> (ค่าที่วัดได้จริง) · เป้า 200 หน้า · 12 บท · 48 ตอน</p>
+    <div class="scroll" style="margin-bottom:0">
+      <table>
+        <tbody>
+          <tr><td>หน้าต้นเล่ม + สารบัญ + ท้ายเล่ม</td><td class="num">6 + 2 + 6 = 14</td></tr>
+          <tr><td>หน้าเนื้อหาดิบ</td><td class="num">186</td></tr>
+          <tr><td>ที่ว่างเชิงโครงสร้าง 12 บท × 1.3</td><td class="num">−15.6</td></tr>
+          <tr><td>ภาพประกอบ 18 ภาพ × 0.35 หน้า</td><td class="num">−6.3</td></tr>
+          <tr><td><strong>หน้าที่เป็นตัวอักษรจริง</strong></td><td class="num"><strong>164.1</strong></td></tr>
+          <tr><td><strong>งบรวม</strong></td><td class="num"><strong>123,075 อักษร</strong></td></tr>
+          <tr><td>เฉลี่ยต่อตอน 48 ตอน</td><td class="num">≈ 2,564 อักษร</td></tr>
+          <tr><td>เพดานที่ ChatGPT ตอบจบในเทิร์นเดียว</td><td class="num">≈ 8,000 อักษร</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p class="note">ควรออกแบบให้ <strong>หนึ่งตอน = หนึ่งเทิร์น</strong> ที่ขนาด 2,000–8,000 อักษร ถ้าโควตาตอนไหนเกินเพดาน ให้แตกเป็นสองตอนตั้งแต่ขั้นสารบัญ อย่าไปแก้ทีหลังด้วยการสั่งเขียนต่อ · ระบบตรวจให้ตั้งแต่ตอนคำนวณโควตา และเตือนถ้าเป้าหมายจำนวนหน้าไม่สมเหตุสมผลกับจำนวนบท</p>
+
+  <h3>ค. ลูปป้อนกลับหลังเรียงพิมพ์</h3>
+<pre><span class="k">for</span> (<span class="k">let</span> round = 1; round &lt;= 3; round++) {
+  <span class="k">const</span> pdf   = <span class="k">await</span> typst.compile(assemble(book));
+  <span class="k">const</span> pages = pdf.pageCount;              <span class="c">// จากไฟล์จริง</span>
+  <span class="k">const</span> err   = pages - book.targetPages;
+
+  <span class="k">if</span> (Math.abs(err) &lt;= book.tolerance) <span class="k">break</span>;
+
+  <span class="k">if</span> (Math.abs(err) / book.targetPages &lt;= 0.02) {
+    nudgeLayout(err);        <span class="c">// ไม่แตะเนื้อหา: leading ±2%, ระยะย่อหน้า, widow/orphan</span>
+  } <span class="k">else</span> {
+    <span class="k">for</span> (<span class="k">const</span> s <span class="k">of</span> pickElastic(err)) {
+      <span class="k">await</span> rewriteSection(s, errShare(s) * charsPerPage);  <span class="c">// ← ยิง ChatGPT</span>
+    }
+  }
+}
+padToEven();                 <span class="c">// โรงพิมพ์ต้องการหน้าคู่เสมอ</span>
+</pre>
+
+  <div class="callout key">
+    <span class="tag">สองอย่างที่เพิ่งค้นพบตอนสร้างจริง และเป็นตัวชี้ขาดว่าลูปลู่เข้าหรือไม่</span>
+    <p><strong>1. อย่ากระจายส่วนต่างให้ทุกตอนเท่า ๆ กัน</strong> — เวอร์ชันแรกทำแบบนั้นแล้วลูปไม่ลู่เข้าเลย วนอยู่ที่ 205–208 หน้าจากเป้า 200 ด้วยเหตุผลสองข้อ: ส่วนแบ่งของแต่ละตอนเล็กจนต่ำกว่าเกณฑ์ขั้นต่ำแล้วถูกตัดทิ้ง ส่วนต่างจึงถูกแก้ไม่ครบ และโมเดลคุมความยาวได้แค่ราว ±15% ทุกตอนที่แตะจึงเติมเสียงรบกวนเข้ามา ยิ่งแตะหลายตอนเสียงยิ่งกลบสัญญาณ <strong>ต้องทำตรงข้าม: รวมส่วนต่างไว้กับตอนที่มีที่ว่างมากที่สุด แตะให้น้อยตอนที่สุด และใช้ส่วนต่างให้ครบจำนวน ไม่ปัดทิ้ง</strong></p>
+    <p><strong>2. การคอมไพล์เล่มจริงครั้งแรกคือข้อมูล calibration ที่ดีที่สุดที่มี</strong> — ตัวอย่างที่ใช้ตอน calibrate เป็นข้อความล้วน ไม่มีหัวบท ไม่มีย่อหน้าสั้น พอเจอเล่มจริงค่าจึงคลาด ถ้าพลาดเกิน 3% ให้คำนวณอักษรต่อหน้าใหม่จากเล่มที่เพิ่งวัด แล้ว <strong>ตั้งโควตาใหม่ทุกตอนจากฐานที่ถูก</strong> ซึ่งย้ายกรอบ ±25% ไปด้วย ทำให้มีที่ว่างให้แก้อีกครั้ง ทดสอบแล้วแม้ตั้งค่าเริ่มต้นผิดไป +33% หรือ −25% ลูปก็ลู่เข้าใน 3 รอบ</p>
+  </div>
+
+  <div class="callout">
+    <span class="tag">กติกาที่ทำให้ลูปนี้ไม่พังคุณภาพ</span>
+    <p><strong>ห้ามสั่ง “เขียนให้ยาวขึ้น” ลอย ๆ</strong> เพราะโมเดลจะเติมน้ำ คำสั่งยืดต้องระบุวิธี — เพิ่มตัวอย่างสถานการณ์จริงหนึ่งเคส เพิ่มตัวเลข/ข้อมูลอ้างอิง เพิ่มขั้นตอนปฏิบัติ ส่วนคำสั่งหดต้องระบุ — รวมย่อหน้าที่พูดเรื่องเดียวกัน ตัดคำขยายซ้ำ ย้ายรายละเอียดปลีกย่อยไปอภิธานศัพท์ และทุกครั้งต้องส่ง <code>takeaways</code> กลับเข้าไปเป็นข้อห้ามตัดทิ้ง พร้อมกรอบ ±25% ต่อตอนที่ลูปห้ามข้าม</p>
+  </div>
+
+  <h3>ง. ตารางขนาดเล่ม</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>พรีเซ็ต</th><th class="num">ขนาด</th><th>เหมาะกับ</th><th class="num">อักษรไทย/หน้า*</th></tr></thead>
+      <tbody>
+        <tr><td>pocket</td><td class="num">11.3 × 18.5 ซม.</td><td>พ็อกเก็ตบุ๊กไทย นิยาย ความเรียง</td><td class="num">462</td></tr>
+        <tr><td>a5</td><td class="num">14.8 × 21.0 ซม.</td><td>ค่าเริ่มต้นสำหรับหนังสือไทยทั่วไป</td><td class="num">750</td></tr>
+        <tr><td>thai-trade</td><td class="num">14.5 × 21.0 ซม.</td><td>How-to ธุรกิจ พัฒนาตัวเอง</td><td class="num">732</td></tr>
+        <tr><td>us-trade</td><td class="num">6 × 9 นิ้ว</td><td>มาตรฐาน non-fiction ของ KDP</td><td class="num">833</td></tr>
+        <tr><td>digest</td><td class="num">5.5 × 8.5 นิ้ว</td><td>เล่มเล็กลง หนาขึ้น จับถนัด</td><td class="num">732</td></tr>
+        <tr><td>textbook</td><td class="num">16 × 23.5 ซม.</td><td>ตำรา คู่มือ มีตาราง/โค้ด</td><td class="num">909</td></tr>
+        <tr><td>workbook</td><td class="num">8.5 × 11 นิ้ว</td><td>เวิร์กบุ๊ก มีที่ว่างให้เขียน</td><td class="num">1,429</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout warn">
+    <span class="tag">แก้ตัวเลข — ค่าชุดแรกที่เขียนไว้ผิดไป 2.4 เท่า</span>
+    <p>ตัวเลขในตารางนี้ตอนแรกผมประมาณจากค่าอ้างอิงทั่วไป แล้วได้ราว 1,150–3,100 พอเอาไปวัดจริงด้วยคอมไพเลอร์ Typst ด้วยข้อความไทย 30,004 อักษร ปรากฏว่าต่ำกว่าที่ประมาณไว้ราว 2.4 เท่าทุกช่อง ตารางข้างบนคือค่าที่วัดได้จริง (Sarabun 15pt · line-height 1.62 · ขอบ 18/14/16/18 มม. · ไม่จัดชิดขอบสองข้าง) เหตุผลที่พลาดคือค่าอ้างอิงทั่วไปเป็นของภาษาอังกฤษที่ 11pt ส่วนไทยต้องใช้ 15pt และเผื่อระยะบรรทัดมากกว่า — <strong>นี่คือเหตุผลที่ระบบต้อง calibrate เอง ไม่ใช่เชื่อตาราง</strong> รวมถึงตารางนี้</p>
+  </div>
+
+  <h3>จ. ขอบในต้องโตตามความหนาเล่ม</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th class="num">จำนวนหน้า</th><th class="num">ขอบในขั้นต่ำ</th><th class="num">ขอบนอก/บน/ล่าง</th></tr></thead>
+      <tbody>
+        <tr><td class="num">24–150</td><td class="num">0.375 นิ้ว (9.5 มม.)</td><td class="num" rowspan="5">0.25 นิ้ว ถ้าไม่มีเลือด<br>0.375 นิ้ว ถ้ามีเลือด</td></tr>
+        <tr><td class="num">151–300</td><td class="num">0.500 นิ้ว (12.7 มม.)</td></tr>
+        <tr><td class="num">301–500</td><td class="num">0.625 นิ้ว (15.9 มม.)</td></tr>
+        <tr><td class="num">501–700</td><td class="num">0.750 นิ้ว (19.1 มม.)</td></tr>
+        <tr><td class="num">701–828</td><td class="num">0.875 นิ้ว (22.2 มม.)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">เกณฑ์ตาม <a href="https://kdp.amazon.com/en_US/help/topic/GVBQ3CMEQW3W2VL6">คู่มือ Trim Size, Bleed, and Margins ของ KDP</a> โรงพิมพ์ไทยมักยืดหยุ่นกว่า แต่ใช้ค่านี้แล้วปลอดภัยทั้งสองทาง</p>
+</section>
+
+<section id="outline">
+  <h2><span class="n">07</span>สารบัญและเนื้อหา</h2>
+
+  <h3>สารบัญคือข้อมูล ไม่ใช่ข้อความ</h3>
+  <p>ให้ ChatGPT ตอบเป็น JSON ในบล็อกโค้ด แล้วตรวจด้วย schema ถ้าไม่ผ่าน ให้ยิงซ้ำโดยแนบข้อความ error ไปด้วย — โมเดลแก้ JSON ที่ผิดได้ดีเมื่อบอกว่าผิดตรงไหน</p>
+<pre>{
+  <span class="s">"title"</span>: <span class="s">"เงินไม่เข้าทุกเดือน แต่ชีวิตต้องเดินทุกวัน"</span>,
+  <span class="s">"subtitle"</span>: <span class="s">"คู่มือการเงินฉบับฟรีแลนซ์"</span>,
+  <span class="s">"thesis"</span>: <span class="s">"ฟรีแลนซ์ไม่ได้ต้องการวินัยมากขึ้น แต่ต้องการระบบที่ทนต่อรายได้ไม่สม่ำเสมอ"</span>,
+  <span class="s">"chapters"</span>: [{
+    <span class="s">"n"</span>: 1,
+    <span class="s">"title"</span>: <span class="s">"ทำไมงบรายเดือนถึงใช้กับคุณไม่ได้"</span>,
+    <span class="s">"weight"</span>: 0.9,
+    <span class="s">"objective"</span>: <span class="s">"ให้ผู้อ่านเลิกใช้กรอบเงินเดือนประจำ"</span>,
+    <span class="s">"promises"</span>: [<span class="s">"จะสอนวิธีคิดฐานรายได้ในบทที่ 3"</span>],
+    <span class="s">"sections"</span>: [{
+      <span class="s">"id"</span>: <span class="s">"1.1"</span>,
+      <span class="s">"title"</span>: <span class="s">"กับดักของคำว่ารายได้เฉลี่ย"</span>,
+      <span class="s">"beats"</span>: [<span class="s">"เล่าเคสจริง"</span>, <span class="s">"ชี้จุดที่ค่าเฉลี่ยหลอกตา"</span>, <span class="s">"สรุปเป็นกฎ"</span>],
+      <span class="s">"takeaways"</span>: [<span class="s">"ค่าเฉลี่ยไม่บอกความเสี่ยงของเดือนที่แย่ที่สุด"</span>],
+      <span class="s">"elastic"</span>: <span class="k">true</span>
+    }]
+  }]
+}
+</pre>
+  <p>สองข้อที่ต้องบังคับใน prompt สารบัญ: <strong>ต้องมี thesis เดียวทั้งเล่ม</strong> ที่ทุกบทรับใช้ และ <strong>แต่ละบทต้องระบุว่าเพิ่มอะไรที่บทก่อนหน้ายังไม่มี</strong> ข้อหลังคือยาแก้อาการ “หนังสือ AI 12 บทที่พูดเรื่องเดียวกัน 12 รอบ”</p>
+
+  <h3>Book Bible — ความจำที่เราถือเอง</h3>
+  <p>เพราะเราสลับเธรดทุกบท ความจำจึงต้องอยู่ฝั่งเรา ไม่ใช่ฝั่ง ChatGPT ไฟล์นี้คือสิ่งที่ทำให้หนังสือเป็นเล่มเดียวกัน</p>
+  <div class="grid2">
+    <div class="card">
+      <h4>ใส่ลง primer ทุกเธรดใหม่</h4>
+      <ul style="margin-bottom:0">
+        <li><code>voice_card</code> — โทน ความยาวประโยค สรรพนาม คำที่ห้ามใช้</li>
+        <li><code>glossary</code> — ศัพท์ + นิยามที่ตกลงแล้ว</li>
+        <li><code>used_examples</code> — เคส/ตัวเลขที่ใช้ไปแล้ว ห้ามซ้ำ</li>
+        <li><code>open_promises</code> — สิ่งที่บทก่อนบอกว่าจะเล่าทีหลัง</li>
+        <li>สรุปหนึ่งบรรทัดของทุกบทที่ผ่านมา</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>เขียนกลับหลังจบทุกเทิร์น</h4>
+      <ul style="margin-bottom:0">
+        <li>สรุปตอนนี้ 2 ประโยค</li>
+        <li>ศัพท์ใหม่ที่บัญญัติขึ้น</li>
+        <li>ตัวอย่าง/ตัวเลขที่เพิ่งใช้</li>
+        <li>คำสัญญาที่เพิ่งให้ และที่เพิ่งจ่ายคืน</li>
+        <li>จำนวนอักษรจริง เทียบโควตา</li>
+      </ul>
+    </div>
+  </div>
+  <p class="note">ให้ ChatGPT สรุปตอนที่เพิ่งเขียนต่อท้ายในเทิร์นเดียวกัน โดยใส่ไว้ในบล็อก sentinel ที่สอง <code>&lt;&lt;&lt;META 1.2 …&gt;&gt;&gt;</code> จะประหยัดไปหนึ่งเทิร์นต่อหนึ่งตอน — คิดเป็นการประหยัดเกือบครึ่งของจำนวนเทิร์นทั้งเล่ม</p>
+
+  <h3>โครง prompt เขียนตอน</h3>
+<pre><span class="k">ROLE</span>  คุณคือนักเขียน non-fiction ที่เขียนตามโทนใน voice_card เท่านั้น
+
+<span class="k">BOOK</span>  thesis: {thesis}
+      บทนี้: {chapter.title} — วัตถุประสงค์: {chapter.objective}
+      ตอนนี้: {section.id} {section.title}
+
+<span class="k">STATE</span> ก่อนหน้า: {summaries_of_last_3}
+      ถัดไปคือ: {next_section.title} — จบตอนนี้ให้ส่งต่อพอดี ห้ามล้ำ
+      ศัพท์ที่ต้องใช้ตามนิยามเดิม: {glossary}
+      ห้ามยกซ้ำ: {used_examples}
+      ต้องจ่ายคืนคำสัญญา: {promises_due_here}
+
+<span class="k">SHAPE</span> เดินตามจังหวะนี้: {beats}
+      ต้องให้ผู้อ่านได้: {takeaways}
+      ความยาว {quota} อักษร (±10%) นับเฉพาะตัวอักษร ไม่รวมช่องว่าง
+      หัวข้อย่อยใช้ ### เท่านั้น ห้ามใช้ # หรือ ##
+
+<span class="k">RULES</span> ห้ามขึ้นต้นด้วยการทวนชื่อหัวข้อ
+      ห้ามปิดท้ายด้วย "สรุปแล้ว..." ถ้าไม่ได้เพิ่มอะไรใหม่
+      ตัวเลขทุกตัวต้องระบุที่มา หรือกำกับว่าเป็นตัวอย่างสมมติ
+
+<span class="k">OUTPUT</span> ตอบเป็นบล็อกโค้ดเดียว ```markdown
+       บรรทัดแรก  &lt;&lt;&lt;SEC 1.2 BEGIN&gt;&gt;&gt;
+       เนื้อหา
+       &lt;&lt;&lt;SEC 1.2 END&gt;&gt;&gt;
+       &lt;&lt;&lt;META 1.2 BEGIN&gt;&gt;&gt;
+       {"summary":"...","new_terms":[],"examples":[],"promises":[]}
+       &lt;&lt;&lt;META 1.2 END&gt;&gt;&gt;
+       ห้ามเขียนอะไรนอกบล็อกโค้ด ห้ามทักทาย ห้ามถามกลับ
+</pre>
+</section>
+
+<section id="layout">
+  <h2><span class="n">08</span>เรียงพิมพ์ใน WASM</h2>
+  <p>การเลือกเครื่องมือเรียงพิมพ์เคยเป็นการตัดสินใจที่ยาก แต่พอโจทย์บังคับว่า “ต้องรันในเบราว์เซอร์ ไม่มีเซิร์ฟเวอร์” คำตอบก็เหลือทางเดียว</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>ตัวเลือก</th><th>รันในส่วนขยายได้ไหม</th><th>ประเมิน</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Typst ผ่าน typst.ts</strong><br><span class="note">เลือกตัวนี้</span></td>
+          <td>ได้ — WASM · ต้องเปิด <code>wasm-unsafe-eval</code> ใน CSP</td>
+          <td>คอมไพล์ 200 หน้าในระดับต่ำกว่าวินาที ทำให้ทั้งลูปนับหน้าและพรีวิวสด ๆ เป็นไปได้ · เทมเพลตเขียนเป็นภาษาโปรแกรมจริง ทำโปรไฟล์ขนาดเล่มเป็นข้อมูลได้ · คุมขอบ/สันใน/หน้าคู่-คี่ครบ</td>
+        </tr>
+        <tr>
+          <td>XeLaTeX / LuaLaTeX</td>
+          <td>ไม่ได้ในทางปฏิบัติ — TeX ทั้งกองเป็นร้อยเมกะไบต์</td>
+          <td>คุณภาพจัดบรรทัดดีที่สุดและมี <code>babel-thai</code> แต่ไม่เข้ากับข้อจำกัดของส่วนขยาย</td>
+        </tr>
+        <tr>
+          <td>HTML + CSS Paged Media</td>
+          <td>ได้ผ่าน Paged.js</td>
+          <td>ใช้ของที่คุ้นอยู่แล้ว แต่จัดคำในบรรทัดสู้ไม่ได้ คุมหน้าคู่-คี่และสันในได้จำกัด และการนับหน้าเชื่อถือได้น้อยกว่า</td>
+        </tr>
+        <tr>
+          <td><code>window.print()</code></td>
+          <td>ได้ แต่ควบคุมไม่ได้</td>
+          <td>ขึ้นกับไดรเวอร์เครื่องพิมพ์ของผู้ใช้ ไม่ฝังฟอนต์ ไม่มีตัดตก ไม่ใช่ไฟล์ส่งโรงพิมพ์</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout key">
+    <span class="tag">อุปสรรคจริงที่เจอตอนสร้าง และทางแก้</span>
+    <p><code>'wasm-unsafe-eval'</code> <strong>ไม่พอ</strong> — ไลบรารี typst.ts มีบรรทัด <code>new Function('m','return import(m)')</code> อยู่ในเส้นทางโหลดฟอนต์ CSP ของหน้า extension อนุญาตเฉพาะ WebAssembly ไม่ได้อนุญาต <code>new Function</code> ทั้งไฟล์จึงพังทันทีที่โหลดฟอนต์ และข้อความ error ไม่ได้ชี้ไปที่สาเหตุ</p>
+    <p><strong>ทางแก้คือหน้า sandbox</strong> — ประกาศหน้าหนึ่งไว้ใน <code>manifest.sandbox.pages</code> หน้านั้นจะได้ CSP ที่ผ่อนคลายกว่า (ใส่ <code>'unsafe-eval'</code> ได้) แลกกับการเรียก <code>chrome.*</code> ไม่ได้ และ origin เป็น opaque จน <code>fetch</code> ไฟล์ของส่วนขยายเองไม่ได้ ทางออกคือ <strong>ให้หน้าแม่อ่านไฟล์ทั้งหมดแล้วส่งไบต์เข้าไปทาง postMessage</strong> ทั้งซอร์สของไลบรารี ไฟล์ wasm และไฟล์ฟอนต์ ตัวไลบรารีโหลดผ่าน blob URL เพราะโมดูล ES ถูกดึงแบบ CORS เสมอ ส่วนฟอนต์ป้อนผ่าน <code>fetcher</code> ของเราเองที่คืนไบต์ที่ส่งเข้ามา ไม่ยิงเครือข่ายเลย</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">อีกสองอย่างที่ต้องรู้</span>
+    <p><strong>ฟอนต์</strong> — คอมไพเลอร์ในเบราว์เซอร์ไม่เห็นฟอนต์ของระบบ ต้องแนบไฟล์ <code>.ttf</code> เข้าไปในส่วนขยาย · <strong>query ต้องคอมไพล์ก่อน</strong> — ฟังก์ชัน <code>$typst.query()</code> ที่ไลบรารีให้มาสร้าง world แล้วถามเลยโดยไม่สั่งประมวลผลเอกสารก่อน ฝั่ง Rust จึงตอบว่า <em>document is not compiled</em> ต้องลงไปใช้ <code>runWithWorld</code> เองแล้วเรียก <code>compile()</code> ก่อนถาม</p>
+  </div>
+
+  <h3>ความเร็วที่วัดได้จริง</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th class="num">ขนาดเล่ม</th><th class="num">เวลาคอมไพล์</th><th>ใช้ทำอะไรได้</th></tr></thead>
+      <tbody>
+        <tr><td class="num">2 หน้า</td><td class="num">4–55 มิลลิวินาที</td><td>ตรวจสุขภาพ, พรีวิวรายตอน</td></tr>
+        <tr><td class="num">40 หน้า</td><td class="num">0.9 วินาที</td><td>พรีวิวสดขณะแก้ไขยังพอไหว</td></tr>
+        <tr><td class="num">200 หน้า</td><td class="num">ราว 3.6 วินาที</td><td>ลูปนับหน้า (2–6 ครั้งต่อเล่ม)</td></tr>
+        <tr><td class="num">300 หน้า</td><td class="num">5.3 วินาที</td><td>ลูปนับหน้า</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout warn">
+    <span class="tag">แก้คำกล่าวอ้าง — เดิมผมเขียนว่า “ต่ำกว่าวินาที”</span>
+    <p>ตัวเลขจริงคือราว 18 มิลลิวินาทีต่อหน้า ซึ่ง <strong>เร็วพอสำหรับลูปนับหน้าอย่างสบาย</strong> (เล่มละ 10–35 วินาทีรวมทุกรอบ เทียบกับเวลาเขียนทั้งเล่มที่เป็นชั่วโมง) แต่ <strong>ไม่พอสำหรับพรีวิวสดทุกครั้งที่พิมพ์</strong> อย่างที่เคยเขียนไว้ในหัวข้อ 11 โหมดแก้ไขจึงต้องใช้ปุ่มนับหน้าใหม่ที่กดเอง หรือคอมไพล์เฉพาะตอนที่กำลังแก้เป็นเอกสารเดี่ยว ซึ่งใช้เวลาระดับ 50 มิลลิวินาที</p>
+  </div>
+
+  <p class="filename">typeset/book.typ — โครงเทมเพลตที่ขับด้วยโปรไฟล์</p>
+<pre><span class="c">#let profile = json("profile.json")</span>
+
+<span class="c">#set page(</span>
+  width: profile.trim.w, height: profile.trim.h,
+  margin: (inside: profile.m.inner, outside: profile.m.outer,
+           top: profile.m.top, bottom: profile.m.bottom),
+  binding: left,                     <span class="c">// ขอบในสลับข้างตามหน้าคู่-คี่</span>
+  numbering: "1",
+  header: context { ... },           <span class="c">// ซ้าย = ชื่อเล่ม, ขวา = ชื่อบท</span>
+)
+<span class="c">#set text(font: profile.body_font, size: profile.size, lang: "th")</span>
+<span class="c">#set par(justify: true, leading: profile.leading * 1em,</span>
+         first-line-indent: 1.2em)
+
+<span class="c">// บทใหม่ขึ้นหน้าขวาเสมอ</span>
+<span class="c">#show heading.where(level: 1): it =&gt; {</span>
+  pagebreak(to: "odd", weak: true)
+  v(profile.chapter_drop)
+  it
+}
+<span class="c">#set par(widows: 2, orphans: 2)     // ห้ามทิ้งบรรทัดเดี่ยวคาหน้า</span>
+</pre>
+
+  <h3>กฎการจัดหน้าที่ต้องบังคับ</h3>
+  <ul>
+    <li><strong>บทเริ่มหน้าขวาเสมอ</strong> — เติมหน้าว่างเองเมื่อจำเป็น และนับหน้าว่างนั้นเข้างบด้วย</li>
+    <li><strong>ห้าม widow/orphan</strong> — ไม่ทิ้งบรรทัดสุดท้ายของย่อหน้าไว้ต้นหน้าใหม่ และไม่ทิ้งบรรทัดแรกไว้ท้ายหน้า</li>
+    <li><strong>หัวข้อย่อยห้ามอยู่บรรทัดสุดท้ายของหน้า</strong> — ต้องมีเนื้อความตามอย่างน้อยสองบรรทัด</li>
+    <li><strong>ภาพต้องอยู่หน้าเดียวกับที่ถูกอ้างถึง</strong> หรือหน้าถัดไปเท่านั้น พร้อมคำบรรยายที่ไม่พรากจากภาพ</li>
+    <li><strong>ตารางยาวเกินหน้า</strong> ต้องซ้ำแถวหัวตารางเมื่อขึ้นหน้าใหม่</li>
+    <li><strong>เลขหน้าไม่ขึ้นบนหน้าเปิดบทและหน้าว่าง</strong></li>
+  </ul>
+</section>
+
+<section id="thai">
+  <h2><span class="n">09</span>งานภาษาไทย</h2>
+  <p>ส่วนนี้แยกออกมาเพราะไม่มีโปรเจกต์โอเพนซอร์สตัวไหนแตะ และเป็นจุดที่ทำให้ผลลัพธ์ต่างระหว่าง “อ่านได้” กับ “ดูเหมือนหนังสือจริง”</p>
+
+  <div class="callout warn">
+    <span class="tag">ความเสี่ยงข้อแรกที่ต้องทดสอบก่อนเขียนโค้ดอย่างอื่น</span>
+    <p>ภาษาไทยไม่มีช่องว่างระหว่างคำ เครื่องมือเรียงพิมพ์จึงต้องมีพจนานุกรมถึงจะรู้ว่าตัดบรรทัดตรงไหนได้ ถ้าไม่รู้ ผลคือบรรทัดยืดผิดปกติหรือตัดกลางคำจนอ่านสะดุด <strong>วันแรกของโปรเจกต์ ให้เขียนหน้าเดียวที่โหลด typst.ts แล้วเรียงพิมพ์ย่อหน้าไทยจริง 20 บรรทัด แล้วดูด้วยตา</strong> อย่าเชื่อเอกสาร รวมถึงหน้านี้</p>
+  </div>
+
+  <h4>ทางแก้ที่ควบคุมได้เอง</h4>
+  <p>ไม่ว่าเครื่องมือจะรองรับหรือไม่ ให้ตัดคำเองในขั้น pre-process แล้วแทรก zero-width space (U+200B) ระหว่างคำ วิธีนี้ทำให้เครื่องมือตัดบรรทัดถูกจุดโดยไม่ต้องรู้ภาษาไทย และเราคุมคุณภาพเองได้ ข้อดีเพิ่มเติมในบริบทส่วนขยายคือ <strong>ทำได้ใน JavaScript ล้วน ไม่ต้องมี Python</strong></p>
+<pre><span class="c">// ตัวเลือกฝั่ง JS ที่ใช้ได้ในส่วนขยาย:</span>
+<span class="c">//  1) Intl.Segmenter — มีในเบราว์เซอร์อยู่แล้ว ไม่ต้องแนบอะไรเพิ่ม</span>
+<span class="c">//  2) พจนานุกรมไทย + longest-matching เขียนเอง ~100 บรรทัด แม่นกว่า</span>
+
+<span class="k">const</span> seg = <span class="k">new</span> Intl.Segmenter(<span class="s">"th"</span>, { granularity: <span class="s">"word"</span> });
+
+<span class="k">function</span> prepareThai(md) {
+  <span class="c">// ข้ามบล็อกโค้ด ลิงก์ และตัวเลข ไม่ให้แตกกลางคัน</span>
+  <span class="k">return</span> mapProseOnly(md, (text) =&gt;
+    [...seg.segment(text)].map(s =&gt; s.segment).join(<span class="s">"​"</span>));
+}
+</pre>
+  <p class="note">ผลข้างเคียงที่ต้องจัดการ: ZWSP จะติดไปกับข้อความเวลาผู้อ่านคัดลอกจาก PDF ให้ลบออกในเวอร์ชัน EPUB และในต้นฉบับที่เก็บไว้ — เก็บ ZWSP ไว้เฉพาะในสายที่ป้อนเข้าคอมไพเลอร์เท่านั้น และ <strong>อย่าลืมว่าโควตาอักษรต้องนับก่อนแทรก ZWSP</strong> ไม่งั้นตัวเลขจะเพี้ยนทั้งระบบ</p>
+
+  <h4>รายละเอียดอื่นที่ทำให้เล่มดูเป็นมืออาชีพ</h4>
+  <ul>
+    <li><strong>ขนาดตัวอักษร</strong> — ฟอนต์ไทยมีความสูงตัวพิมพ์เล็กกว่าละตินที่ point เดียวกัน ตั้ง 14–16pt สำหรับเนื้อความ ไม่ใช่ 11pt แบบหนังสืออังกฤษ</li>
+    <li><strong>ระยะบรรทัด</strong> — ต้องเผื่อวรรณยุกต์และสระบน–ล่างสองชั้น ใช้ 1.6–1.8 เท่า ไม่ใช่ 1.4</li>
+    <li><strong>เลือกฟอนต์ให้ถูกงาน</strong> — แบบมีหัว (Sarabun, TH Sarabun, IBM Plex Sans Thai) อ่านสบายกว่าสำหรับเนื้อความยาว แบบไม่มีหัวเก็บไว้ใช้กับหัวเรื่อง และต้องเป็นฟอนต์ที่ใบอนุญาตให้ฝังในไฟล์เพื่อการค้าได้</li>
+    <li><strong>การจัดชิดขอบสองข้าง</strong> — ไทยไม่มียัติภังค์ การ justify จึงต้องยืดช่องว่างระหว่างคำ ให้กำหนดเพดานการยืดไว้ ไม่งั้นจะเกิด “แม่น้ำ” ช่องว่างพาดกลางหน้า ถ้าคุมไม่ได้ ใช้ชิดซ้ายแทน ดูดีกว่า justify ที่แย่</li>
+    <li><strong>การนับอักษร</strong> — สระและวรรณยุกต์เป็น combining character อย่านับด้วย <code>str.length</code> ให้ normalize เป็น NFC แล้วนับด้วย <code>Intl.Segmenter</code> granularity <code>grapheme</code></li>
+  </ul>
+</section>
+
+<section id="fail">
+  <h2><span class="n">10</span>เมื่อระบบพัง</h2>
+  <p>งานที่ยิงหนึ่งร้อยเทิร์นติดต่อกันเป็นชั่วโมงจะเจอทุกอย่างที่พังได้ อย่างน้อยหนึ่งครั้งต่อเล่ม ถ้าไม่ออกแบบเรื่องนี้ไว้ตั้งแต่ต้น ระบบจะใช้งานจริงไม่ได้ ไม่ว่าส่วนอื่นจะดีแค่ไหน</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>อาการ</th><th>ตรวจจับอย่างไร</th><th>ทำอะไร</th></tr></thead>
+      <tbody>
+        <tr><td>คำตอบถูกตัดกลางคัน</td><td>ไม่พบ sentinel <code>END</code></td><td>ส่งเทิร์นต่อ “เขียนต่อจากคำว่า …” แล้วเชื่อมข้อความ สูงสุด 3 ครั้ง เกินนั้นทิ้งแล้วเริ่มตอนนั้นใหม่ด้วยโควตาที่เล็กลง 30%</td></tr>
+        <tr><td>ชนลิมิตข้อความของแพ็กเกจ</td><td>พบข้อความแจ้งลิมิตในหน้า หรือปุ่มส่งค้างเป็นสีเทานานเกิน 10 วินาที</td><td>หยุดงานทั้งหมด บันทึกสถานะ ตั้ง <code>chrome.alarms</code> ตามเวลาที่หน้าเว็บบอก แล้วเริ่มต่อเองอัตโนมัติ พร้อมแจ้งเตือนผู้ใช้</td></tr>
+        <tr><td>โมเดลปฏิเสธหรือเตือนนโยบาย</td><td>คำตอบสั้นผิดปกติและไม่มี sentinel</td><td>ลองใหม่หนึ่งครั้งด้วยการเรียบเรียงคำสั่งใหม่ ถ้ายังไม่ผ่านให้ทำเครื่องหมายตอนนั้นเป็น <code>blocked</code> ข้ามไปตอนถัดไป แล้วรวบมาให้คนตัดสินตอนจบ อย่าหยุดทั้งเล่มเพราะตอนเดียว</td></tr>
+        <tr><td>เน็ตหลุด / เว็บขึ้น error</td><td>พบปุ่ม regenerate จาก error</td><td>ถอยแบบทวีคูณ 5 / 15 / 45 วินาที แล้วยิงเทิร์นเดิมซ้ำ</td></tr>
+        <tr><td>หลุดล็อกอิน หรือเจอด่านตรวจว่าเป็นมนุษย์</td><td>ไม่พบช่องพิมพ์ หรือถูกพาไปหน้าล็อกอิน</td><td><strong>หยุดและเรียกผู้ใช้มาทำเอง</strong> — ระบบต้องไม่พยายามผ่านด่านตรวจอัตโนมัติใด ๆ ทั้งสิ้น เมื่อผู้ใช้จัดการเสร็จ กดทำต่อได้จากจุดเดิม</td></tr>
+        <tr><td>เว็บสลับโมเดลเอง</td><td>อ่านป้ายชื่อโมเดลก่อนส่งทุกเทิร์น เทียบกับ <code>expected_model</code></td><td>หยุดและถาม เพราะเนื้อหาครึ่งเล่มที่มาจากคนละโมเดลจะโทนไม่เท่ากันอย่างเห็นได้ชัด</td></tr>
+        <tr><td>ตอบมาผิดตอน</td><td>รหัสใน sentinel ไม่ตรงกับที่ขอ</td><td>ทิ้งคำตอบ ยิงใหม่พร้อมย้ำรหัสตอน</td></tr>
+        <tr><td>มีคำทักทายหรือคำถามกลับปนมา</td><td>มีข้อความนอกบล็อกโค้ด</td><td>ตัดทิ้งอัตโนมัติ ใช้เฉพาะสิ่งที่อยู่ระหว่าง sentinel — ไม่ต้องยิงใหม่</td></tr>
+        <tr><td>แท็บ ChatGPT หรือ Studio ถูกปิด</td><td>พอร์ตขาด</td><td>ทุกเทิร์นถูกเขียนลง IndexedDB ก่อนยิงเทิร์นถัดไปเสมอ เปิดใหม่แล้วกดทำต่อจากเทิร์นล่าสุดได้</td></tr>
+        <tr><td>เนื้อหาคุณภาพตกโดยไม่มี error</td><td>ความยาวห่างโควตาเกิน 40% ติดกันสามตอน หรือคะแนนความซ้ำสูงผิดปกติ</td><td>หยุดโดยอัตโนมัติแล้วเรียกคนมาดู — ตัวชี้วัดง่าย ๆ นี้จับอาการ “โมเดลเริ่มมั่ว” ได้ดีอย่างน่าประหลาด</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout key">
+    <span class="tag">หลักการเดียวที่ครอบทุกข้อ</span>
+    <p>ทำให้ทุกเทิร์นเป็น <strong>หน่วยที่ทำซ้ำได้และไม่มีผลข้างเคียง</strong> — เขียนผลลง IndexedDB ก่อนไปต่อเสมอ ไม่มีสถานะสำคัญค้างอยู่ในหน่วยความจำ และงานทั้งหมดต้องกู้คืนได้จากสิ่งที่อยู่บนดิสก์เท่านั้น ถ้าทำได้ตามนี้ ทุกความพังกลายเป็นแค่ “ลองเทิร์นนั้นใหม่”</p>
+  </div>
+</section>
+
+<section id="edit">
+  <h2><span class="n">11</span>โหมดแก้ไข</h2>
+  <p>ประตูที่ 2 และเป็นสิ่งที่ทำให้ผลลัพธ์ต่างจาก “ไฟล์ที่ AI พ่นออกมา” ออกแบบเป็นสองบานคู่กันในหน้า Studio: ซ้ายคือรายการตอนพร้อมตัวเลขว่าห่างจากโควตาเท่าไร ขวาคือต้นฉบับที่แก้ได้ พร้อมปุ่มนับหน้าใหม่ที่คอมไพล์ทั้งเล่มแล้วบอกจำนวนหน้าจริง</p>
+  <p class="note">เดิมผมออกแบบให้คอมไพล์ใหม่อัตโนมัติทุกครั้งที่หยุดพิมพ์ 400 มิลลิวินาที แต่พอวัดความเร็วจริงแล้วเล่ม 200 หน้าใช้เวลาราว 3.6 วินาที การคอมไพล์อัตโนมัติจึงกลายเป็นการหน่วงที่น่ารำคาญแทนที่จะช่วย ให้กดเองดีกว่า</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>แก้ที่เนื้อหา</h4>
+      <ul style="margin-bottom:0">
+        <li>สั่งเขียนตอนนี้ใหม่พร้อมคำกำกับ เช่น “สั้นลง 30% และเพิ่มตัวอย่างคนขายของออนไลน์” → เป็นเทิร์นเดียวไปที่ ChatGPT</li>
+        <li>ล็อกตอน (<code>elastic: false</code>) ให้ลูปนับหน้าห้ามแตะ</li>
+        <li>ดู diff ก่อน–หลังทุกครั้งที่เขียนทับ พร้อมย้อนกลับเวอร์ชันเดิมได้จาก <code>history[]</code></li>
+        <li>แก้ด้วยมือได้ตรง ๆ ในกล่องข้อความ ไม่ต้องผ่านโมเดล</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>แก้ที่หน้ากระดาษ</h4>
+      <ul style="margin-bottom:0">
+        <li>สลับโปรไฟล์ฟอนต์/ขนาด/ระยะบรรทัด แล้วเห็นจำนวนหน้าเปลี่ยนทันที</li>
+        <li>ตัวชี้ปัญหาบนหน้า: บรรทัดหลุด หัวข้อค้างท้ายหน้า ภาพพรากคำบรรยาย</li>
+        <li>ย้ายภาพ ปรับขนาดภาพเป็นสัดส่วนของคอลัมน์</li>
+        <li>บังคับขึ้นหน้าใหม่ / ห้ามขึ้นหน้าใหม่ ณ จุดที่ระบุ</li>
+        <li>แถบสถานะตลอดเวลา <span style="font-family:var(--font-mono);font-size:.8em">198 / 200 หน้า · ±2 · ผ่าน</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="tag">กับดักที่ต้องหลบ</span>
+    <p>อย่าใช้ตัวเรนเดอร์สองตัว — ตัวหนึ่งสำหรับพรีวิว อีกตัวสำหรับ PDF จริง เพราะสองตัวจะเริ่มแสดงผลต่างกันในรายละเอียด แล้วความเชื่อมั่นในหน้าพรีวิวจะหายไป ให้พรีวิวด้วย <strong>ผลลัพธ์ของคอมไพเลอร์ตัวจริง</strong> ไปเลย ซึ่ง typst.ts เรนเดอร์เป็น SVG ให้ได้โดยตรงและเร็วกว่าการฝัง PDF ด้วยซ้ำ ใช้ SVG ตอนแก้ไข แล้วค่อยสร้าง PDF ตอนส่งออก — คอมไพเลอร์ตัวเดียวกัน ผลเหมือนกัน</p>
+  </div>
+</section>
+
+<section id="preflight">
+  <h2><span class="n">12</span>Preflight และการส่งออก</h2>
+  <p>รายการตรวจอัตโนมัติก่อนออกไฟล์ ข้อที่ไม่ผ่านต้องบล็อกการส่งออก ไม่ใช่แค่เตือน</p>
+  <ul class="check">
+    <li>จำนวนหน้าอยู่ในช่วง <code>target ± tolerance</code></li>
+    <li>จำนวนหน้ารวมเป็นเลขคู่ และไม่ต่ำกว่าขั้นต่ำของโรงพิมพ์ (KDP = 24 หน้า)</li>
+    <li>ขอบในผ่านเกณฑ์ตามความหนาเล่มจริง ไม่ใช่ตามที่ตั้งไว้ตอนแรก</li>
+    <li>ไม่มีวัตถุใดล้ำเข้าเขตตัดตกโดยไม่ตั้งใจ</li>
+    <li>ภาพทุกภาพความละเอียด ≥ 300 dpi ที่ขนาดพิมพ์จริง</li>
+    <li>ฟอนต์ทุกตัวฝังในไฟล์ครบ</li>
+    <li>ไม่มี widow/orphan เหลือค้าง</li>
+    <li>บททุกบทเริ่มที่หน้าขวา</li>
+    <li>เลขหน้าในสารบัญตรงกับหน้าจริงหลังลูปรอบสุดท้าย</li>
+    <li>ไม่มีตอนไหนเหลือสถานะ <code>draft</code> หรือ <code>blocked</code></li>
+    <li>ไม่มี ZWSP หลงเหลือในไฟล์ EPUB และในต้นฉบับที่ส่งออก</li>
+    <li>ความหนาสันปกคำนวณจากจำนวนหน้าสุดท้าย ไม่ใช่จำนวนหน้าเป้าหมาย</li>
+    <li>ปกกางเต็มขนาดตรงตามสูตร และวัตถุสำคัญไม่ล้ำเขตปลอดภัยของสัน</li>
+    <li>เมทาดาทาใน PDF ครบ: ชื่อเรื่อง ผู้แต่ง ภาษา และไม่มีคำว่า Untitled</li>
+  </ul>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>ไฟล์</th><th>ใช้ทำอะไร</th><th>ข้อกำหนด</th></tr></thead>
+      <tbody>
+        <tr><td><code>interior.pdf</code></td><td>ส่งโรงพิมพ์</td><td>ขนาดเท่า trim + ตัดตก · ฟอนต์ฝังครบ · ไม่มีเลเยอร์/คอมเมนต์</td></tr>
+        <tr><td><code>cover.pdf</code></td><td>ปกกางเต็ม</td><td>ปกหลัง + สัน + ปกหน้าในหน้าเดียว ดูสูตรหัวข้อ 13</td></tr>
+        <tr><td><code>book.epub</code></td><td>ขายเป็นอีบุ๊ก</td><td>reflow ได้ · ไม่มี ZWSP · สารบัญเป็น navigation จริง</td></tr>
+        <tr><td><code>screen.pdf</code></td><td>ส่งให้คนอ่านตรวจ</td><td>หน้าเดี่ยว ไม่มีตัดตก เลขหน้าใหญ่ ใส่ลายน้ำ DRAFT</td></tr>
+        <tr><td><code>project.json</code></td><td>สำรอง/ย้ายเครื่อง</td><td>ทุกอย่างใน IndexedDB ของเล่มนี้ รวมภาพเป็น base64</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">ส่งออกด้วย <code>chrome.downloads.download()</code> จาก Blob URL ที่สร้างในหน้า Studio อย่าลืม <code>URL.revokeObjectURL</code> หลังดาวน์โหลด ไม่งั้นไฟล์ PDF หลายสิบเมกะไบต์จะค้างใน memory ทั้ง session</p>
+</section>
+
+<section id="cover">
+  <h2><span class="n">13</span>คณิตศาสตร์ของปก</h2>
+  <p>ปกต้องคำนวณ ไม่ใช่ออกแบบด้วยสายตา เพราะความกว้างสันขึ้นกับจำนวนหน้าสุดท้าย ซึ่งรู้ก็ต่อเมื่อเนื้อในเสร็จแล้ว ระบบจึงสร้างปกเป็นขั้นสุดท้ายเสมอ</p>
+
+  <figure class="wide">
+    <svg viewBox="0 0 720 300" role="img" aria-label="แผนภาพปกกางเต็ม แสดงปกหลัง สัน ปกหน้า พร้อมเขตตัดตกและเขตปลอดภัย">
+      <defs>
+        <pattern id="hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="currentColor" stroke-width="1.6" opacity=".28"/>
+        </pattern>
+      </defs>
+      <g style="color:var(--magenta)">
+        <rect x="20" y="30" width="680" height="230" fill="url(#hatch)" stroke="currentColor" stroke-width="1" stroke-dasharray="4 3"/>
+      </g>
+      <rect x="38" y="48" width="644" height="194" fill="var(--surface)" stroke="var(--rule-strong)" stroke-width="1.2"/>
+      <rect x="38" y="48" width="300" height="194" fill="var(--surface-2)" stroke="var(--rule-strong)" stroke-width="1.2"/>
+      <rect x="338" y="48" width="44" height="194" fill="var(--cyan-soft)" stroke="var(--cyan)" stroke-width="1.2"/>
+      <rect x="382" y="48" width="300" height="194" fill="var(--surface-2)" stroke="var(--rule-strong)" stroke-width="1.2"/>
+      <rect x="404" y="66" width="256" height="158" fill="none" stroke="var(--cyan)" stroke-width="1" stroke-dasharray="3 3"/>
+      <rect x="60" y="66" width="256" height="158" fill="none" stroke="var(--cyan)" stroke-width="1" stroke-dasharray="3 3"/>
+      <rect x="272" y="186" width="58" height="34" fill="var(--surface)" stroke="var(--ink-3)" stroke-width="1"/>
+      <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-2)">
+        <text x="130" y="150" fill="var(--ink)">ปกหลัง</text>
+        <text x="474" y="150" fill="var(--ink)">ปกหน้า</text>
+        <text x="360" y="150" text-anchor="middle" transform="rotate(-90 360 150)" fill="var(--cyan)">สัน</text>
+        <text x="277" y="207" font-size="8" fill="var(--ink-3)">บาร์โค้ด</text>
+        <text x="30" y="22" fill="var(--magenta)">เขตตัดตก 3 มม. รอบด้าน</text>
+        <text x="60" y="284" fill="var(--cyan)">เส้นประ = เขตปลอดภัย อย่าวางข้อความเลยออกไป</text>
+      </g>
+      <g stroke="var(--ink-3)" stroke-width="1" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">
+        <line x1="338" y1="262" x2="382" y2="262"/>
+        <line x1="338" y1="258" x2="338" y2="266"/><line x1="382" y1="258" x2="382" y2="266"/>
+        <text x="392" y="266" stroke="none">spine = pages × ความหนา/แผ่น</text>
+      </g>
+    </svg>
+    <figcaption>ปกกางเต็มเป็นภาพเดียว ไม่ใช่สามภาพต่อกัน ระบบต้องสร้างเป็นไฟล์เดียวที่ความกว้างคำนวณจากจำนวนหน้าสุดท้าย</figcaption>
+  </figure>
+
+<pre>ความหนาต่อแผ่น (นิ้ว):
+  กระดาษขาว 0.002252   กระดาษครีม 0.0025   พิมพ์สี 0.002347
+
+spine        = final_pages × thickness_per_page
+cover_width  = (trim_w × 2) + spine + (bleed × 2)
+cover_height = trim_h + (bleed × 2)
+
+<span class="c">// ตัวอย่าง: 6×9 นิ้ว, 200 หน้า, กระดาษขาว, ตัดตก 0.125 นิ้ว</span>
+spine        = 200 × 0.002252 = 0.4504 นิ้ว
+cover_width  = 12 + 0.4504 + 0.25 = 12.7004 นิ้ว
+cover_height = 9 + 0.25 = 9.25 นิ้ว
+<span class="c">// ที่ 300 dpi → ไฟล์ปกต้องมีขนาด 3,810 × 2,775 พิกเซล</span>
+
+<span class="c">// ถ้า spine &lt; 0.0625 นิ้ว (ต่ำกว่าราว 28 หน้า) ห้ามใส่ตัวหนังสือบนสัน</span>
+<span class="c">// เพราะการเข้าเล่มคลาดได้ถึง 0.0625 นิ้ว</span>
+</pre>
+  <p class="note">ค่าความหนาต่อแผ่นอิงสเปกของ Amazon KDP ถ้าส่งโรงพิมพ์ไทย ให้ขอค่า “ความหนากระดาษต่อแผ่น” จากโรงพิมพ์แล้วใส่เป็นค่าคอนฟิก เพราะกระดาษถนอมสายตาหนากว่าปอนด์ขาวมาก</p>
+
+  <div class="callout warn">
+    <span class="tag">ข้อจำกัดจริงของการเอาภาพจาก ChatGPT มาทำปก</span>
+    <p>ภาพที่สร้างจากหน้าเว็บมักได้ราว 1024×1536 พิกเซล ซึ่งเมื่อนำมาใช้เป็นปกหน้าขนาด 6×9 นิ้ว จะได้ความละเอียดเพียงประมาณ 170 dpi — <strong>ต่ำกว่าเกณฑ์ 300 dpi ของงานพิมพ์อย่างชัดเจน</strong> ทางออกที่ดีที่สุดคือข้อสาม: <strong>(1)</strong> ขยายภาพด้วยตัว upscale ซึ่งช่วยได้บ้างแต่รายละเอียดไม่กลับมา · <strong>(2)</strong> ใช้บริการสร้างภาพที่ให้ไฟล์ใหญ่กว่า · <strong>(3)</strong> <strong>ออกแบบปกให้ภาพเป็นเพียงส่วนหนึ่ง</strong> เช่น แถบภาพครึ่งบนบนพื้นสีทึบ แล้วให้ Typst วาดพื้น เส้น และตัวอักษรทั้งหมดเป็นเวกเตอร์ — ส่วนที่เป็นเวกเตอร์คมกริบทุกความละเอียด และปกแบบนี้ดูตั้งใจกว่าปกภาพเต็มหน้าที่เบลอ</p>
+  </div>
+
+  <div class="callout key">
+    <span class="tag">ลำดับการประกอบปก</span>
+    <p><strong>(1)</strong> ให้ ChatGPT สร้างภาพปกหน้าและปกหลังแยกกัน โดยใช้ style token ชุดเดียวกัน <strong>(2)</strong> ดึงภาพกลับ: content script อ่าน <code>src</code> ของภาพในคำตอบ แล้ว <code>fetch</code> เป็น Blob เก็บลง IndexedDB <strong>(3)</strong> ดูดสีเด่นจากขอบภาพมาไล่เฉดเป็นพื้นสัน <strong>(4)</strong> ประกอบทั้งสามส่วนใน Typst และ <strong>เรียงพิมพ์ตัวหนังสือทุกตัวด้วย Typst</strong> ทับลงไป ทั้งชื่อเรื่อง ชื่อผู้แต่ง คำโปรย ISBN — ตัวหนังสือบนปกต้องคมและสะกดถูก ซึ่งมีทางเดียวคือเรียงพิมพ์เอง ห้ามให้โมเดลภาพวาดตัวอักษร</p>
+  </div>
+</section>
+
+<section id="prompts">
+  <h2><span class="n">14</span>Prompt สำหรับภาพปก</h2>
+  <p>ระบบเขียน prompt เหล่านี้เองจาก <code>book.yaml</code> + thesis ของเล่ม แล้วยิงเข้าแท็บ ChatGPT ในเทิร์นถัดจากเนื้อหา ผู้ใช้ไม่ต้องคิดเอง ด้านล่างคือเทมเพลตพร้อมตัวอย่างที่กรอกจริง</p>
+
+  <h3>ขั้นที่ 0 — ล็อกสไตล์ก่อน</h3>
+  <p>หนึ่งเทิร์น สร้าง “style token” ชุดเดียวของเล่ม แล้วใช้ซ้ำในทุก prompt ภาพ นี่คือสิ่งที่ทำให้ปกหน้ากับปกหลังดูมาจากหนังสือเล่มเดียวกัน</p>
+<pre><span class="k">ตอบเป็น JSON ในบล็อกโค้ด:</span>
+{
+  "visual_metaphor": "อุปมาภาพหลักของเล่ม หนึ่งประโยค ที่มองเห็นได้จริง",
+  "style": "เช่น flat vector editorial illustration / textured risograph print /
+            cinematic still-life photography",
+  "palette": ["#0F2A3D", "#E8B33A", "#F2EFE9"],
+  "texture": "เช่น subtle paper grain, halftone dots",
+  "lighting": "เช่น soft directional light from upper left",
+  "mood": "สามคำ"
+}
+<span class="k">ข้อบังคับ:</span> อุปมาต้องเป็นวัตถุหรือฉากที่วาดได้ ห้ามเป็นแนวคิดนามธรรม
+        และต้องอ่านออกตอนย่อเหลือขนาดนิ้วหัวแม่มือบนหน้าจอมือถือ
+</pre>
+
+  <h3>ปกหน้า</h3>
+  <p class="filename">เทมเพลต</p>
+<pre>Book cover illustration for a {genre} book about {topic}.
+
+Concept: {visual_metaphor}.
+Composition: single clear focal subject in the lower two-thirds; the top 35%
+is deliberately empty, calm, low-contrast negative space reserved for a title;
+the bottom 15% is a quiet band reserved for an author name. Strong readable
+silhouette that still works at thumbnail size.
+Style: {style}, {texture}, {lighting}.
+Palette: strictly {palette[0]}, {palette[1]}, {palette[2]} plus neutrals —
+no additional hues.
+Mood: {mood}.
+Format: vertical 2:3 aspect ratio, artwork bleeding edge to edge,
+no border, no frame, no mockup, no book shown in perspective.
+
+Negative: no text, no letters, no words, no numbers, no typography,
+no logo, no watermark, no signature, no UI elements, no stock-photo people
+smiling at camera, no generic lightbulb, no rising arrow, no handshake.
+</pre>
+
+  <p class="filename">ตัวอย่างที่กรอกแล้ว — “เงินไม่เข้าทุกเดือน แต่ชีวิตต้องเดินทุกวัน”</p>
+<pre>Book cover illustration for a personal-finance book about managing money
+on an irregular freelance income.
+
+Concept: a set of three stacked glass vessels of different sizes, water
+filling them at uneven levels, one overflowing gently into the next.
+Composition: the vessels sit in the lower two-thirds, centered slightly
+right; the top 35% is flat empty deep-teal space for the title; the bottom
+15% is a quiet band for the author name. Strong readable silhouette at
+thumbnail size.
+Style: flat vector editorial illustration with hand-printed risograph
+texture, subtle paper grain, soft directional light from the upper left.
+Palette: strictly #0F2A3D deep teal, #E8B33A warm ochre, #F2EFE9 bone white
+plus neutrals — no additional hues.
+Mood: calm, grounded, quietly optimistic.
+Format: vertical 2:3 aspect ratio, artwork bleeding edge to edge, no border,
+no frame, no mockup, no book shown in perspective.
+
+Negative: no text, no letters, no words, no numbers, no typography, no logo,
+no watermark, no signature, no coins, no piggy bank, no rising arrow.
+</pre>
+
+  <h3>ปกหลัง</h3>
+  <p>ปกหลังไม่ใช่ภาพสวยอีกภาพ แต่เป็น <strong>พื้นหลังของข้อความ</strong> เงื่อนไขสำคัญคือกลางหน้าต้องเรียบพอให้อ่านคำโปรยออก และมุมล่างขวาต้องว่างให้บาร์โค้ด</p>
+  <p class="filename">เทมเพลต</p>
+<pre>Back cover artwork for the same book, matching the front cover exactly:
+same {style}, same {texture}, same {lighting}, same palette
+{palette[0]}, {palette[1]}, {palette[2]}.
+
+Concept: a quieter, wider continuation of the front cover world —
+{background_element} only, with the main subject absent or reduced to a
+distant, small echo near the top edge.
+Composition: the central 60% of the canvas must stay low-contrast and near
+uniform so a paragraph of dark body text remains readable on top of it;
+keep the bottom-right corner area, roughly 2 × 1.2 inches, visually clean
+and light for a barcode block; keep the left edge simple because it will
+meet the spine.
+Format: vertical 2:3 aspect ratio, edge to edge, no border.
+
+Negative: no text, no letters, no numbers, no logo, no watermark,
+no busy detail in the centre, no high-contrast pattern.
+</pre>
+  <p class="filename">ตัวอย่างที่กรอกแล้ว</p>
+<pre>Back cover artwork for the same book, matching the front cover exactly:
+flat vector editorial illustration with hand-printed risograph texture,
+subtle paper grain, soft directional light from the upper left, palette
+strictly #0F2A3D deep teal, #E8B33A warm ochre, #F2EFE9 bone white.
+
+Concept: the same water surface seen from just above, calm and almost
+still, with one small ochre ripple near the top edge; the glass vessels are
+gone.
+Composition: the central 60% is a near-uniform deep-teal field with only the
+faintest grain, so dark body text stays readable; the bottom-right corner,
+roughly 2 × 1.2 inches, is clean bone white for a barcode; the left edge is
+plain because it meets the spine.
+Format: vertical 2:3 aspect ratio, edge to edge, no border.
+
+Negative: no text, no letters, no numbers, no logo, no watermark, no busy
+detail in the centre, no high-contrast pattern.
+</pre>
+
+  <h3>สัน และการเชื่อมสามส่วน</h3>
+<pre><span class="c">// สันไม่ต้องสร้างด้วยโมเดลภาพ ให้ระบบทำเอง:</span>
+spineFill = linearGradient(
+  sampleDominantColor(frontImage, <span class="s">"left_edge"</span>),
+  sampleDominantColor(backImage,  <span class="s">"right_edge"</span>));
+
+<span class="c">// ถ้า spine กว้างพอ จึงเรียงพิมพ์ชื่อเรื่อง + ชื่อผู้แต่งลงบนสัน</span>
+<span class="c">// หมุน 90° ตามธรรมเนียม: อ่านจากบนลงล่างเมื่อวางหนังสือหงายหน้าปกขึ้น</span>
+</pre>
+
+  <div class="callout">
+    <span class="tag">เคล็ดที่ทำให้ปกหน้า–หลังเข้าคู่กันจริง</span>
+    <p>อย่าพึ่งคำบรรยายสไตล์อย่างเดียว ในบริบทของ ChatGPT ที่คุยกันในเธรดเดียวได้ ให้ใช้ข้อได้เปรียบนี้: <strong>สร้างปกหน้าก่อน แล้วสั่งต่อในเธรดเดิมว่า “ใช้ภาพข้างบนเป็นแบบ ขยายฉากนี้ออกไปทางซ้าย เอาวัตถุหลักออก เก็บสีและพื้นผิวเดิมทุกอย่าง”</strong> โมเดลจะเห็นภาพเดิมของตัวเองเป็นบริบท ซึ่งได้ผลดีกว่าการบรรยายสไตล์ซ้ำในเธรดใหม่มาก</p>
+  </div>
+
+  <h4>Prompt ภาพประกอบในเล่ม</h4>
+<pre>Interior illustration for a book, {style}, {texture}, monochrome using only
+{palette[0]} on {palette[2]} background — must remain legible when printed
+in grayscale at 300 dpi on uncoated paper.
+Subject: {figure_description}.
+Composition: centered, generous margins, simple shapes, line weight heavy
+enough to survive printing at {figure_width_mm} mm wide.
+Negative: no text, no labels, no thin hairlines, no gradients, no photorealism.
+</pre>
+  <p class="note">เนื้อในหนังสือส่วนใหญ่พิมพ์ขาวดำ ภาพประกอบจึงต้องออกแบบมาให้อ่านออกในโทนเทา ไม่ใช่แค่ลดสีทีหลัง และเส้นบางเกินไปจะหายไปตอนพิมพ์บนกระดาษไม่เคลือบ ข้อดีคือภาพขาวดำใช้ความละเอียดต่ำกว่าปกได้มาก ปัญหา dpi จึงไม่รุนแรงเท่า</p>
+</section>
+
+<section id="limits">
+  <h2><span class="n">15</span>ข้อจำกัดของระบบ</h2>
+  <p>ข้อจำกัดมีสามชั้นที่ต่างกันมาก และควรแยกให้ออกก่อนลงมือ: ชั้นแรกแก้ไม่ได้เพราะเป็นผลจากการเลือกขับ ChatGPT ผ่านหน้าเว็บ · ชั้นที่สองแก้ได้ด้วยการออกแบบซึ่งเอกสารนี้แก้ให้แล้ว · ชั้นที่สามคือสิ่งที่ระบบนี้ตั้งใจไม่ทำ</p>
+
+  <h3>ก. แก้ไม่ได้ — ยอมรับแล้ววางแผนรอบมัน</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>ข้อจำกัด</th><th>ผลที่ตามมา</th><th>วางแผนรอบมันอย่างไร</th></tr></thead>
+      <tbody>
+        <tr><td><strong>ทำขนานไม่ได้</strong></td><td>บัญชีเดียว หน้าต่างแชตเดียว และแต่ละตอนต้องรู้ว่าตอนก่อนหน้าเขียนอะไร — ทั้งสองเหตุผลบังคับให้ทำทีละตอนเรียงกัน</td><td>ยอมรับว่าเล่มหนึ่งใช้เวลาเป็นชั่วโมง ออกแบบให้ทิ้งไว้เดินเองแล้วไปทำอย่างอื่นได้</td></tr>
+        <tr><td><strong>ความเร็วถูกล็อกที่ความเร็วพิมพ์ของ ChatGPT</strong></td><td>~50–100 วินาทีต่อตอน คูณ 75–85 เทิร์น = 1.5–2.5 ชั่วโมงต่อเล่ม</td><td>ทำแถบความคืบหน้าที่บอกเวลาเหลือจริง และให้ปิดเครื่องกลับมาทำต่อได้</td></tr>
+        <tr><td><strong>ลิมิตข้อความของแพ็กเกจ</strong></td><td>คือเพดานจริงของระบบ ไม่ใช่ความเร็วเน็ตหรือความเร็วโค้ด บางแพ็กเกจอาจทำให้เล่มหนึ่งกินเวลาข้ามวัน</td><td>ตั้งเพดานเทิร์นต่อชั่วโมงเอง หยุดอัตโนมัติเมื่อชนลิมิต แล้วนัดทำต่อด้วย <code>chrome.alarms</code></td></tr>
+        <tr><td><strong>คำตอบหนึ่งเทิร์นยาวได้จำกัด</strong></td><td>ตอนหนึ่งไม่ควรเกิน ~6,000–8,000 อักษร ซึ่ง <strong>บังคับรูปร่างของหนังสือ</strong> ให้เป็นตอนสั้นจำนวนมาก ไม่ใช่บทยาว ๆ ไม่กี่บท</td><td>บังคับตั้งแต่ขั้นสารบัญ ถ้าโควตาตอนไหนเกินให้แตกเป็นสองตอน อย่าไปแก้ทีหลังด้วยการสั่งเขียนต่อ</td></tr>
+        <tr><td><strong>ต้องเปิดเครื่องและเปิดแท็บค้างไว้</strong></td><td>ไม่ใช่บริการบนคลาวด์ ปิดโน้ตบุ๊ก = งานหยุด (กลับมาทำต่อได้ แต่ไม่เดินเอง)</td><td>เหมาะกับการสั่งงานตอนกลางคืนบนเครื่องที่ไม่ได้ปิด ไม่เหมาะกับการสั่งจากมือถือ</td></tr>
+        <tr><td><strong>คุณภาพเนื้อหา = คุณภาพของโมเดล</strong></td><td>ระบบทำให้ <em>ยาวตามสั่ง ไม่ซ้ำ และต่อกันลื่น</em> ได้ แต่ทำให้ <em>ลึกขึ้น</em> ไม่ได้ ถ้าโมเดลไม่รู้จริงในหัวข้อนั้น หนังสือก็จะตื้นทั้งเล่มอย่างสม่ำเสมอ</td><td>ป้อนวัตถุดิบของคุณเองเข้าไปใน primer — ข้อมูล ประสบการณ์ ตัวเลขจริง นี่คือสิ่งที่ทำให้หนังสือต่างจากที่คนอื่นกดออกมาได้</td></tr>
+        <tr><td><strong>ไม่มีการตรวจข้อเท็จจริงจากภายนอก</strong></td><td>ตัวเลข ชื่อคน กฎหมาย วันที่ อาจถูกแต่งขึ้นและอ่านดูน่าเชื่อถือมาก</td><td>บังคับกำกับที่มาทุกตัวเลข และต้องมีคนอ่านตรวจก่อนขายจริง โดยเฉพาะสายการเงิน สุขภาพ กฎหมาย</td></tr>
+        <tr><td><strong>ความละเอียดภาพไม่พอสำหรับปก</strong></td><td>ภาพจากหน้าเว็บได้ราว 170 dpi บนปก 6×9 นิ้ว ต่ำกว่าเกณฑ์งานพิมพ์</td><td>ออกแบบปกให้ภาพเป็นแค่ส่วนหนึ่ง ที่เหลือให้ Typst วาดเป็นเวกเตอร์ (หัวข้อ 13)</td></tr>
+        <tr><td><strong>ผูกกับหน้าตาเว็บของคนอื่น</strong></td><td>ChatGPT เปลี่ยน UI เมื่อไหร่ ระบบพังเมื่อนั้น โดยไม่มีการเตือนล่วงหน้า</td><td>รวม selector ไว้ไฟล์เดียว แก้ได้จากหน้าตั้งค่า + healthcheck ก่อนเริ่มงานทุกครั้ง</td></tr>
+        <tr><td><strong>เงื่อนไขการใช้บริการ</strong></td><td>ขัดกับ ToS ของ OpenAI มีความเสี่ยงต่อบัญชี</td><td>ชั้น transport ที่สลับไป API หรือโมเดลโลคัลได้ทันทีเมื่อจำเป็น</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>ข. แก้ได้ด้วยการออกแบบ — และเอกสารนี้แก้ให้แล้ว</h3>
+  <p>ข้อเหล่านี้เป็นสิ่งที่ทำให้โปรเจกต์คล้าย ๆ กันใช้งานจริงไม่ได้ ทั้งที่ดูเหมือนทำงานได้ในเดโม</p>
+  <ul>
+    <li><strong>จำนวนหน้าไม่ตรง</strong> → ลูปวัดจาก PDF จริงแล้ววนแก้ (หัวข้อ 06)</li>
+    <li><strong>เนื้อหาซ้ำข้ามบท</strong> → Book Bible ที่เราถือเอง ไม่พึ่งความจำของเธรด (หัวข้อ 07)</li>
+    <li><strong>งานตายกลางทาง</strong> → สมองอยู่ในแท็บ ไม่ใช่ service worker + ทุกเทิร์นเขียนลงดิสก์ก่อนไปต่อ (หัวข้อ 02, 10)</li>
+    <li><strong>ดึงข้อความกลับมาแล้วเพี้ยน</strong> → บังคับตอบในบล็อกโค้ดเดียว + sentinel (หัวข้อ 03)</li>
+    <li><strong>ภาษาไทยตัดบรรทัดผิด</strong> → แทรก ZWSP ก่อนป้อนเข้าคอมไพเลอร์ (หัวข้อ 09)</li>
+    <li><strong>ลูปยืด/หดทำให้เนื้อหาเป็นน้ำ</strong> → บังคับวิธียืดที่เพิ่มสาระ + กรอบ ±25% ต่อตอน (หัวข้อ 06)</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="tag">ข้อเดียวที่ยังแก้ไม่หมด</span>
+    <p><strong>ลูปนับหน้าไม่ลู่เข้าเสมอ</strong> ถ้าเป้าหมายหน้าไม่สมเหตุสมผลกับโครงเรื่อง เช่นสั่ง 500 หน้าจากสารบัญ 5 บท ระบบจะต้องยืดทุกตอนจนเกินเพดาน +25% แล้ววนไม่จบ ทางแก้คือ <strong>ตรวจตั้งแต่ขั้นอนุมัติสารบัญ</strong> ว่างบอักษรต่อตอนอยู่ในช่วงที่เขียนได้จริง (ราว 2,000–8,000 อักษร) ถ้าไม่อยู่ ให้เสนอปรับจำนวนบท/ตอน หรือปรับจำนวนหน้าเป้าหมาย ตั้งแต่ตอนนั้นเลย ดีกว่าปล่อยให้ไปพังตอนวนรอบที่สาม</p>
+  </div>
+
+  <h3>ค. สิ่งที่ระบบนี้ตั้งใจไม่ทำ</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>ไม่ใช่</h4>
+      <ul style="margin-bottom:0">
+        <li>ผู้ช่วยเขียนแบบนั่งเขียนไปด้วยกัน — ระบบนี้เดินเองจนจบแล้วให้คนมาแก้ทีหลัง</li>
+        <li>เครื่องมือเขียนนิยาย — โครงสร้าง บท/ตอน/จังหวะ/takeaways ออกแบบมาเพื่อ non-fiction</li>
+        <li>ระบบจัดจำหน่าย — จบที่ไฟล์ ไม่ยุ่งกับการอัปโหลดขึ้นร้าน</li>
+        <li>ระบบหลายคนใช้ร่วมกัน — ทุกอย่างอยู่ในเบราว์เซอร์เครื่องเดียว</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>ผลที่ตามมาที่ต้องรับมือ</h4>
+      <ul style="margin-bottom:0">
+        <li>งานทั้งหมดอยู่ใน IndexedDB ของเบราว์เซอร์ — ถ้าล้างข้อมูลเบราว์เซอร์ งานหาย</li>
+        <li>จึงต้อง <strong>ส่งออก <code>project.json</code> อัตโนมัติทุกครั้งที่จบบท</strong> ไม่ใช่รอให้ผู้ใช้กดเอง</li>
+        <li>ย้ายเครื่องได้ด้วยไฟล์เดียวกันนี้</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="build">
+  <h2><span class="n">16</span>ลงมือสร้าง</h2>
+
+  <h4>ลำดับที่ควรสร้าง — เรียงตามความเสี่ยง ไม่ใช่ตามลำดับการทำงาน</h4>
+  <ol>
+    <li><strong>พิสูจน์สองอย่างในวันแรก ก่อนเขียนอะไรอย่างอื่น</strong> — (ก) หน้าเดียวที่โหลด typst.ts แล้วเรียงพิมพ์ย่อหน้าไทยจริง 20 บรรทัด ดูการตัดบรรทัดด้วยตา (ข) ส่วนขยายเปล่าที่ฉีดข้อความ “ตอบว่า OK” เข้า ChatGPT แล้วดึงคำตอบกลับได้ ถ้าสองอย่างนี้ไม่ผ่าน สถาปัตยกรรมทั้งหมดต้องเปลี่ยน — และรู้ตอนนี้ถูกกว่ารู้ตอนเดือนหน้ามาก</li>
+    <li><strong>ทำลูปนับหน้าให้ครบด้วย <code>transport/fake.js</code></strong> — ตัวสร้างข้อความปลอมที่ยืด/หดได้ตามสั่ง ยังไม่ต้องยิง ChatGPT เลย พิสูจน์ว่าลูปทำให้หน้าตรงเป้าได้จริง นี่คือหัวใจของระบบและเป็นส่วนที่ต้องแน่ก่อน</li>
+    <li><strong>ต่อ transport ตัวจริง</strong> พร้อม healthcheck, sentinel, การจัดการเธรด และตารางความพังในหัวข้อ 10 — ทำเรื่องความพังตั้งแต่ตอนนี้ อย่าเลื่อนไปทีหลัง</li>
+    <li><strong>ขั้นสารบัญ + ประตูอนุมัติ</strong> พร้อม schema validation</li>
+    <li><strong>ขั้นเขียนเนื้อหา + Book Bible</strong> แล้วปล่อยให้เดินครบเล่มหนึ่งรอบ</li>
+    <li><strong>โหมดแก้ไข</strong> — สองบานคู่ + พรีวิว SVG + ปุ่มเขียนใหม่ + สถานะจำนวนหน้า</li>
+    <li><strong>ปก + preflight</strong> เป็นขั้นสุดท้าย เพราะต้องใช้จำนวนหน้าสุดท้าย</li>
+  </ol>
+
+  <h4>ประมาณการต่อเล่ม 200 หน้า</h4>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>รายการ</th><th class="num">ปริมาณ</th></tr></thead>
+      <tbody>
+        <tr><td>อักษรเนื้อหาไทย</td><td class="num">≈ 123,000</td></tr>
+        <tr><td>เทิร์นเขียนเนื้อหา (ตอนละเทิร์น)</td><td class="num">48</td></tr>
+        <tr><td>เทิร์นสารบัญ + ตรวจความสอดคล้อง + ปก</td><td class="num">1 + 12 + 3</td></tr>
+        <tr><td>เทิร์นจากลูปนับหน้าและการลองใหม่</td><td class="num">+15–25%</td></tr>
+        <tr><td><strong>รวมเทิร์นทั้งเล่ม</strong></td><td class="num"><strong>≈ 75–85</strong></td></tr>
+        <tr><td>เวลาต่อเทิร์น (พิมพ์ + รอตอบ + หน่วง)</td><td class="num">50–100 วินาที</td></tr>
+        <tr><td><strong>เวลาเดินเครื่องทั้งเล่ม</strong></td><td class="num"><strong>≈ 1.5–2.5 ชั่วโมง</strong></td></tr>
+        <tr><td>เวลาคอมไพล์ทั้งหมด (Typst WASM 2–6 รอบ)</td><td class="num">10–35 วินาที</td></tr>
+        <tr><td>ค่า API</td><td class="num">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">ตัวเลขนี้เป็นการประมาณเชิงลำดับขนาด ไม่ใช่ค่าที่วัดมา ตัวแปรใหญ่ที่สุดคือลิมิตข้อความของแพ็กเกจที่ใช้ ซึ่งอาจทำให้เล่มหนึ่งกินเวลาข้ามวัน — ให้เก็บของจริงลง <code>turns</code> ตั้งแต่เล่มแรก แล้วจะได้ค่าที่ใช้วางแผนได้จริงภายในไม่กี่เล่ม</p>
+
+  <div class="callout warn">
+    <span class="tag">ความเสี่ยงเรียงตามความรุนแรง</span>
+    <p><strong>1. เงื่อนไขการใช้บริการและความเสี่ยงต่อบัญชี</strong> — วางชั้น transport ให้สลับได้ตั้งแต่วันแรก อย่าผูกโค้ดกับ ChatGPT จนถอดไม่ออก · <strong>2. หน้าตาเว็บเปลี่ยน</strong> — รวม selector ไว้ไฟล์เดียว แก้ได้จากหน้าตั้งค่าโดยไม่ต้องอัปเดตส่วนขยาย และมี healthcheck ก่อนเริ่มงานทุกครั้ง · <strong>3. การตัดบรรทัดภาษาไทย</strong> — พิสูจน์ก่อนทุกอย่าง · <strong>4. ลูปยืด/หดทำให้คุณภาพตก</strong> — บังคับวิธียืดที่เพิ่มสาระเท่านั้น และตรึงด้วย ±25% รายตอน · <strong>5. เนื้อหาซ้ำข้ามบท</strong> — จะเกิดแน่ถ้าไม่มี Book Bible · <strong>6. ข้อเท็จจริงและตัวเลขที่โมเดลแต่งขึ้น</strong> — เป็นความเสี่ยงทางกฎหมายเมื่อเอาไปขายจริง ให้บังคับกำกับที่มาทุกตัวเลข และเพิ่มขั้นตรวจข้อเท็จจริงถ้าเนื้อหาเป็นสายการเงิน สุขภาพ หรือกฎหมาย</p>
+  </div>
+</section>
+
+<footer>
+  <p>เอกสารออกแบบระบบ · 22 สิงหาคม 2569 · การสำรวจโปรเจกต์อ้างอิงจากหน้า repo สาธารณะ ณ วันที่จัดทำ · ตัวเลือก DOM ของ chatgpt.com เป็นค่าตั้งต้นที่ต้องยืนยันด้วย DevTools ในวันที่ลงมือ · ตัวเลขสเปกงานพิมพ์อ้างอิง <a href="https://kdp.amazon.com/en_US/help/topic/GVBQ3CMEQW3W2VL6">คู่มือ KDP</a> ควรยืนยันกับโรงพิมพ์ที่ใช้จริงอีกครั้ง</p>
+</footer>
+
+</main>
+</div>

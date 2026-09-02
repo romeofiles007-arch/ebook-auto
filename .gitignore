@@ -1,0 +1,22 @@
+# งานเขียนของผู้ใช้ — ไม่ใช่ซอร์สโค้ด และเป็นทรัพย์สินของคนที่สร้างมัน
+books/
+extension/Ebook Projects/
+*.project.json
+*.meta.json
+
+# ไฟล์ที่ระบบสร้างระหว่างทำงาน
+tmp/
+*.pdf
+*.docx
+*.epub
+
+# เครื่องมือ/แคชของเครื่องที่ใช้พัฒนา
+.serena/
+.claude/
+node_modules/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ไฟล์ขยะจากการดาวน์โหลดที่ค้างอยู่ในโฟลเดอร์
+m[1])
