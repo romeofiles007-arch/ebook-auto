@@ -131,16 +131,61 @@ export function costOfImages({ inputTokens = 0, outputTokens = 0, model = 'gpt-i
 }
 
 /**
- * ประเมินค่าภาพทั้งเล่มก่อนสร้าง
- * ปกหน้า/ปกหลังเป็นแนวตั้ง ส่วนภาพในเล่มส่วนใหญ่เป็นแนวนอนหรือจัตุรัส
+ * นับจำนวนภาพที่ระบบจะสร้างจริงทั้งเล่ม
+ *
+ * ต้องตรงกับ plannedImageJobs() ใน core/machine.js เป๊ะ ๆ ไม่ใช่นับแต่ปกสองรูป
+ * ของจริงมีสี่กลุ่ม และกลุ่มที่ลืมง่ายที่สุดคือลวดลายพื้นหลังของทุกหน้า
+ * ซึ่งเป็นภาพหนึ่งรูปที่ต้องจ่ายเงินเหมือนกัน
+ *
+ * ภาพจะถูกสร้างผ่าน API ก็ต่อเมื่อโหมดของงานนั้นเป็น auto เท่านั้น
+ * โหมด prompt/upload ผู้ใช้ไปหาไฟล์มาเอง จึงไม่มีค่าใช้จ่ายฝั่งเรา
  */
-export function estimateImageCost({ covers = 2, figures = 0, quality = 'medium', model = 'gpt-image-2' }) {
+export function plannedImageCount({
+  coverMode = 'prompt',
+  pagePattern = 'none',
+  figureMode = 'prompt',
+  illustrationLevel = 'light',
+  sections = 0,
+  knownFigures = null,
+}) {
+  const covers = coverMode === 'auto' ? 2 : 0;
+  const pattern = pagePattern && pagePattern !== 'none' ? 1 : 0;
+
+  let figures = 0;
+  if (figureMode === 'auto') {
+    // ถ้าวางแผนภาพไปแล้วให้ใช้จำนวนจริง ถ้ายังไม่ถึงขั้นนั้นค่อยประมาณจากความหนาแน่นที่ตั้งไว้
+    // กล่องสรุปไม่นับ เพราะ Typst วาดเองและไม่เสียเงิน
+    if (Number.isFinite(knownFigures)) figures = knownFigures;
+    else {
+      const perSections = { light: 3, rich: 1.5 }[illustrationLevel] || 3;
+      figures = illustrationLevel === 'none' ? 0 : Math.round(sections / perSections);
+    }
+  }
+  return { covers, pattern, figures, total: covers + pattern + figures };
+}
+
+/**
+ * ประเมินค่าภาพทั้งเล่มก่อนสร้าง
+ *
+ * ปกและลวดลายพื้นหลังเป็นแนวตั้ง ส่วนภาพในเล่มส่วนใหญ่เป็นแนวนอนหรือจัตุรัส
+ * retries คือจำนวนครั้งเฉลี่ยที่ต้องวาดต่อรูป — ระบบลองซ้ำได้สูงสุด 2 ครั้งต่อรูป
+ * และทุกครั้งที่ลองคือเงินจริง จึงต้องเผื่อไว้ ไม่ใช่คิดแบบวาดครั้งเดียวผ่านทุกรูป
+ */
+export function estimateImageCost({
+  covers = 2,
+  pattern = 0,
+  figures = 0,
+  quality = 'medium',
+  model = 'gpt-image-2',
+  retries = 1.15,
+}) {
   const t = IMAGE_TOKENS[quality] || IMAGE_TOKENS.medium;
-  const outTokens = covers * t.tall + figures * t.square;
+  const images = covers + pattern + figures;
+  const outTokens = Math.round(((covers + pattern) * t.tall + figures * t.square) * retries);
   // คำสั่งภาพยาวราว 2,500 ตัวอักษร คิดคร่าว ๆ ที่ 700 token ต่อรูป
-  const inTokens = (covers + figures) * 700;
+  const inTokens = Math.round(images * 700 * retries);
   return {
-    images: covers + figures,
+    images,
     inTokens,
     outTokens,
     usd: costOfImages({ inputTokens: inTokens, outputTokens: outTokens, model }),

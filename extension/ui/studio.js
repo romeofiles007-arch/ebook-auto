@@ -15,6 +15,7 @@ import {
   costOf,
   estimateCost,
   estimateImageCost,
+  plannedImageCount,
   costOfImages,
   formatCost,
 } from '../core/pricing.js';
@@ -3742,11 +3743,27 @@ function renderTextPrice() {
    * ผู้ใช้จะตั้งราคาขายจากตัวเลขที่ผิด
    */
   const imgApi = val('imageSource', 'web') === 'api';
-  const figures = Number(book?.figures?.filter?.((f) => f.kind === 'image')?.length) || 0;
-  const img = imgApi
+  /**
+   * นับภาพให้ตรงกับที่ระบบจะสร้างจริง ไม่ใช่นับแต่ปกสองรูป
+   * ที่ลืมง่ายที่สุดคือลวดลายพื้นหลังของทุกหน้า ซึ่งเป็นภาพหนึ่งรูปที่ต้องจ่ายเงินเหมือนกัน
+   * และตอนอยู่หน้าตั้งค่ายังไม่มีแผนภาพ จึงต้องประมาณจากความหนาแน่นที่ผู้ใช้เลือกไว้
+   */
+  const planned = plannedImageCount({
+    coverMode: val('coverMode', 'prompt'),
+    pagePattern: val('pagePattern', 'none'),
+    figureMode: val('figureMode', 'prompt'),
+    // ช่องความหนาแน่นภาพชื่อ illus ไม่ใช่ illustrationLevel — และโหมด auto ที่ยังตั้ง "ไม่มี"
+    // ถือเป็นระดับพอดี ตรงกับที่ใช้ตอนสร้างเล่มจริง
+    illustrationLevel:
+      val('figureMode', 'prompt') === 'auto' && val('illus', 'none') === 'none' ? 'light' : val('illus', 'none'),
+    sections: (currentEstimate?.chapters || 0) * 4,
+    knownFigures: book?.figures ? book.figures.filter((f) => f.kind === 'image').length : null,
+  });
+  const img = imgApi && planned.total
     ? estimateImageCost({
-        covers: ['none', 'upload'].includes(val('coverMode', 'prompt')) ? 0 : 2,
-        figures,
+        covers: planned.covers,
+        pattern: planned.pattern,
+        figures: planned.figures,
         quality: val('imageApiQuality', 'medium'),
         model: $('imageApiModel')?.value.trim() || 'gpt-image-2',
       })
@@ -3761,7 +3778,13 @@ function renderTextPrice() {
         ` — ส่งเข้าราว ${Math.round(est.inTokens / 1000).toLocaleString()}K token · เขียนออกราว ${Math.round(est.outTokens / 1000).toLocaleString()}K token`
       : '') +
     (img
-      ? `<br>ค่าภาพ ${img.images} รูป (ปก + ภาพในเล่ม) ราว <b>${esc(formatCost(img.usd, usdThb))}</b>` +
+      ? `<br>ค่าภาพ ${img.images} รูป (${[
+          planned.covers ? `ปก ${planned.covers}` : '',
+          planned.pattern ? 'ลายพื้นหลัง 1' : '',
+          planned.figures ? `ภาพในเล่ม ${planned.figures}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ')}) ราว <b>${esc(formatCost(img.usd, usdThb))}</b>` +
         `<br><b>รวมทั้งเล่มราว ${esc(formatCost(total, usdThb))}</b>`
       : est
         ? `<br>ยังไม่รวมค่าภาพ เพราะเล่มนี้ตั้งให้สร้างภาพเอง ไม่ผ่าน API`
