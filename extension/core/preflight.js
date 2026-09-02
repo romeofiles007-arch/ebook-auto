@@ -5,6 +5,7 @@
 import { minInnerMargin, coverGeometry, targetPhysicalPages } from './budget.js';
 import { planItems } from './items.js';
 import { ZWSP } from './thai.js';
+import { findUndrawable } from './glyphs.js';
 
 const KDP_MIN_PAGES = 24;
 
@@ -44,6 +45,36 @@ export function preflight({ book, sections, pages }) {
       `ขอบใน ${book.typography.marginsMm.inner} มม. น้อยเกินไป`,
       `เล่มหนา ${pages} หน้า ต้องมีขอบในอย่างน้อย ${needInner} มม. ไม่งั้นตัวหนังสือจะจมเข้าไปในสัน`,
     );
+
+  /**
+   * ตัวอักษรที่ฟอนต์วาดไม่ได้ จะกลายเป็นกล่องสี่เหลี่ยมในไฟล์จริง
+   *
+   * ระบบแปลงให้อัตโนมัติตอนเรียงพิมพ์อยู่แล้ว แต่ผู้ใช้ควรรู้ว่าเนื้อหาถูกแตะตรงไหน
+   * โดยเฉพาะตัวที่แทนด้วยอะไรไม่ได้เลยและต้องถอดทิ้ง — เจ้าของเล่มควรได้ตัดสินใจเอง
+   * ว่าจะเขียนใหม่หรือปล่อย ไม่ใช่มารู้ตอนเปิดไฟล์ที่พิมพ์ไปแล้ว
+   */
+  const glyphHits = new Map();
+  for (const sec of sections) {
+    for (const hit of findUndrawable(sec.md || sec.text || '')) {
+      const rec = glyphHits.get(hit.ch) || { ...hit, n: 0, ids: [] };
+      rec.n += hit.n;
+      if (rec.ids.length < 4 && !rec.ids.includes(sec.id)) rec.ids.push(sec.id);
+      glyphHits.set(hit.ch, rec);
+    }
+  }
+  if (!glyphHits.size) ok('glyphs', 'ทุกตัวอักษรในเล่มพิมพ์ออกมาเห็นได้จริง');
+  else {
+    const list = [...glyphHits.values()].sort((a, b) => b.n - a.n);
+    const dropped = list.filter((h) => !h.replaceable);
+    warn(
+      'glyphs',
+      `มีตัวอักษรที่ฟอนต์ไม่มี ${list.length} แบบ รวม ${list.reduce((n, h) => n + h.n, 0)} ตัว`,
+      list
+        .slice(0, 6)
+        .map((h) => `${h.ch} (${h.n} จุด · ${h.ids.join(', ')}) ${h.replaceable ? 'แปลงให้แล้ว' : 'ถอดทิ้ง'}`)
+        .join(' · ') + (dropped.length ? ' — ตัวที่ถอดทิ้งควรกลับไปเขียนใหม่ให้เป็นคำ' : ''),
+    );
+  }
 
   const blocked = sections.filter((s) => s.status === 'blocked');
   const draft = sections.filter((s) => !s.md?.trim());
