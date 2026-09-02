@@ -81,9 +81,18 @@ const isNoCostFailure = (res) =>
   res?.status !== 'ok' && NO_COST_ERRORS.has(String(res?.meta?.error || ''));
 
 export class Machine {
-  constructor({ book, transport, onEvent = () => {} }) {
+  /**
+   * เครื่องนี้มีสายส่งสองเส้น ไม่ใช่เส้นเดียว
+   *
+   * งานเขียนกับงานสร้างภาพเลือกแหล่งแยกกันได้ตั้งแต่หน้าตั้งค่า และคนใช้บัญชีฟรี
+   * มักเขียนด้วยทางหนึ่งแล้ววาดภาพอีกทางหนึ่ง ถ้าเครื่องมีสายส่งเส้นเดียว
+   * เล่มที่เขียนด้วย API จะส่งเทิร์นสร้างภาพไปทาง API ด้วย ซึ่งวาดภาพไม่ได้
+   * แล้วภาพทั้งเล่มจะไม่มาโดยที่คำสั่งภาพไม่มีอะไรผิดเลยสักบรรทัด
+   */
+  constructor({ book, transport, imageTransport = null, onEvent = () => {} }) {
     this.book = book;
     this.tr = transport;
+    this.imgTr = imageTransport || transport;
     this.emit = onEvent;
     this.stopRequested = false;
     this.turnNo = book.job?.turnNo || 0;
@@ -168,14 +177,17 @@ export class Machine {
      * ทาง API ไม่มีหน้าเว็บให้ต้องทำเนียน หน่วงไปก็เสียเวลาเปล่าอย่างเดียว
      * เล่มหนึ่งมีหลายสิบเทิร์น ตรงนี้จึงเป็นเวลาที่ประหยัดได้จริงเมื่อเลือกทาง API
      */
-    const noPacingNeeded = this.tr.kind === 'fake' || this.tr.kind === 'openai_api';
+    const activeKind = opts.wantImages ? this.imgTr.kind : this.tr.kind;
+    const noPacingNeeded = activeKind === 'fake' || activeKind === 'openai_api';
     const [lo, hi] = this.book.transport?.delayMs || [4000, 9000];
     if (this.turnNo > 0 && !noPacingNeeded) await sleep(jitter([lo, hi]));
 
     const n = ++this.turnNo;
     this.emit({ type: 'turn.start', n, label: opts.label || '', prompt });
 
-    const res = await this.tr.send(prompt, opts);
+    // เทิร์นที่ขอภาพต้องออกทางสายภาพเสมอ ไม่ใช่สายที่ใช้เขียนข้อความ
+    const line = opts.wantImages ? this.imgTr : this.tr;
+    const res = await line.send(prompt, opts);
     await db.saveTurn(this.book.id, n, {
       label: opts.label || '',
       prompt,

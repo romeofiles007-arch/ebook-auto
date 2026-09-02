@@ -1276,6 +1276,12 @@ const testing = () => (book ? !!book.testMode : on('testMode'));
  * จะถูกพาไปหน้าเว็บตามค่าของเล่มเก่าที่ไม่เกี่ยวอะไรกับสิ่งที่เขากำลังจะทำเลย
  */
 const bookUsesApi = (b) => (b?.textSource || 'web') === 'api';
+/**
+ * งานภาพของเล่มนี้ต้องใช้แท็บ ChatGPT หรือไม่ — คนละเรื่องกับเครื่องยนต์เขียนข้อความ
+ * เล่มที่เขียนด้วย API แต่วาดภาพในแท็บ ยังต้องเรียกแท็บขึ้นมาตอน Phase 2 อยู่ดี
+ */
+const bookDrawsInTab = (b) =>
+  (b?.imageSource || 'web') !== 'api' && !['none', 'upload'].includes(b?.coverMode || 'prompt');
 const uiUsesApi = () => val('textSource', 'web') === 'api';
 const useTextApi = (forBook = null) => !testing() && (forBook ? bookUsesApi(forBook) : uiUsesApi());
 const transportKind = (forBook = null) =>
@@ -1338,7 +1344,16 @@ function showRunningCost() {
 
 function makeMachine() {
   const transport = makeTransport(transportKind(book), transportOpts({}, book));
-  machine = new Machine({ book, transport, onEvent: logMachine });
+  /**
+   * สายสำหรับเทิร์นสร้างภาพ แยกจากสายเขียนข้อความเสมอ
+   *
+   * ภาพที่ให้ ChatGPT วาดในแท็บ ต้องออกทางแท็บ ไม่ว่าเนื้อหาจะเขียนด้วยทางไหน
+   * (โหมดภาพแบบ API ไม่ผ่านสายนี้เลย มันเรียก Images API ตรงจาก core/imageApi.js)
+   */
+  const imageTransport = testing()
+    ? transport
+    : makeTransport('chatgpt_tab', { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
+  machine = new Machine({ book, transport, imageTransport, onEvent: logMachine });
 }
 
 /**
@@ -3105,7 +3120,7 @@ async function startPhase2() {
 
   // ไม่ await ตรงนี้ เพราะถ้าการ focus หน้าต่าง ChatGPT ช้าหรือ browser กำลังสลับหน้าต่าง
   // Studio จะไม่ถูกทิ้งไว้ที่หน้า Progress ว่าง ๆ; transport ของเทิร์นแรกจะ ensure/focus ChatGPT ซ้ำให้อีกชั้น
-  if (!testing() && !useTextApi(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (!testing() && bookDrawsInTab(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 
   showRunningCost();
   makeMachine();
@@ -3177,7 +3192,7 @@ async function rethinkCoverWithGpt() {
   renderSteps();
   setPhase('style', 'กำลังส่งข้อมูลทั้งเล่มให้ GPT Art Director คิดปกใหม่ 3 ทางและเลือกแนวที่แนะนำ');
   status('กำลังปรึกษา GPT เรื่องปก');
-  if (!testing() && !useTextApi(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (!testing() && bookDrawsInTab(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
   showRunningCost();
   makeMachine();
   try {
