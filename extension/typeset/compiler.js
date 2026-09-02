@@ -55,6 +55,13 @@ function call(op, payload = {}, transfer = []) {
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
     frame.contentWindow.postMessage({ id, op, ...payload }, '*', transfer);
+  }).catch((e) => {
+    // ห้องที่ชน CSP กลางทางถือว่าใช้ต่อไม่ได้ทั้งห้อง ล้างทิ้งเพื่อให้ครั้งหน้าสร้างใหม่จริง
+    if (isCspError(e)) {
+      teardown();
+      throw new Error(SANDBOX_BROKEN);
+    }
+    throw e;
   });
 }
 
@@ -62,6 +69,25 @@ async function bytes(path) {
   const res = await fetch(url(path));
   if (!res.ok) throw new Error(`โหลดไฟล์ไม่ได้: ${path}`);
   return res.arrayBuffer();
+}
+
+/** ข้อความที่บอกทางออกจริง ไม่ใช่คำบ่นของเบราว์เซอร์ที่ผู้ใช้ทำอะไรกับมันไม่ได้ */
+const SANDBOX_BROKEN =
+  'ห้องเรียงพิมพ์ไม่ได้ทำงานในโหมด sandbox หน้านี้จึงคอมไพล์เอกสารไม่ได้ — ' +
+  'ให้ปิดหน้า Studio แล้วเปิดใหม่จากไอคอนส่วนขยาย ' +
+  '(อาการนี้เกิดเมื่อส่วนขยายถูกรีโหลดหรืออัปเดตขณะที่หน้านี้เปิดค้างอยู่ หน้าเก่าจะยังผูกกับสิทธิ์ชุดเดิมที่หมดอายุแล้ว) ' +
+  'ถ้าเปิดใหม่แล้วยังไม่หาย ให้เข้า chrome://extensions แล้วกดรีโหลดส่วนขยาย';
+
+const isCspError = (e) => /unsafe-eval|Content Security Policy/i.test(String(e?.message || e));
+
+/** ล้างห้องเรียงพิมพ์ทิ้งเพื่อให้ครั้งหน้าเริ่มใหม่จริง ๆ ไม่ใช่คืนความล้มเหลวเดิมที่ค้างอยู่ */
+function teardown() {
+  try { window.removeEventListener('message', onMessage); } catch {}
+  try { frame?.remove(); } catch {}
+  frame = null;
+  ready = null;
+  for (const [, p] of pending) p.reject(new Error('ห้องเรียงพิมพ์ถูกปิดระหว่างรอผลลัพธ์'));
+  pending.clear();
 }
 
 export function init() {
@@ -79,12 +105,21 @@ export function init() {
         if (e.source !== frame.contentWindow || !e.data?.ready) return;
         clearTimeout(t);
         window.removeEventListener('message', onReady);
-        resolve();
+        resolve(e.data);
       };
       window.addEventListener('message', onReady);
     });
     document.body.appendChild(frame);
-    await opened;
+    const hello = await opened;
+
+    /**
+     * ตรวจว่าห้องนี้ "เป็น sandbox จริง" ก่อนจะทำอะไรต่อ
+     *
+     * เดิมห้องรายงานแค่ว่าโหลดเสร็จแล้ว หน้าแม่จึงเดินหน้าโหลด wasm 28 MB ต่อไป
+     * แล้วไปพังกลางทางด้วยข้อความ CSP ดิบ ๆ ที่ผู้ใช้อ่านแล้วทำอะไรไม่ถูก
+     * ตรวจตั้งแต่ตอนจับมือจะได้รู้ทันทีก่อนเสียเวลาและก่อนเผลอไปเผาเทิร์น ChatGPT
+     */
+    if (hello?.evalOk === false) throw new Error(SANDBOX_BROKEN);
 
     // หน้าแม่เป็นฝ่ายอ่านไฟล์ทั้งหมด เพราะในห้องแยกอ่านไฟล์ของส่วนขยายไม่ได้
     const [librarySource, compilerWasm, rendererWasm] = await Promise.all([
@@ -103,7 +138,18 @@ export function init() {
     return true;
   })();
 
-  return ready;
+  /**
+   * ความล้มเหลวห้ามถูกจำไว้
+   *
+   * ของเดิม `ready` เก็บ promise ไว้ตลอด รวมทั้ง promise ที่ reject ไปแล้ว
+   * ครั้งถัดไปที่กด "ทำต่อจากที่ค้าง" จึงได้ error ตัวเดิมกลับมาทันทีโดยไม่ลองใหม่เลยสักครั้ง
+   * ผู้ใช้เห็นเป็น "โหมดนี้ไม่เคยใช้ได้" ทั้งที่ลองใหม่จริง ๆ อาจผ่านตั้งแต่ครั้งที่สอง
+   * ต้องรีเซ็ตให้ครั้งหน้าเริ่มนับหนึ่งใหม่จริง
+   */
+  return ready.catch((e) => {
+    teardown();
+    throw isCspError(e) ? new Error(SANDBOX_BROKEN) : e;
+  });
 }
 
 /** จำนวนหน้าจริงที่โรงพิมพ์ต้องพิมพ์ — อ่านจากเอกสาร ไม่ใช่จากการประมาณ */
