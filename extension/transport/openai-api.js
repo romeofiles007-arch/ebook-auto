@@ -83,10 +83,13 @@ export class OpenAiApiTransport {
     const timeoutMs = opts.timeoutMs ?? this.timeoutMs;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const startedAt = Date.now();
-    this.onProgress?.({ type: 'gpt.progress', phase: 'sending', detail: `ส่งให้ ${this.model}` });
+    const report = (phase, extra = {}) =>
+      this.onProgress?.({ type: 'gpt.progress', via: 'api', phase, model: this.model, ...extra });
 
-    try {
-      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    report('sending', { detail: `ส่งให้ ${this.model}` });
+
+    const ask = (extras) =>
+      fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         signal: controller.signal,
         headers: {
@@ -96,12 +99,37 @@ export class OpenAiApiTransport {
         body: JSON.stringify({
           model: this.model,
           messages: [{ role: 'user', content: prompt }],
+          ...extras,
         }),
       });
 
-      const body = await res.json().catch(() => null);
+    try {
+      /**
+       * สตรีมเสมอ เพื่อให้เห็นว่ากำลังทำงานอยู่จริง
+       *
+       * ทางขับหน้าเว็บมีข้อดีที่มองข้ามไม่ได้ข้อหนึ่ง คือผู้ใช้เห็น ChatGPT พิมพ์ทีละตัวอักษร
+       * จึงรู้ตลอดว่าระบบยังไม่ตาย ทาง API แบบรอทั้งก้อนจะเงียบสนิทเป็นนาที
+       * ซึ่งกับงานที่กินเวลาเป็นสิบนาที ความเงียบแบบนั้นทำให้คนกดปิดทิ้งกลางทาง
+       */
+      let res = await ask({ stream: true, stream_options: { include_usage: true } });
+
+      /**
+       * บริการที่พูดภาษาเดียวกับ OpenAI ไม่ได้รองรับทุกช่องเท่ากัน
+       *
+       * โมเดลที่รันในเครื่อง (Ollama, LM Studio) หลายตัวไม่รู้จัก stream_options
+       * แล้วตอบ 400 ทิ้งทั้งคำขอ ถ้าไม่ถอยให้ ทางเลือกโมเดลโลคัลที่โฆษณาไว้จะใช้ไม่ได้จริง
+       * ถอยเป็นสตรีมเปล่า ๆ แล้วยอมไม่รู้จำนวน token ดีกว่าใช้งานไม่ได้เลย
+       */
+      if (res.status === 400) {
+        const peek = await res.clone().json().catch(() => null);
+        if (/stream_options|unknown|unsupported|unrecognized/i.test(peek?.error?.message || '')) {
+          report('sending', { detail: 'เซิร์ฟเวอร์นี้ไม่รับ stream_options — ส่งใหม่แบบไม่ขอยอด token' });
+          res = await ask({ stream: true });
+        }
+      }
 
       if (!res.ok) {
+        const body = await res.json().catch(() => null);
         const message = apiErrorMessage(res.status, body);
         // ชนลิมิตต้องแยกออกจากความผิดพลาดอื่น เพราะระบบหยุดรอคนสั่งทำต่อ ไม่ใช่ลองใหม่เอง
         return {
@@ -111,27 +139,30 @@ export class OpenAiApiTransport {
         };
       }
 
-      const choice = body?.choices?.[0];
-      const text = String(choice?.message?.content || '').trim();
+      const out = await this.readStream(res, report, startedAt);
+      const text = out.text.trim();
+
       if (!text) {
         return {
           status: 'empty',
           text: '',
-          meta: { error: 'โมเดลตอบกลับมาว่าง', finish: choice?.finish_reason || '' },
+          meta: { error: out.error || 'โมเดลตอบกลับมาว่าง', finish: out.finish },
         };
       }
 
+      report('done', { chars: text.length, ms: Date.now() - startedAt });
       return {
         status: 'ok',
         text,
         meta: {
-          model: body?.model || this.model,
+          model: out.model || this.model,
           ms: Date.now() - startedAt,
-          // เก็บจำนวน token ไว้ให้ผู้ใช้เห็นว่าเทิร์นนี้ราคาประมาณเท่าไร
-          promptTokens: body?.usage?.prompt_tokens ?? null,
-          completionTokens: body?.usage?.completion_tokens ?? null,
+          // เก็บจำนวน token ไว้ให้ผู้ใช้เห็นว่าเทิร์นนี้ราคาเท่าไร
+          promptTokens: out.usage?.prompt_tokens ?? null,
+          completionTokens: out.usage?.completion_tokens ?? null,
           // ตอบไม่จบเพราะชนเพดานความยาว = คำตอบถูกตัด ระบบต้องรู้เพื่อสั่งเขียนต่อ
-          truncated: choice?.finish_reason === 'length',
+          truncated: out.finish === 'length',
+          streamBroken: out.broken || false,
         },
       };
     } catch (e) {
@@ -140,6 +171,85 @@ export class OpenAiApiTransport {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * อ่านคำตอบแบบสตรีม แล้วรายงานความคืบหน้าระหว่างทาง
+   *
+   * รายงานถี่กว่านี้ไม่ได้ช่วยให้รู้อะไรเพิ่ม แต่ทำให้หน้าจอวาดใหม่ตลอดเวลาจนหน่วง
+   * ทุก 200 มิลลิวินาทีคือจังหวะที่ตายังเห็นว่าข้อความกำลังงอกอยู่ โดยไม่กินแรงเครื่อง
+   */
+  async readStream(res, report, startedAt) {
+    const reader = res.body?.getReader?.();
+    if (!reader) {
+      // เซิร์ฟเวอร์ที่ไม่รองรับสตรีม ยังต้องอ่านคำตอบทั้งก้อนได้ตามปกติ
+      const body = await res.json().catch(() => null);
+      const choice = body?.choices?.[0];
+      return {
+        text: String(choice?.message?.content || ''),
+        usage: body?.usage,
+        model: body?.model,
+        finish: choice?.finish_reason || '',
+      };
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    let usage = null;
+    let model = '';
+    let finish = '';
+    let broken = false;
+    let lastReport = 0;
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // ข้อความ SSE คั่นด้วยบรรทัดว่าง ชิ้นสุดท้ายอาจยังมาไม่ครบ เก็บไว้รอรอบหน้า
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const line = part.split('\n').find((l) => l.startsWith('data:'));
+          if (!line) continue;
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          let chunk;
+          try {
+            chunk = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          model = chunk.model || model;
+          if (chunk.usage) usage = chunk.usage;
+          const c = chunk.choices?.[0];
+          if (c?.finish_reason) finish = c.finish_reason;
+          const piece = c?.delta?.content;
+          if (piece) text += piece;
+        }
+
+        const now = Date.now();
+        if (now - lastReport > 200) {
+          lastReport = now;
+          report('streaming', {
+            chars: text.length,
+            ms: now - startedAt,
+            // ท้ายข้อความล่าสุด ให้เห็นว่ากำลังเขียนถึงตรงไหน ไม่ใช่แค่ตัวเลขวิ่ง
+            tail: text.slice(-90).replace(/\s+/g, ' '),
+          });
+        }
+      }
+    } catch (e) {
+      // สตรีมขาดกลางทางแต่ได้ข้อความมาบางส่วนแล้ว ดีกว่าทิ้งทั้งเทิร์น
+      // ตัวตรวจ sentinel ปลายทางจะจับได้เองว่าไม่ครบ แล้วสั่งเขียนต่อ
+      broken = true;
+      if (!text) throw e;
+    }
+
+    return { text, usage, model, finish, broken };
   }
 
   /** ตรวจว่าคีย์ใช้ได้และมีโมเดลชื่อนี้จริง ก่อนเริ่มเล่มที่กินเวลาเป็นชั่วโมง */

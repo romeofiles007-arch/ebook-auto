@@ -402,10 +402,47 @@ setInterval(() => {
   status(`ค้างที่ขั้น ${where} มา ${quiet} วินาที`);
 }, 5000);
 
+
+/**
+ * ความคืบหน้าของเทิร์นที่วิ่งผ่าน API
+ *
+ * ทางขับหน้าเว็บมีข้อดีที่มองข้ามไม่ได้: ผู้ใช้เห็น ChatGPT พิมพ์ทีละตัวอักษร
+ * จึงรู้ตลอดว่าระบบยังไม่ตาย ทางนี้ต้องสร้างสัญญาณชีพนั้นขึ้นมาเอง
+ * จากข้อความที่สตรีมกลับมา — เห็นทั้งจำนวนตัวอักษรที่ได้แล้ว เวลาที่ใช้ไป
+ * และท้ายประโยคล่าสุดที่โมเดลเพิ่งเขียน
+ */
+function showApiProgress(m) {
+  const secs = m.ms ? (m.ms / 1000).toFixed(1) : '0.0';
+  if (m.phase === 'sending') {
+    status(`ส่งงานให้ ${m.model || 'API'} แล้ว รอคำตอบ`);
+    $('detail').textContent = '';
+    return;
+  }
+  if (m.phase === 'streaming') {
+    status(`กำลังเขียน · ${Number(m.chars || 0).toLocaleString()} ตัวอักษร · ${secs} วินาที`);
+    $('detail').textContent = m.tail ? `…${m.tail}` : '';
+    return;
+  }
+  if (m.phase === 'done') {
+    status(`เขียนจบแล้ว ${Number(m.chars || 0).toLocaleString()} ตัวอักษร ใน ${secs} วินาที`);
+    $('detail').textContent = '';
+  }
+}
+
 function handleGptMessage(m) {
   if (m?.type !== 'gpt.progress') return;
   lastProgressAt = Date.now();
   lastProgressPhase = m.phase || lastProgressPhase;
+
+  /**
+   * ความคืบหน้าจากทาง API มีคิวของตัวเอง ไม่ได้อยู่ในทะเบียนเทิร์นของแท็บ ChatGPT
+   *
+   * ตัวกรองด้านล่างใช้ทะเบียนของแท็บเป็นเกณฑ์ ซึ่งของทาง API ว่างเสมอ
+   * เหตุการณ์ทั้งหมดจึงถูกทิ้งตั้งแต่บรรทัดแรก หน้าจอเลยเงียบสนิทตลอดการทำงาน
+   * ทั้งที่ระบบกำลังเขียนอยู่จริง — เป็นความเงียบที่ทำให้คนกดปิดทิ้งกลางทาง
+   */
+  if (m.via === 'api') return showApiProgress(m);
+
   // ไม่มีเทิร์นไหนรอผลอยู่ = ข้อความนี้มาช้ากว่างานที่จบไปแล้ว ห้ามทับสถานะปัจจุบัน
   if (!hasPendingTurn()) return;
   const map = {
