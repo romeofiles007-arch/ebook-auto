@@ -130,6 +130,6 @@ service worker ใน 30 วินาที) · Typst ต้องรันใ�
 
 โค้ดในโปรเจกต์นี้อยู่ภายใต้ [MIT](LICENSE) — เอาไปใช้ แก้ ต่อยอด หรือทำเป็นสินค้าได้
 
-ฟอนต์และไลบรารีที่แจกมาด้วยมีสัญญาอนุญาตของตัวเอง ดู
-[`extension/fonts/NOTICE.md`](extension/fonts/NOTICE.md) (SIL OFL 1.1) และ
-[`extension/vendor/NOTICE.md`](extension/vendor/NOTICE.md) (Apache-2.0)
+ฟอนต์และไลบรารีที่แจกมาด้วยมีสัญญาอนุญาตของตัวเอง — Sarabun และ IBM Plex Sans Thai
+อยู่ภายใต้ SIL OFL 1.1 ส่วน Typst และ typst.ts อยู่ภายใต้ Apache-2.0
+รายละเอียดอยู่ใน [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
