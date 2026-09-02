@@ -6,7 +6,7 @@
 
 import * as db from '../core/db.js';
 import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage } from '../core/machine.js';
-import { makeTransport, hasPendingTurn } from '../transport/index.js';
+import { makeTransport, hasPendingTurn, DEFAULT_TEXT_MODEL } from '../transport/index.js';
 import { TRIM_PRESETS, estimateTurns, targetPhysicalPages } from '../core/budget.js';
 import {
   FIGURE_STYLES,
@@ -40,6 +40,14 @@ let sections = [];
 let assetNames = [];
 let selected = null;
 let eventCount = 0;
+/**
+ * คีย์ OpenAI ที่โหลดไว้ในหน่วยความจำ
+ *
+ * transport ถูกสร้างแบบ synchronous ในหลายจุด จะไปอ่าน IndexedDB ตอนนั้นไม่ได้
+ * จึงโหลดคีย์ไว้ตั้งแต่เปิดหน้า แล้วอัปเดตทุกครั้งที่ผู้ใช้พิมพ์
+ */
+let apiKeyValue = '';
+const textApiModel = () => $('textApiModel')?.value.trim() || DEFAULT_TEXT_MODEL;
 let trendSeed = null;
 let trendPool = [];
 let outlineDirection = null;
@@ -678,7 +686,7 @@ async function generateTrendIdeas() {
   await saveCreatorDefaults();
   await focusChat();
   try {
-    const transport = makeTransport(transportKind(), { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
+    const transport = makeTransport(transportKind(), transportOpts());
     const res = await sendTurn(
       transport,
       trendIdeasPrompt({
@@ -724,7 +732,7 @@ async function generateOutlineDirections() {
     const fictionGenre = val('fictionGenre', 'fantasy');
     const genre = contentMode === 'fiction' ? fictionGenre : val('genre', 'how-to');
     const res = await sendTurn(
-      makeTransport(transportKind(), { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 }),
+      makeTransport(transportKind(), transportOpts()),
       outlineDirectionsPrompt({
         title,
         audience: $('audience').value.trim(),
@@ -875,7 +883,7 @@ async function polishUserOutline() {
     const fictionGenre = val('fictionGenre', 'fantasy');
     const genre = contentMode === 'fiction' ? fictionGenre : val('genre', 'how-to');
     const res = await sendTurn(
-      makeTransport(transportKind(), { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 }),
+      makeTransport(transportKind(), transportOpts()),
       outlinePolishPrompt({
         title,
         userOutline,
@@ -918,7 +926,7 @@ async function generateTitleIdeas() {
   await saveCreatorDefaults();
   await focusChat();
   try {
-    const transport = makeTransport(transportKind(), { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
+    const transport = makeTransport(transportKind(), transportOpts());
     const res = await sendTurn(
       transport,
       titleIdeasPrompt({
@@ -1029,23 +1037,29 @@ async function saveCreatorDefaults() {
 }
 
 async function loadCreatorDefaults() {
-  const [audience, author, draftOutline, imageSource, apiKey, apiQuality, apiModel] = await Promise.all([
-    db.setting('defaultAudience'),
-    db.setting('defaultAuthor'),
-    db.setting('draftUserOutline'),
-    db.setting('imageSource'),
-    db.setting('openaiApiKey'),
-    db.setting('imageApiQuality'),
-    db.setting('imageApiModel'),
-  ]);
+  const [audience, author, draftOutline, imageSource, apiKey, apiQuality, apiModel, textSource, textModel] =
+    await Promise.all([
+      db.setting('defaultAudience'),
+      db.setting('defaultAuthor'),
+      db.setting('draftUserOutline'),
+      db.setting('imageSource'),
+      db.setting('openaiApiKey'),
+      db.setting('imageApiQuality'),
+      db.setting('imageApiModel'),
+      db.setting('textSource'),
+      db.setting('textApiModel'),
+    ]);
   if (imageSource) $('imageSource').value = imageSource;
+  if (textSource) $('textSource').value = textSource;
+  if (textModel) $('textApiModel').value = textModel;
+  apiKeyValue = apiKey || '';
   if (apiKey) {
     $('openaiApiKey').value = apiKey;
     $('apiKeyNote').textContent = `✓ ใช้คีย์ที่บันทึกไว้ (${apiKey.length > 12 ? `${apiKey.slice(0, 7)}…${apiKey.slice(-4)}` : 'บันทึกแล้ว'})`;
   }
   if (apiQuality) $('imageApiQuality').value = apiQuality;
   if (apiModel) $('imageApiModel').value = apiModel;
-  syncImageSource();
+  syncApiSources();
   if (!$('audience').value.trim() && audience) $('audience').value = audience;
   if (!$('author').value.trim() && author) $('author').value = author;
   if (draftOutline && $('inspireOutline') && !$('inspireOutline').value.trim()) {
@@ -1178,14 +1192,23 @@ function updateEstimate() {
   if (perSection) draft.maxCharsPerTurn = 1; // เขียนทีละตอน จำนวนข้อความ = จำนวนตอน
 
   const e = estimateTurns(draft);
-  const mins = Math.round((e.likely * 70) / 60);
+  /**
+   * ทาง API ไม่ต้องหน่วงระหว่างเทิร์นและตอบเร็วกว่าการรอหน้าเว็บพิมพ์ทีละตัวอักษร
+   * เวลาที่ประเมินจึงต้องต่างกัน ไม่ใช่บอกตัวเลขเดียวแล้วให้ผู้ใช้ไปเจอเองว่าไม่ตรง
+   */
+  const viaApi = val('textSource', 'web') === 'api';
+  const secPerTurn = viaApi ? 30 : 70;
+  const mins = Math.round((e.likely * secPerTurn) / 60);
 
   $('estimate').className = 'estimate';
   $('estimate').innerHTML =
-    `คาดว่าจะใช้ราว <span class="big">${e.likely}</span> ข้อความ ChatGPT ` +
+    `คาดว่าจะใช้ราว <span class="big">${e.likely}</span> ${viaApi ? 'เทิร์น API' : 'ข้อความ ChatGPT'} ` +
     `<b>(อย่างน้อย ${e.min} · มากสุด ${e.max})</b><br>` +
-    `ราว ${e.chapters} บท · เขียน ${e.batches} ข้อความ${perSection ? ' (ทีละตอน)' : ' (รวมหลายตอนต่อข้อความ)'} · เนื้อหา ${e.budget.toLocaleString()} อักษร<br>` +
-    `ใช้เวลาเดินเครื่องราว ${mins} นาที ระบบจะเดินต่อจนจบเนื้อหา`;
+    `ราว ${e.chapters} บท · เขียน ${e.batches} ${viaApi ? 'เทิร์น' : 'ข้อความ'}${perSection ? ' (ทีละตอน)' : ' (รวมหลายตอนต่อข้อความ)'} · เนื้อหา ${e.budget.toLocaleString()} อักษร<br>` +
+    `ใช้เวลาเดินเครื่องราว ${mins} นาที ระบบจะเดินต่อจนจบเนื้อหา` +
+    (viaApi
+      ? `<br>ทาง API ไม่มีลิมิตข้อความรายสามชั่วโมง แต่คิดเงินตาม token ที่ใช้จริง — ระบบจะบอกจำนวน token ของทุกเทิร์นในบันทึกการทำงาน`
+      : '');
 }
 
 /**
@@ -1193,16 +1216,34 @@ function updateEstimate() {
  * มีไว้ไล่ดูว่าทุกขั้นตอนต่อกันครบไหมภายในไม่กี่วินาที แทนการรอของจริงเป็นชั่วโมง
  */
 const testing = () => (book ? !!book.testMode : on('testMode'));
-const transportKind = () => (testing() ? 'fake' : 'chatgpt_tab');
+const useTextApi = () => !testing() && val('textSource', 'web') === 'api';
+const transportKind = () => (testing() ? 'fake' : useTextApi() ? 'openai_api' : 'chatgpt_tab');
+
+/**
+ * ตัวเลือกที่ transport ต้องใช้ รวมไว้ที่เดียว
+ *
+ * ทุกจุดในหน้านี้สร้าง transport ด้วยมือของตัวเอง (มีสิบกว่าจุด) ถ้าปล่อยให้แต่ละจุด
+ * ประกอบคีย์กับชื่อโมเดลเอง จะมีจุดที่ลืมส่งเสมอ แล้วโหมด API จะพังเป็นบางปุ่ม
+ * ซึ่งเป็นอาการที่หาสาเหตุยากที่สุดแบบหนึ่ง
+ */
+const transportOpts = (extra = {}) => ({
+  timeoutMs: 300000,
+  onProgress: handleGptMessage,
+  latencyMs: 60,
+  apiKey: apiKeyValue,
+  model: textApiModel(),
+  ...extra,
+});
 
 /** โหมดทดสอบไม่ต้องไปยุ่งกับแท็บ ChatGPT เลย */
 const focusChat = async () => {
-  if (testing()) return;
+  // ทาง API ไม่มีแท็บ ChatGPT ให้ต้องเรียกขึ้นมา การสลับหน้าต่างตอนนั้นมีแต่จะรบกวนคนใช้งาน
+  if (testing() || useTextApi()) return;
   await chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 };
 
 function makeMachine() {
-  const transport = makeTransport(transportKind(), { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
+  const transport = makeTransport(transportKind(), transportOpts());
   machine = new Machine({ book, transport, onEvent: logMachine });
 }
 
@@ -2080,7 +2121,7 @@ async function writeSectionWithAi(id, report = () => {}) {
     report(`กำลังให้ ChatGPT เขียนตอน ${id}...`);
     await focusChat();
     const res = await sendTurn(
-      makeTransport(transportKind(), { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 }),
+      makeTransport(transportKind(), transportOpts()),
       sectionPrompt({
         book,
         outline,
@@ -2912,7 +2953,7 @@ async function startPhase2() {
 
   // ไม่ await ตรงนี้ เพราะถ้าการ focus หน้าต่าง ChatGPT ช้าหรือ browser กำลังสลับหน้าต่าง
   // Studio จะไม่ถูกทิ้งไว้ที่หน้า Progress ว่าง ๆ; transport ของเทิร์นแรกจะ ensure/focus ChatGPT ซ้ำให้อีกชั้น
-  if (!testing()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (!testing() && !useTextApi()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 
   makeMachine();
   try {
@@ -2983,7 +3024,7 @@ async function rethinkCoverWithGpt() {
   renderSteps();
   setPhase('style', 'กำลังส่งข้อมูลทั้งเล่มให้ GPT Art Director คิดปกใหม่ 3 ทางและเลือกแนวที่แนะนำ');
   status('กำลังปรึกษา GPT เรื่องปก');
-  if (!testing()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (!testing() && !useTextApi()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
   makeMachine();
   try {
     await runMachine();
@@ -3360,7 +3401,7 @@ $('aboutPolish').onclick = async () => {
   if (!raw) return ($('aboutState').textContent = 'พิมพ์ข้อมูลของคุณก่อน ระบบจะไม่แต่งขึ้นเอง');
   $('aboutState').textContent = 'กำลังส่งให้เรียบเรียง...';
   try {
-    const tr = makeTransport(transportKind(), { timeoutMs: 180000, latencyMs: 60 });
+    const tr = makeTransport(transportKind(), transportOpts({ timeoutMs: 180000, onProgress: () => {} }));
     const res = await tr.send(polishAboutPrompt(raw, book?.language || val('lang', 'th')));
     const out = (res.text || '').replace(/^```[\w]*\s*/m, '').replace(/```\s*$/m, '').trim();
     if (out) {
@@ -3418,14 +3459,49 @@ $('phase2Folder').onclick = pullImagesFromFolder;
  * ช่องใส่คีย์โผล่เฉพาะตอนเลือกโหมด API
  * คีย์ถูกเก็บใน IndexedDB ของส่วนขยายเครื่องนี้ ไม่ได้ sync ไปไหน และไม่เคยถูก log
  */
-function syncImageSource() {
-  const useApi = val('imageSource', 'web') === 'api';
-  $('apiKeyField').hidden = !useApi;
+function syncApiSources() {
+  const imageApi = val('imageSource', 'web') === 'api';
+  const textApi = val('textSource', 'web') === 'api';
+  // คีย์เดียวใช้ได้ทั้งสองงาน ช่องคีย์จึงโผล่เมื่อมีงานใดงานหนึ่งเลือกทาง API
+  $('apiKeyField').hidden = !imageApi && !textApi;
+  $('textApiRow').hidden = !textApi;
+  $('textSourceNote').textContent = textApi
+    ? 'เร็วกว่าและไม่มีลิมิตข้อความรายสามชั่วโมง แต่จ่ายตามจำนวน token ที่ใช้จริง และไม่แตะบัญชี ChatGPT ของคุณ'
+    : 'ขับหน้าเว็บ ChatGPT ฟรีตามแพ็กเกจที่มีอยู่ แต่ช้ากว่าและมีลิมิตข้อความ';
 }
 $('imageSource').addEventListener('change', async () => {
-  syncImageSource();
+  syncApiSources();
   await db.setting('imageSource', val('imageSource', 'web'));
 });
+$('textSource').addEventListener('change', async () => {
+  syncApiSources();
+  await db.setting('textSource', val('textSource', 'web'));
+  updateEstimate();
+});
+$('textApiModel').addEventListener('change', async () => {
+  await db.setting('textApiModel', textApiModel());
+});
+/** ทดสอบว่าคีย์ใช้ได้และบัญชีมีโมเดลที่เลือกไว้จริง ก่อนเริ่มเล่มที่กินเวลาเป็นชั่วโมง */
+$('testTextApi').onclick = async () => {
+  const note = $('apiKeyNote');
+  const key = $('openaiApiKey').value.trim();
+  if (!key) return (note.textContent = 'ใส่คีย์ก่อนแล้วค่อยกดทดสอบ');
+  $('testTextApi').disabled = true;
+  note.textContent = 'กำลังตรวจคีย์และรายชื่อโมเดล...';
+  try {
+    apiKeyValue = key;
+    await db.setting('openaiApiKey', key);
+    await db.setting('textApiModel', textApiModel());
+    const r = await makeTransport('openai_api', { apiKey: key, model: textApiModel() }).health();
+    note.textContent = r.ok
+      ? `✓ ใช้ได้ — บัญชีนี้เรียกโมเดล ${r.model} ได้ พร้อมใช้ API เขียนเนื้อหาแล้ว`
+      : `✕ ${r.error}`;
+  } catch (e) {
+    note.textContent = `✕ ${e?.message || e}`;
+  } finally {
+    $('testTextApi').disabled = false;
+  }
+};
 /**
  * บันทึกคีย์ทันทีที่พิมพ์ ไม่ต้องรอให้คลิกออกจากช่อง
  *
@@ -3439,6 +3515,7 @@ const saveApiKey = () => {
   clearTimeout(saveKeyTimer);
   saveKeyTimer = setTimeout(async () => {
     const key = $('openaiApiKey').value.trim();
+    apiKeyValue = key;
     await db.setting('openaiApiKey', key);
     $('apiKeyNote').textContent = key
       ? `✓ บันทึกคีย์แล้ว (${maskKey(key)}) — กด "ทดสอบคีย์" เพื่อยืนยันว่าสร้างภาพได้จริง`

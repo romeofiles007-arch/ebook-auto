@@ -163,8 +163,14 @@ export class Machine {
   async turn(prompt, opts = {}) {
     if (this.stopRequested) throw new Halt('หยุดโดยผู้ใช้');
 
+    /**
+     * ช่วงหน่วงระหว่างเทิร์นมีไว้ให้จังหวะการพิมพ์บนหน้าเว็บดูเป็นคนใช้งานจริง
+     * ทาง API ไม่มีหน้าเว็บให้ต้องทำเนียน หน่วงไปก็เสียเวลาเปล่าอย่างเดียว
+     * เล่มหนึ่งมีหลายสิบเทิร์น ตรงนี้จึงเป็นเวลาที่ประหยัดได้จริงเมื่อเลือกทาง API
+     */
+    const noPacingNeeded = this.tr.kind === 'fake' || this.tr.kind === 'openai_api';
     const [lo, hi] = this.book.transport?.delayMs || [4000, 9000];
-    if (this.turnNo > 0 && this.tr.kind !== 'fake') await sleep(jitter([lo, hi]));
+    if (this.turnNo > 0 && !noPacingNeeded) await sleep(jitter([lo, hi]));
 
     const n = ++this.turnNo;
     this.emit({ type: 'turn.start', n, label: opts.label || '', prompt });

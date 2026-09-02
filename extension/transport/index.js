@@ -11,11 +11,16 @@ import { ChatGptTabTransport } from './chatgpt-tab.js';
 
 export { hasPendingTurn } from './chatgpt-tab.js';
 import { FakeTransport } from './fake.js';
+import { OpenAiApiTransport, DEFAULT_TEXT_MODEL } from './openai-api.js';
+
+export { DEFAULT_TEXT_MODEL };
 
 export function makeTransport(kind, opts = {}) {
   switch (kind) {
     case 'fake':
       return new FakeTransport(opts);
+    case 'openai_api':
+      return new OpenAiApiTransport(opts);
     case 'chatgpt_tab':
     default:
       return new ChatGptTabTransport(opts);

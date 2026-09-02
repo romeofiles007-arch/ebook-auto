@@ -49,8 +49,18 @@
   <div class="apiBar">
     <div class="apiBarTop">
       <div>
+        <b>✍️ แหล่งเขียนเนื้อหา</b>
+        <span id="textSourceNote">ขับหน้าเว็บ ChatGPT ฟรีตามแพ็กเกจที่มีอยู่ แต่ช้ากว่าและมีลิมิตข้อความ</span>
+      </div>
+      <select id="textSource">
+        <option value="web" selected>หน้าเว็บ ChatGPT (ฟรี)</option>
+        <option value="api">OpenAI API (จ่ายตามใช้จริง)</option>
+      </select>
+    </div>
+    <div class="apiBarTop">
+      <div>
         <b>🖼 แหล่งสร้างภาพ</b>
-        <span>การเขียนเนื้อหาใช้หน้าเว็บ ChatGPT เสมอ ตัวเลือกนี้มีผลกับภาพเท่านั้น</span>
+        <span>เลือกแยกจากงานเขียนได้ บัญชีที่สร้างภาพไม่ได้ก็ยังเขียนเนื้อหาได้ครบ</span>
       </div>
       <select id="imageSource">
         <option value="web" selected>หน้าเว็บ ChatGPT</option>
@@ -73,7 +83,17 @@
         </select>
         <button id="testApiKey" type="button" class="inline">ทดสอบคีย์</button>
       </div>
-      <div id="apiKeyNote" class="muted">คีย์ถูกบันทึกในเบราว์เซอร์เครื่องนี้เท่านั้น ใส่ครั้งเดียวจำไว้ให้ตลอด</div>
+      <div id="textApiRow" class="apiKeyRow" hidden>
+        <input id="textApiModel" list="textModelOptions" placeholder="โมเดลสำหรับงานเขียน" autocomplete="off" spellcheck="false">
+        <datalist id="textModelOptions">
+          <option value="gpt-4.1"></option>
+          <option value="gpt-4.1-mini"></option>
+          <option value="gpt-4o"></option>
+          <option value="gpt-4o-mini"></option>
+        </datalist>
+        <button id="testTextApi" type="button" class="inline">ทดสอบโมเดลเขียน</button>
+      </div>
+      <div id="apiKeyNote" class="muted">คีย์ถูกบันทึกในเบราว์เซอร์เครื่องนี้เท่านั้น ใส่ครั้งเดียวจำไว้ให้ตลอด · ใช้คีย์เดียวได้ทั้งงานเขียนและงานภาพ</div>
     </div>
   </div>
 
