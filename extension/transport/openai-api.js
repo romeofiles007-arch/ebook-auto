@@ -20,10 +20,12 @@
  * (เช่น โมเดลที่รันในเครื่องผ่าน Ollama หรือ LM Studio) โดยไม่ต้องแก้โค้ดตรงนี้
  */
 
+import { DEFAULT_TEXT_MODEL } from '../core/pricing.js';
+
 const DEFAULT_BASE = 'https://api.openai.com/v1';
 
-/** โมเดลเริ่มต้นสำหรับงานเขียน เปลี่ยนได้จากหน้าจอ */
-export const DEFAULT_TEXT_MODEL = 'gpt-4.1';
+// ชื่อโมเดลตั้งต้นอยู่ที่เดียวกับตารางราคา จะได้ไม่มีวันหลุดจากกัน
+export { DEFAULT_TEXT_MODEL };
 
 /**
  * แปลงข้อผิดพลาดของเซิร์ฟเวอร์เป็นประโยคที่บอกว่าต้องไปแก้ตรงไหน

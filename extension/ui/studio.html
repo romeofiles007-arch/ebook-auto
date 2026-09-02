@@ -84,15 +84,24 @@
         <button id="testApiKey" type="button" class="inline">ทดสอบคีย์</button>
       </div>
       <div id="textApiRow" class="apiKeyRow" hidden>
-        <input id="textApiModel" list="textModelOptions" placeholder="โมเดลสำหรับงานเขียน" autocomplete="off" spellcheck="false">
-        <datalist id="textModelOptions">
-          <option value="gpt-4.1"></option>
-          <option value="gpt-4.1-mini"></option>
-          <option value="gpt-4o"></option>
-          <option value="gpt-4o-mini"></option>
-        </datalist>
+        <select id="textApiModel"></select>
         <button id="testTextApi" type="button" class="inline">ทดสอบโมเดลเขียน</button>
       </div>
+      <div id="textApiPrice" class="muted" hidden></div>
+      <details id="priceEdit" class="more" hidden>
+        <summary>ราคาไม่ตรงกับที่ OpenAI คิดจริง? แก้เองได้</summary>
+        <div class="apiKeyRow" style="margin-top:10px">
+          <input id="priceIn" type="number" min="0" step="0.01" placeholder="ราคา input ต่อ 1M token (USD)">
+          <input id="priceOut" type="number" min="0" step="0.01" placeholder="ราคา output ต่อ 1M token (USD)">
+          <input id="usdThb" type="number" min="1" step="0.1" placeholder="บาทต่อดอลลาร์">
+          <button id="priceReset" type="button" class="inline">ใช้ราคาตั้งต้น</button>
+        </div>
+        <div class="muted" style="margin-top:6px">
+          ราคาตั้งต้นในโปรแกรมถูกจดไว้วันหนึ่ง แล้วราคาจริงเปลี่ยนได้ตลอด —
+          ดูราคาปัจจุบันที่ platform.openai.com/docs/pricing แล้วกรอกทับที่นี่
+          ค่าที่กรอกจะถูกใช้แทนตารางในโปรแกรมทันที
+        </div>
+      </details>
       <div id="apiKeyNote" class="muted">คีย์ถูกบันทึกในเบราว์เซอร์เครื่องนี้เท่านั้น ใส่ครั้งเดียวจำไว้ให้ตลอด · ใช้คีย์เดียวได้ทั้งงานเขียนและงานภาพ</div>
     </div>
   </div>
@@ -514,6 +523,7 @@
   <div class="card now">
     <div class="nowTitle">กำลังทำอะไรอยู่</div>
     <div id="phase">รอเริ่ม...</div>
+    <div id="runningCost" class="pagestat hidden"></div>
     <div class="bar"><i id="bar"></i></div>
     <div id="detail" class="muted"></div>
     <div id="pagestat" class="pagestat hidden"></div>

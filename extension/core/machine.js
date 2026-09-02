@@ -185,6 +185,7 @@ export class Machine {
       meta: res.meta || {},
     });
 
+    this.recordUsage(res);
     this.emit({ type: 'turn.end', n, status: res.status, response: res.text || '', meta: res.meta || {} });
 
     if (res.status === 'rate_limited') throw new RateLimited();
@@ -193,6 +194,26 @@ export class Machine {
         `เว็บสลับโมเดลเป็น "${res.meta?.model}" ซึ่งไม่ตรงกับที่ตั้งไว้ — หยุดไว้ก่อน เพราะเนื้อหาคนละโมเดลจะโทนไม่เท่ากัน`,
       );
     return res;
+  }
+
+  /**
+   * เก็บ token ที่ใช้จริงของเล่มนี้
+   *
+   * ตัวเลขที่เซิร์ฟเวอร์รายงานกลับมาคือความจริงเรื่องค่าใช้จ่าย ไม่ใช่การประมาณ
+   * เก็บสะสมไว้ในเล่มเพื่อสองอย่าง: บอกผู้ใช้ว่าเล่มนี้จ่ายไปเท่าไรแล้ว
+   * และวัดว่าภาษาไทยของเล่มนี้กินกี่ตัวอักษรต่อหนึ่ง token เพื่อให้การประเมิน
+   * ของเล่มถัดไปแม่นขึ้นจากของจริง ไม่ใช่จากค่าที่เราเดาไว้ในโค้ด
+   */
+  recordUsage(res) {
+    const m = res?.meta;
+    if (!m || m.promptTokens == null) return;
+    const u = (this.book.apiUsage ||= { turns: 0, promptTokens: 0, completionTokens: 0, chars: 0, model: '' });
+    u.turns += 1;
+    u.promptTokens += Number(m.promptTokens) || 0;
+    u.completionTokens += Number(m.completionTokens) || 0;
+    u.chars += (res.text || '').length;
+    u.model = m.model || u.model;
+    if (u.completionTokens > 0) u.charsPerToken = Math.round((u.chars / u.completionTokens) * 100) / 100;
   }
 
   /**

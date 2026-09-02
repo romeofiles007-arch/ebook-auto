@@ -6,7 +6,16 @@
 
 import * as db from '../core/db.js';
 import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage } from '../core/machine.js';
-import { makeTransport, hasPendingTurn, DEFAULT_TEXT_MODEL } from '../transport/index.js';
+import { makeTransport, hasPendingTurn } from '../transport/index.js';
+import {
+  MODEL_PRICES,
+  DEFAULT_TEXT_MODEL,
+  PRICE_CHECKED_AT,
+  priceFor,
+  costOf,
+  estimateCost,
+  formatCost,
+} from '../core/pricing.js';
 import { TRIM_PRESETS, estimateTurns, targetPhysicalPages } from '../core/budget.js';
 import {
   FIGURE_STYLES,
@@ -47,6 +56,7 @@ let eventCount = 0;
  * จึงโหลดคีย์ไว้ตั้งแต่เปิดหน้า แล้วอัปเดตทุกครั้งที่ผู้ใช้พิมพ์
  */
 let apiKeyValue = '';
+let currentEstimate = null; // ผลประเมินล่าสุด ใช้คิดราคาโดยไม่ต้องคำนวณซ้ำ
 const textApiModel = () => $('textApiModel')?.value.trim() || DEFAULT_TEXT_MODEL;
 let trendSeed = null;
 let trendPool = [];
@@ -304,7 +314,24 @@ function logMachine(e) {
     lastProgressPhase = 'เริ่มเทิร์น';
   }
   if (e.type === 'turn.start') return addEvent('send', `Turn ${e.n}${e.label ? ' · ' + e.label : ''}`, e.prompt, 'ส่ง Prompt ไปยังหน้า ChatGPT');
-  if (e.type === 'turn.end') return addEvent('receive', `Turn ${e.n} · ${e.status}`, e.response, e.meta?.ms ? `ตอบกลับใน ${e.meta.ms} ms` : '');
+  if (e.type === 'turn.end') {
+    /**
+     * ค่าใช้จ่ายต้องเห็นระหว่างทำงาน ไม่ใช่ตอนเปิดบิลสิ้นเดือน
+     * ตัวเลข token มาจากเซิร์ฟเวอร์โดยตรง จึงเป็นค่าจริงไม่ใช่การประเมิน
+     */
+    const bits = [];
+    if (e.meta?.ms) bits.push(`ตอบกลับใน ${e.meta.ms} ms`);
+    if (e.meta?.promptTokens != null) {
+      const price = priceFor(e.meta.model || textApiModel(), customPrice);
+      const usd = costOf({ promptTokens: e.meta.promptTokens, completionTokens: e.meta.completionTokens, price });
+      bits.push(
+        `token เข้า ${Number(e.meta.promptTokens).toLocaleString()} · ออก ${Number(e.meta.completionTokens || 0).toLocaleString()}` +
+          (usd != null ? ` · เทิร์นนี้ ${formatCost(usd, usdThb)}` : ''),
+      );
+      showRunningCost();
+    }
+    return addEvent('receive', `Turn ${e.n} · ${e.status}`, e.response, bits.join(' · '));
+  }
   if (e.type === 'image.progress') {
     const pos = e.total ? `${e.current || 0}/${e.total}` : '';
     const label = e.what || e.name || 'ภาพ';
@@ -1037,7 +1064,7 @@ async function saveCreatorDefaults() {
 }
 
 async function loadCreatorDefaults() {
-  const [audience, author, draftOutline, imageSource, apiKey, apiQuality, apiModel, textSource, textModel] =
+  const [audience, author, draftOutline, imageSource, apiKey, apiQuality, apiModel, textSource, textModel, priceOverride] =
     await Promise.all([
       db.setting('defaultAudience'),
       db.setting('defaultAuthor'),
@@ -1048,10 +1075,19 @@ async function loadCreatorDefaults() {
       db.setting('imageApiModel'),
       db.setting('textSource'),
       db.setting('textApiModel'),
+      db.setting('priceOverride'),
     ]);
   if (imageSource) $('imageSource').value = imageSource;
   if (textSource) $('textSource').value = textSource;
+  renderModelOptions();
   if (textModel) $('textApiModel').value = textModel;
+  if (priceOverride?.in > 0) {
+    customPrice = { in: priceOverride.in, out: priceOverride.out };
+    usdThb = Number(priceOverride.usdThb) || 36;
+    $('priceIn').value = priceOverride.in;
+    $('priceOut').value = priceOverride.out;
+    $('usdThb').value = usdThb;
+  }
   apiKeyValue = apiKey || '';
   if (apiKey) {
     $('openaiApiKey').value = apiKey;
@@ -1192,6 +1228,7 @@ function updateEstimate() {
   if (perSection) draft.maxCharsPerTurn = 1; // เขียนทีละตอน จำนวนข้อความ = จำนวนตอน
 
   const e = estimateTurns(draft);
+  currentEstimate = e;
   /**
    * ทาง API ไม่ต้องหน่วงระหว่างเทิร์นและตอบเร็วกว่าการรอหน้าเว็บพิมพ์ทีละตัวอักษร
    * เวลาที่ประเมินจึงต้องต่างกัน ไม่ใช่บอกตัวเลขเดียวแล้วให้ผู้ใช้ไปเจอเองว่าไม่ตรง
@@ -1207,8 +1244,9 @@ function updateEstimate() {
     `ราว ${e.chapters} บท · เขียน ${e.batches} ${viaApi ? 'เทิร์น' : 'ข้อความ'}${perSection ? ' (ทีละตอน)' : ' (รวมหลายตอนต่อข้อความ)'} · เนื้อหา ${e.budget.toLocaleString()} อักษร<br>` +
     `ใช้เวลาเดินเครื่องราว ${mins} นาที ระบบจะเดินต่อจนจบเนื้อหา` +
     (viaApi
-      ? `<br>ทาง API ไม่มีลิมิตข้อความรายสามชั่วโมง แต่คิดเงินตาม token ที่ใช้จริง — ระบบจะบอกจำนวน token ของทุกเทิร์นในบันทึกการทำงาน`
+      ? `<br>ทาง API ไม่มีลิมิตข้อความรายสามชั่วโมง แต่คิดเงินตาม token ที่ใช้จริง`
       : '');
+  renderTextPrice();
 }
 
 /**
@@ -1241,6 +1279,27 @@ const focusChat = async () => {
   if (testing() || useTextApi()) return;
   await chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 };
+
+/**
+ * ยอดที่จ่ายไปแล้วของเล่มนี้ คิดจาก token จริงที่สะสมไว้ใน book.apiUsage
+ * ไม่ใช่การประเมิน จึงเป็นตัวเลขที่เอาไปตั้งราคาขายหนังสือได้จริง
+ */
+function showRunningCost() {
+  const u = book?.apiUsage;
+  const el = $('runningCost');
+  if (!el) return;
+  if (!u?.turns) {
+    el.classList.add('hidden');
+    return;
+  }
+  const price = priceFor(u.model || textApiModel(), customPrice);
+  const usd = costOf({ promptTokens: u.promptTokens, completionTokens: u.completionTokens, price });
+  el.classList.remove('hidden');
+  el.textContent =
+    `💵 เล่มนี้ใช้ API ไปแล้ว ${u.turns} เทิร์น · token เข้า ${u.promptTokens.toLocaleString()} · ออก ${u.completionTokens.toLocaleString()}` +
+    (usd != null ? ` · รวม ${formatCost(usd, usdThb)}` : '') +
+    (u.charsPerToken ? ` · ภาษาไทยของเล่มนี้ ${u.charsPerToken} ตัวอักษรต่อ token` : '');
+}
 
 function makeMachine() {
   const transport = makeTransport(transportKind(), transportOpts());
@@ -1394,6 +1453,7 @@ async function create() {
   status('กำลังเริ่มงาน');
 
   await focusChat();
+  showRunningCost();
   makeMachine();
   try {
     await runMachine();
@@ -1601,6 +1661,7 @@ async function resumeGo() {
   if (!String(book.job.step || '').startsWith('gate_')) {
     await focusChat();
   }
+  showRunningCost();
   makeMachine();
   try {
     await runMachine();
@@ -2254,6 +2315,7 @@ async function proceed() {
   }
   book.job.step = 'style';
   await db.saveBook(book);
+  showRunningCost();
   makeMachine();
   try {
     await runMachine();
@@ -2955,6 +3017,7 @@ async function startPhase2() {
   // Studio จะไม่ถูกทิ้งไว้ที่หน้า Progress ว่าง ๆ; transport ของเทิร์นแรกจะ ensure/focus ChatGPT ซ้ำให้อีกชั้น
   if (!testing() && !useTextApi()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 
+  showRunningCost();
   makeMachine();
   try {
     await runMachine();
@@ -3025,6 +3088,7 @@ async function rethinkCoverWithGpt() {
   setPhase('style', 'กำลังส่งข้อมูลทั้งเล่มให้ GPT Art Director คิดปกใหม่ 3 ทางและเลือกแนวที่แนะนำ');
   status('กำลังปรึกษา GPT เรื่องปก');
   if (!testing() && !useTextApi()) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  showRunningCost();
   makeMachine();
   try {
     await runMachine();
@@ -3459,6 +3523,66 @@ $('phase2Folder').onclick = pullImagesFromFolder;
  * ช่องใส่คีย์โผล่เฉพาะตอนเลือกโหมด API
  * คีย์ถูกเก็บใน IndexedDB ของส่วนขยายเครื่องนี้ ไม่ได้ sync ไปไหน และไม่เคยถูก log
  */
+/** ราคาที่ผู้ใช้กรอกทับเอง มาก่อนตารางในโปรแกรมเสมอ */
+let customPrice = null;
+let usdThb = 36;
+
+function renderModelOptions() {
+  const sel = $('textApiModel');
+  if (!sel || sel.dataset.filled === '1') return;
+  sel.innerHTML = Object.entries(MODEL_PRICES)
+    .map(([id, p]) => {
+      const label = `${id} — $${p.in}/$${p.out} ต่อ 1M token${p.note ? ` · ${p.note}` : ''}`;
+      return `<option value="${esc(id)}">${esc(label)}</option>`;
+    })
+    .join('');
+  sel.value = DEFAULT_TEXT_MODEL;
+  sel.dataset.filled = '1';
+}
+
+/**
+ * บอกราคาก่อนกดเริ่ม ไม่ใช่ให้รู้ตอนบิลมา
+ *
+ * แสดงสองอย่างแยกกันชัดเจน: ราคาต่อ 1M token ของโมเดลที่เลือก
+ * และค่าใช้จ่ายที่คาดว่าจะเกิดกับเล่มขนาดที่ตั้งไว้จริง
+ * พร้อมบอกวันที่จดราคาไว้ เพราะราคาของ OpenAI เปลี่ยนบ่อยกว่าที่โปรแกรมนี้จะตามทัน
+ */
+function renderTextPrice() {
+  const box = $('textApiPrice');
+  if (!box) return;
+  const on = val('textSource', 'web') === 'api';
+  box.hidden = !on;
+  $('priceEdit').hidden = !on;
+  if (!on) return;
+
+  const model = textApiModel();
+  const price = priceFor(model, customPrice);
+  if (!price) {
+    box.textContent = `ไม่มีราคาของ “${model}” ในโปรแกรม — กรอกราคาเองได้ที่หัวข้อด้านล่าง`;
+    return;
+  }
+  const e = currentEstimate;
+  const est = e
+    ? estimateCost({
+        model,
+        turns: e.likely,
+        budgetChars: e.budget,
+        language: val('lang', 'th'),
+        measuredCharsPerToken: Number(book?.apiUsage?.charsPerToken) || 0,
+        custom: customPrice,
+      })
+    : null;
+
+  box.innerHTML =
+    `💵 <b>${esc(model)}</b> · $${price.in} เข้า / $${price.out} ออก ต่อ 1M token` +
+    (price.source === 'custom' ? ' (ราคาที่คุณกรอกเอง)' : ` (จดไว้ ${PRICE_CHECKED_AT})`) +
+    (est
+      ? `<br>เล่มขนาดนี้คาดว่าจะจ่ายราว <b>${esc(formatCost(est.usd, usdThb))}</b> ` +
+        `— ส่งเข้าราว ${Math.round(est.inTokens / 1000).toLocaleString()}K token · เขียนออกราว ${Math.round(est.outTokens / 1000).toLocaleString()}K token`
+      : '') +
+    `<br>เป็นการประเมิน ไม่ใช่ราคาที่ตกลงไว้ — ตัวเลขจริงจะขึ้นให้เห็นทุกเทิร์นระหว่างทำงาน`;
+}
+
 function syncApiSources() {
   const imageApi = val('imageSource', 'web') === 'api';
   const textApi = val('textSource', 'web') === 'api';
@@ -3468,6 +3592,8 @@ function syncApiSources() {
   $('textSourceNote').textContent = textApi
     ? 'เร็วกว่าและไม่มีลิมิตข้อความรายสามชั่วโมง แต่จ่ายตามจำนวน token ที่ใช้จริง และไม่แตะบัญชี ChatGPT ของคุณ'
     : 'ขับหน้าเว็บ ChatGPT ฟรีตามแพ็กเกจที่มีอยู่ แต่ช้ากว่าและมีลิมิตข้อความ';
+  renderModelOptions();
+  renderTextPrice();
 }
 $('imageSource').addEventListener('change', async () => {
   syncApiSources();
@@ -3480,7 +3606,24 @@ $('textSource').addEventListener('change', async () => {
 });
 $('textApiModel').addEventListener('change', async () => {
   await db.setting('textApiModel', textApiModel());
+  renderTextPrice();
 });
+const savePriceOverride = async () => {
+  const inp = Number($('priceIn').value);
+  const outp = Number($('priceOut').value);
+  customPrice = inp > 0 && outp > 0 ? { in: inp, out: outp } : null;
+  usdThb = Number($('usdThb').value) > 0 ? Number($('usdThb').value) : 36;
+  await db.setting('priceOverride', customPrice ? { ...customPrice, usdThb } : null);
+  renderTextPrice();
+};
+['priceIn', 'priceOut', 'usdThb'].forEach((id) => $(id).addEventListener('change', savePriceOverride));
+$('priceReset').onclick = async () => {
+  customPrice = null;
+  $('priceIn').value = '';
+  $('priceOut').value = '';
+  await db.setting('priceOverride', null);
+  renderTextPrice();
+};
 /** ทดสอบว่าคีย์ใช้ได้และบัญชีมีโมเดลที่เลือกไว้จริง ก่อนเริ่มเล่มที่กินเวลาเป็นชั่วโมง */
 $('testTextApi').onclick = async () => {
   const note = $('apiKeyNote');
