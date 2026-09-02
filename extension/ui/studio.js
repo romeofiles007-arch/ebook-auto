@@ -1443,6 +1443,26 @@ async function halted() {
   $('resume').scrollIntoView({ behavior: 'smooth' });
 }
 
+/**
+ * แปลข้อความผิดพลาดที่ค้างอยู่ในโครงการให้เป็นภาษาที่ทำอะไรต่อได้
+ *
+ * ข้อความใน job.error คือบันทึกของ "การรันครั้งที่แล้ว" ไม่ใช่สภาพปัจจุบัน
+ * แต่การ์ดงานค้างเอามาแสดงดิบ ๆ ต่อท้ายสถานะ ผู้ใช้จึงอ่านว่าระบบยังพังอยู่ตอนนี้
+ * และเมื่อกดทำต่อแล้วข้อความไม่เปลี่ยน (เพราะยังไม่มีการรันใหม่มาเขียนทับ)
+ * ก็สรุปว่า "แก้แล้วยังเหมือนเดิม" ทั้งที่ยังไม่ได้ลองอะไรเลย
+ *
+ * ข้อความบางอย่างเป็นคำบ่นของเบราว์เซอร์ที่ผู้ใช้ทำอะไรกับมันไม่ได้ ต้องแปลให้เป็นทางออก
+ */
+function explainJobError(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  if (/unsafe-eval|Content Security Policy/i.test(text)) {
+    return 'ครั้งที่แล้วหยุดเพราะห้องเรียงพิมพ์ไม่ได้ทำงานในโหมด sandbox ' +
+      '(เกิดเมื่อส่วนขยายถูกรีโหลดขณะหน้า Studio เปิดค้างอยู่) — ปิดหน้านี้แล้วเปิดใหม่จากไอคอนส่วนขยาย แล้วกดทำต่อได้เลย';
+  }
+  return `ครั้งที่แล้วหยุดเพราะ ${text}`;
+}
+
 // ---------- ทำต่อจากที่ค้าง ----------
 function showResume(b) {
   const done = b.job?.status === 'done';
@@ -1463,7 +1483,7 @@ function showResume(b) {
   const why =
     b.job?.status === 'rate_limited'
       ? 'หยุดเพราะชนลิมิตข้อความของ ChatGPT'
-      : b.job?.error || (b.job?.status === 'paused' ? 'หยุดไว้' : '');
+      : explainJobError(b.job?.error) || (b.job?.status === 'paused' ? 'หยุดไว้' : '');
   const seen = Math.max(b.updatedAt || 0, b.imagePhase?.stoppedAt || 0, b.imagePhase?.lastAttemptAt || 0);
   $('resumeInfo').textContent =
     `${b.targetPages} หน้า · ใช้ไป ${b.job?.turnNo || 0} ข้อความ · ค้างที่ขั้น ${STEP_NAMES[b.job?.step] || b.job?.step || '-'}` +
