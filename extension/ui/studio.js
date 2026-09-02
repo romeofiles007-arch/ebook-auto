@@ -1207,6 +1207,16 @@ function readForm() {
     maxCharsPerTurn: capByLen,
     runConsistency: on('opt_consistency'),
     pageMode: val('pageMode', 'soft'),
+    /**
+     * เล่มหนึ่งต้องเขียนด้วยเครื่องยนต์เดียวตลอด
+     *
+     * ตัวเลือกแหล่งเขียนเป็นค่าของโปรแกรม ไม่ใช่ของเล่ม ถ้าอ่านจากหน้าจอตอนทำงาน
+     * เล่มที่เขียนค้างไว้ด้วย API แล้วกลับมาทำต่อวันหลังตอนสลับเป็นหน้าเว็บ
+     * จะถูกเขียนต่อด้วยคนละโมเดล ได้สำนวนคนละแบบกลางเล่มโดยไม่มีใครทัก
+     * จึงล็อกไว้กับเล่มตั้งแต่วันที่สร้าง เหมือนที่ทำกับโหมดทดสอบ
+     */
+    textSource: val('textSource', 'web'),
+    textApiModel: textApiModel(),
     job: { step: 'health', cursor: 0, round: 0, status: 'idle' },
   };
 }
@@ -1254,7 +1264,8 @@ function updateEstimate() {
  * มีไว้ไล่ดูว่าทุกขั้นตอนต่อกันครบไหมภายในไม่กี่วินาที แทนการรอของจริงเป็นชั่วโมง
  */
 const testing = () => (book ? !!book.testMode : on('testMode'));
-const useTextApi = () => !testing() && val('textSource', 'web') === 'api';
+const useTextApi = () =>
+  !testing() && (book ? (book.textSource || 'web') === 'api' : val('textSource', 'web') === 'api');
 const transportKind = () => (testing() ? 'fake' : useTextApi() ? 'openai_api' : 'chatgpt_tab');
 
 /**
@@ -1269,7 +1280,7 @@ const transportOpts = (extra = {}) => ({
   onProgress: handleGptMessage,
   latencyMs: 60,
   apiKey: apiKeyValue,
-  model: textApiModel(),
+  model: book?.textApiModel || textApiModel(),
   ...extra,
 });
 
@@ -1595,8 +1606,14 @@ function showResume(b) {
       ? 'หยุดเพราะชนลิมิตข้อความของ ChatGPT'
       : explainJobError(b.job?.error) || (b.job?.status === 'paused' ? 'หยุดไว้' : '');
   const seen = Math.max(b.updatedAt || 0, b.imagePhase?.stoppedAt || 0, b.imagePhase?.lastAttemptAt || 0);
+  /**
+   * บอกด้วยว่าเล่มนี้เขียนด้วยเครื่องยนต์ไหน
+   * เพราะค่านี้ถูกล็อกไว้กับเล่ม ไม่ได้ตามตัวเลือกบนหน้าจอ ณ ตอนนี้
+   * ถ้าไม่บอก ผู้ใช้ที่สลับตัวเลือกไปแล้วจะงงว่าทำไมกดทำต่อแล้วไม่ตรงกับที่ตั้งไว้
+   */
+  const engine = (b.textSource || 'web') === 'api' ? `API · ${b.textApiModel || 'ค่าเริ่มต้น'}` : 'หน้าเว็บ ChatGPT';
   $('resumeInfo').textContent =
-    `${b.targetPages} หน้า · ใช้ไป ${b.job?.turnNo || 0} ข้อความ · ค้างที่ขั้น ${STEP_NAMES[b.job?.step] || b.job?.step || '-'}` +
+    `${b.targetPages} หน้า · เขียนด้วย ${engine} · ใช้ไป ${b.job?.turnNo || 0} ${(b.textSource || 'web') === 'api' ? 'เทิร์น' : 'ข้อความ'} · ค้างที่ขั้น ${STEP_NAMES[b.job?.step] || b.job?.step || '-'}` +
     (seen ? ` · แตะล่าสุด${sinceText(seen)}` : '') +
     (why ? ` — ${why}` : '');
   $('resumeGo').textContent = ['gate_images', 'images'].includes(b.job?.step) ? 'เปิด Image Phase 2' : 'ทำต่อจากที่ค้าง';
