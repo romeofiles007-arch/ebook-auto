@@ -315,6 +315,14 @@ function expectedPhysicalPages(b) {
 }
 
 function logMachine(e) {
+  /**
+   * ทุกเหตุการณ์จากเครื่องคือหลักฐานว่ามันยังไม่ตาย ไม่ใช่แค่ตอนเริ่มเทิร์น
+   *
+   * เดิมจับเวลาเฉพาะ turn.start ซึ่งพอมารวมกับเงื่อนไข hasPendingTurn()
+   * ทำให้นาฬิกาเฝ้าดูมองไม่เห็นช่วง "เทิร์นก่อนจบแล้ว เทิร์นใหม่ยังไม่ออก" เลย
+   * ซึ่งเป็นช่วงที่เครื่องทำงานในเครื่องอยู่ (คอมไพล์ บันทึก วางแผน) และเป็นช่วงที่หยุดเงียบได้จริง
+   */
+  lastActivityAt = Date.now();
   if (e.type === 'turn.start') {
     lastProgressAt = Date.now();
     lastProgressPhase = 'เริ่มเทิร์น';
@@ -383,6 +391,24 @@ function logMachine(e) {
  */
 let lastProgressAt = 0;
 let lastProgressPhase = '';
+
+/**
+ * เครื่องกำลังเดินอยู่หรือไม่ — คนละเรื่องกับ "มีเทิร์นค้างอยู่"
+ *
+ * เทิร์นค้างคือช่วงที่รอ ChatGPT ตอบ ซึ่งเป็นแค่ส่วนหนึ่งของเวลาทั้งหมด
+ * ที่เหลือคือคอมไพล์เล่ม บันทึกลงฐานข้อมูล วางแผนภาพ เรียก Images API
+ * ซึ่งไม่นับเป็นเทิร์นเลยสักอย่าง และเป็นช่วงที่เครื่องหยุดเงียบได้จริง
+ */
+let machineBusy = false;
+let lastActivityAt = 0;
+
+/**
+ * เพดานความเงียบที่ยอมรับได้ ต่างกันตามขั้น เพราะงานแต่ละขั้นกินเวลาไม่เท่ากัน
+ * ตั้งต่ำเกินไปจะเตือนหลอกจนคนเลิกเชื่อ ตั้งสูงเกินไปก็กลับไปเงียบเหมือนเดิม
+ * ขั้นสร้างภาพยาวสุด เพราะเรียก Images API ครั้งหนึ่งรอได้ถึง 180 วินาทีโดยไม่ถือเป็นเทิร์น
+ */
+const QUIET_LIMIT = { images: 260, fit: 150, style: 120, calibrate: 120 };
+const quietLimitFor = (step) => QUIET_LIMIT[step] || 75;
 const PHASE_NAME = {
   waiting_ready: 'รอหน้า ChatGPT พร้อม',
   new_thread: 'เปิดห้องแชตใหม่',
@@ -397,14 +423,39 @@ const PHASE_NAME = {
 };
 
 setInterval(() => {
-  if (!hasPendingTurn() || !lastProgressAt) return;
-  const quiet = Math.round((Date.now() - lastProgressAt) / 1000);
-  if (quiet < 25) return;
-  const where = PHASE_NAME[lastProgressPhase] || lastProgressPhase || 'ไม่ทราบขั้น';
+  // ทางที่ 1: มีเทิร์นค้างอยู่ — รู้ได้ละเอียดถึงขั้นย่อยว่าค้างตรงไหนของการคุยกับหน้าเว็บ
+  if (hasPendingTurn() && lastProgressAt) {
+    const quiet = Math.round((Date.now() - lastProgressAt) / 1000);
+    if (quiet < 25) return;
+    const where = PHASE_NAME[lastProgressPhase] || lastProgressPhase || 'ไม่ทราบขั้น';
+    $('detail').textContent =
+      `⏳ ไม่มีสัญญาณจากหน้า ChatGPT มา ${quiet} วินาที · ค้างอยู่ที่ขั้น “${where}”` +
+      (quiet > 90 ? ' — ลองดูแท็บ ChatGPT ว่ามี Prompt ค้างในช่องพิมพ์หรือปุ่มหยุดค้างอยู่ไหม' : '');
+    status(`ค้างที่ขั้น ${where} มา ${quiet} วินาที`);
+    return;
+  }
+
+  /**
+   * ทางที่ 2: เครื่องเดินอยู่แต่ไม่มีเทิร์นค้าง — จุดบอดเดิมทั้งหมดอยู่ตรงนี้
+   *
+   * เทิร์นจบแล้วเครื่องไปทำงานต่อในเครื่อง ถ้าตายตรงนั้นจะไม่มีอะไรฟ้องเลยสักอย่าง
+   * หน้าจอค้างสถานะเดิมของเทิร์นที่เพิ่งสำเร็จไว้ ซึ่งอ่านแล้วเหมือนทุกอย่างปกติ
+   * คนจึงนั่งรอต่อไปเรื่อย ๆ โดยไม่รู้ว่าไม่มีอะไรเดินอยู่แล้ว
+   */
+  if (!machineBusy || !lastActivityAt) return;
+  const step = book?.job?.step;
+  const quiet = Math.round((Date.now() - lastActivityAt) / 1000);
+  const limit = quietLimitFor(step);
+  if (quiet < limit) return;
+  const where = STEP_NAMES[step] || step || 'ไม่ทราบขั้น';
+  const mins = Math.floor(quiet / 60);
+  const ago = mins ? `${mins} นาที ${quiet % 60} วินาที` : `${quiet} วินาที`;
   $('detail').textContent =
-    `⏳ ไม่มีสัญญาณจากหน้า ChatGPT มา ${quiet} วินาที · ค้างอยู่ที่ขั้น “${where}”` +
-    (quiet > 90 ? ' — ลองดูแท็บ ChatGPT ว่ามี Prompt ค้างในช่องพิมพ์หรือปุ่มหยุดค้างอยู่ไหม' : '');
-  status(`ค้างที่ขั้น ${where} มา ${quiet} วินาที`);
+    `⏳ ไม่มีความคืบหน้ามา ${ago} · ขั้นล่าสุดคือ “${where}”` +
+    (quiet > limit * 2
+      ? ' — นานผิดปกติแล้ว เปิด DevTools (F12) แท็บ Console ดูว่ามี error ค้างอยู่ไหม แล้วกดหยุดไว้ก่อนเพื่อบันทึกงาน จากนั้นกดทำต่อได้'
+      : ' — ยังไม่ถือว่าผิดปกติ แต่ถ้าเลยจากนี้ไปอีกจะแจ้งซ้ำ');
+  status(`เงียบมา ${ago} ที่ขั้น ${where}`);
 }, 5000);
 
 
@@ -1609,7 +1660,15 @@ async function create() {
 }
 
 async function runMachine() {
-  const r = await machine.runUntilGate();
+  machineBusy = true;
+  lastActivityAt = Date.now();
+  let r;
+  try {
+    r = await machine.runUntilGate();
+  } finally {
+    // ต้องปลดธงแม้ตอนโยน error ไม่งั้นนาฬิกาจะฟ้อง "เงียบ" ค้างไว้ทั้งที่งานจบไปแล้ว
+    machineBusy = false;
+  }
   book = await db.loadBook(book.id);
 
   if (r?.gate === 'gate_outline') {
