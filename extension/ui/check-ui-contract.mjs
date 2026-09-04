@@ -10,7 +10,10 @@
  *   node ui/check-ui-contract.mjs
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, readdir, mkdtemp } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -53,7 +56,50 @@ const missingIds = [...usedIds].filter((id) => !allIds.has(id)).sort();
 const missingAttrs = [...usedAttrs].filter((a) => !hasAttr(a)).sort();
 const missingCss = mechanicalClasses.filter((c) => !new RegExp('\\.' + c + '\\b').test(css));
 
+/**
+ * ตรวจว่าไฟล์ทุกไฟล์ยัง parse ผ่านในฐานะ ES module
+ *
+ * `node --check ไฟล์.js` ไม่พอ และเคยปล่อยของพังผ่านมาแล้วจริง:
+ * สตริงที่ \n กลายเป็นการขึ้นบรรทัดจริงกลางสตริง ทำให้ studio.js ทั้งไฟล์ parse ไม่ผ่าน
+ * แต่ `node --check` คืน exit 0 เพราะมันตัดสินชนิดไฟล์จากนามสกุล .js ก่อน
+ * ผลคือหน้าเว็บโหลด module ไม่สำเร็จ ปุ่มทุกปุ่มไม่ถูกผูก และ select ทุกช่องว่างเปล่า
+ * โดยไม่มีอะไรฟ้องเลยจนกว่าจะเปิด DevTools
+ *
+ * คัดลอกเป็น .mjs ก่อนตรวจ จึงบังคับให้ node ใช้ตัว parse ตัวเดียวกับที่เบราว์เซอร์ใช้
+ */
+const run = promisify(execFile);
+const roots = ['adapter', 'core', 'transport', 'typeset', 'ui'];
+const jsFiles = [];
+for (const dir of roots) {
+  const abs = join(here, '..', dir);
+  let names = [];
+  try {
+    names = await readdir(abs);
+  } catch {
+    continue;
+  }
+  for (const n of names) if (n.endsWith('.js') || n.endsWith('.mjs')) jsFiles.push(join(abs, n));
+}
+
+const scratch = await mkdtemp(join(tmpdir(), 'ebook-syntax-'));
+const syntaxErrors = [];
+for (const file of jsFiles) {
+  const copy = join(scratch, 'check.mjs');
+  await writeFile(copy, await readFile(file, 'utf8'), 'utf8');
+  try {
+    await run(process.execPath, ['--check', copy]);
+  } catch (e) {
+    const line = String(e.stderr || e.message)
+      .split('\n')
+      .find((l) => /SyntaxError/.test(l));
+    syntaxErrors.push(`${file.replace(join(here, '..'), '').replace(/\\/g, '/')} — ${line || 'parse ไม่ผ่าน'}`);
+  }
+}
+
 const problems = [];
+if (syntaxErrors.length)
+  problems.push(`ไฟล์ที่ parse ไม่ผ่านในฐานะ ES module (${syntaxErrors.length}):\n  ${syntaxErrors.join('\n  ')}`);
+
 if (missingIds.length) problems.push(`id ที่โค้ดเรียกแต่ไม่มีอยู่จริง (${missingIds.length}): ${missingIds.join(', ')}`);
 if (missingAttrs.length) problems.push(`data-attribute ที่หาไม่เจอ (${missingAttrs.length}): ${missingAttrs.join(', ')}`);
 if (missingCss.length) problems.push(`คลาสที่เป็นกลไกแต่ไม่มีใน CSS: ${missingCss.join(', ')}`);
