@@ -3088,10 +3088,19 @@ async function renderPhase2() {
     const total = rows.length;
     const done = rows.filter((r) => r.state === 'done').length;
     const left = total - done;
+    /**
+     * "ยังขาด" กับ "ระบบทำต่อให้ได้" เป็นคนละจำนวนกัน
+     *
+     * รูปที่ตั้งไว้ให้ผู้ใช้สร้างเอง กดเริ่มไปกี่ครั้งก็ไม่มีอะไรเกิดขึ้น
+     * ถ้านับรวมกันแล้วขึ้นปุ่มว่า "เริ่มสร้างภาพ 3 รูป" คือการชวนให้กดปุ่มที่ไม่ทำงาน
+     */
+    const leftManual = rows.filter((r) => r.state !== 'done' && r.manual).length;
+    const leftAuto = left - leftManual;
 
     $('phase2Count').textContent = total
-      ? `ผ่านแล้ว ${done} จาก ${total} รูป · ยังขาด ${left}`
-      : 'เล่มนี้ไม่ได้ตั้งค่าให้สร้างภาพอัตโนมัติ';
+      ? `ผ่านแล้ว ${done} จาก ${total} รูป · ยังขาด ${left}` +
+        (leftManual ? ` (ในนั้น ${leftManual} รูปต้องคัดลอก Prompt ไปสร้างเองแล้วอัปโหลดกลับ)` : '')
+      : 'เล่มนี้ไม่มีช่องภาพที่ต้องเติม';
     $('phase2Bar').style.width = total ? `${Math.round((done / total) * 100)}%` : '0%';
 
     const alertHtml = phase2AlertHtml();
@@ -3164,14 +3173,17 @@ async function renderPhase2() {
     $('phase2Skip').classList.toggle('hidden', phase2Running);
     $('phase2Edit').classList.toggle('hidden', phase2Running);
     const start = $('phase2Start');
-    start.disabled = phase2Running;
+    // ปุ่มต้องพูดความจริงว่ากดแล้วจะเกิดอะไร ไม่ใช่พูดว่ายังขาดกี่รูป
+    start.disabled = phase2Running || (!leftAuto && leftManual > 0);
     start.textContent = phase2Running
       ? 'กำลังทำงาน...'
-      : !left
-        ? 'ภาพครบแล้ว — ตรวจและประกอบ PDF'
-        : book.imagePhase?.startedAt
-          ? `ทำต่อ — เหลือ ${left} รูป`
-          : `เริ่มสร้างภาพ ${left} รูป`;
+      : leftAuto
+        ? book.imagePhase?.startedAt
+          ? `ทำต่อ — เหลือ ${leftAuto} รูป`
+          : `เริ่มสร้างภาพ ${leftAuto} รูป`
+        : leftManual
+          ? `รอคุณใส่อีก ${leftManual} รูป — ระบบสร้างให้ไม่ได้`
+          : 'ภาพครบแล้ว — ตรวจและประกอบ PDF';
   } finally {
     phase2Rendering = false;
   }
