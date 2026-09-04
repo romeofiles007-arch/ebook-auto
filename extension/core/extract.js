@@ -23,7 +23,8 @@ function escape(s) {
  *  truncated     เจอ BEGIN แต่ไม่เจอ END → สั่งเขียนต่อได้
  *  wrong_section ตอบมาผิดตอน → ยิงใหม่
  *  no_sentinel   ไม่ทำตามรูปแบบเลย → ยิงใหม่พร้อมย้ำรูปแบบ
- *  refused       สั้นผิดปกติ น่าจะโดนปฏิเสธหรือเตือนนโยบาย
+ *  short         ทำตามรูปแบบครบ แต่เขียนสั้นกว่าที่กำหนด — มีเนื้อหาจริง ห้ามทิ้ง
+ *  refused       ตอบสั้นโดยไม่มีเครื่องหมายกำกับเลย น่าจะโดนปฏิเสธหรือเตือนนโยบาย
  */
 export function extractSection(raw, expectId, { minChars = 200 } = {}) {
   const text = String(raw || '');
@@ -31,7 +32,15 @@ export function extractSection(raw, expectId, { minChars = 200 } = {}) {
   const m = text.match(secRe(expectId));
   if (m) {
     const body = cleanBody(m[1]);
-    if (body.length < minChars) return { status: 'refused', body };
+    /**
+     * ใส่เครื่องหมายเปิด-ปิดครบแต่เนื้อสั้น ไม่ใช่การถูกปฏิเสธ
+     *
+     * การปฏิเสธคือโมเดลไม่ยอมเขียนให้เลย ส่วนกรณีนี้คือเขียนให้แล้วแต่เขียนสั้น
+     * เดิมเหมารวมเป็น refused เหมือนกัน แล้วเนื้อหาที่ได้มาจริงถูกทิ้งทั้งก้อน
+     * ตอนนั้นจึงถูกบันทึกเป็นว่างเปล่า ไปโดนด่านสุดท้ายจับว่า "เขียนไม่สำเร็จ" แล้วหยุดทั้งเล่ม
+     * ทั้งที่มีเนื้อหาอยู่ในมือแล้ว แค่สั้นกว่าเป้า ซึ่งมีขั้นปรับจำนวนหน้าคอยตามแก้อยู่แล้ว
+     */
+    if (body.length < minChars) return { status: 'short', body, meta: extractMeta(text, expectId) };
     return { status: 'ok', body, meta: extractMeta(text, expectId) };
   }
 

@@ -770,10 +770,19 @@ export class Machine {
       const afterById = new Map(after.map((s) => [s.id, s]));
       const stillEmpty = all.filter((s) => !((afterById.get(s.id)?.md || '').trim()));
       if (stillEmpty.length) {
+        /**
+          * ทางที่ใช้เขียนต่างกัน วิธีตรวจก็คนละเรื่องกัน
+          * เดิมไล่ให้ไปดูแท็บ ChatGPT เสมอ ซึ่งไม่มีความหมายเลยกับเล่มที่เขียนด้วย API
+          * คำแนะนำที่ใช้ไม่ได้แย่กว่าไม่แนะนำอะไร เพราะพาไปหาปัญหาผิดที่
+          */
+        const how =
+          (this.book.textSource || 'web') === 'api'
+            ? 'ตรวจว่า API key ยังใช้ได้และเครดิตยังเหลือ'
+            : 'ตรวจว่าแท็บ ChatGPT ยังตอบได้ปกติ';
         throw new Halt(
           `เขียนเนื้อหาไม่สำเร็จ ${stillEmpty.length} จาก ${all.length} ตอน (${stillEmpty.map((s) => s.id).join(', ')}) — ` +
             `หยุดไว้ก่อนเพื่อไม่ให้ได้เล่มที่หน้าเป็นช่องว่าง ` +
-            `ตรวจว่าแท็บ ChatGPT ยังตอบได้ปกติ แล้วกด "ทำต่อจากที่ค้าง" ระบบจะเขียนเฉพาะตอนที่ยังขาด`,
+            `${how} แล้วกด "ทำต่อจากที่ค้าง" ระบบจะเขียนเฉพาะตอนที่ยังขาด`,
         );
       }
       this.log('ok', `เขียนตอนที่ขาดครบแล้วทั้ง ${empty.length} ตอน`);
@@ -1033,13 +1042,22 @@ export class Machine {
       }
 
       if (ex.status !== 'ok') {
+        /**
+         * เนื้อหาที่ได้มาจริงต้องไม่ถูกทิ้ง ไม่ว่าจะได้มาไม่ครบด้วยเหตุใด
+         * ของที่ถูกตัดกลางคันเก็บไว้ใน partial ส่วนของที่เขียนครบแต่สั้นอยู่ใน body
+         * เดิมอ่านแต่ partial ตอนที่เขียนสั้นจึงกลายเป็นตอนว่างทั้งที่มีเนื้อหาอยู่
+         *
+         * ส่วน refused จริง ๆ (ตอบสั้นโดยไม่มีเครื่องหมายกำกับ) ยังต้องทิ้งเหมือนเดิม
+         * เพราะข้อความแบบนั้นคือคำปฏิเสธของโมเดล ไม่ใช่เนื้อหาหนังสือ
+         */
+        const kept = ex.partial || (ex.status === 'short' ? ex.body : '') || '';
         await db.saveSection(this.book.id, {
           id: s.id,
           title: s.title,
           chapter: chapter.n,
-          md: ex.partial || '',
-          chars: countUnits(ex.partial || '', this.book.language),
-          status: 'blocked',
+          md: kept,
+          chars: countUnits(kept, this.book.language),
+          status: ex.status === 'short' ? 'short' : 'blocked',
           reason: ex.status,
           quota: s.quota,
           minChars: s.minChars,
@@ -1055,7 +1073,13 @@ export class Machine {
           hook: s.hook || '',
           elastic: s.elastic !== false,
         });
-        this.log('error', `ตอน ${s.id} ไม่ผ่าน (${ex.status}) ข้ามไปก่อน รวบมาให้ดูตอนจบ`);
+        if (ex.status === 'short')
+          this.log(
+            'warn',
+            `ตอน ${s.id} เขียนสั้นกว่าที่กำหนด — ได้ ${countUnits(kept, this.book.language).toLocaleString()} หน่วย ` +
+              `เก็บไว้แล้ว ขั้นปรับจำนวนหน้าจะตามแก้ให้ ถ้าเห็นแบบนี้ทุกตอนแปลว่าโมเดลกำลังเขียนสั้นเกินไปทั้งเล่ม`,
+          );
+        else this.log('error', `ตอน ${s.id} ไม่ผ่าน (${ex.status}) ข้ามไปก่อน รวบมาให้ดูตอนจบ`);
         continue;
       }
 
