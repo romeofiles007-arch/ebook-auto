@@ -69,14 +69,40 @@
     ลำดับสำคัญกว่าที่เห็น: ปุ่ม "เสนอสารบัญ" อยู่บนสุด แต่ต้องกดเป็นขั้นที่ 3
     ถ้ากดก่อนตั้งค่าเล่ม สารบัญจะถูกวางตามจำนวนหน้า/ผู้อ่านชุดเก่า พอแก้ทีหลังต้องเสนอใหม่ทั้งชุด
   -->
-  <ol id="stepGuide" class="stepGuide">
+  <ol id="wizardSteps" class="wizardSteps" data-step="always"></ol>
+
+  <!--
+    การ์ดเลือกโหมด — ตัวตัดสินใจแรกที่เหลือทั้งหมดขึ้นอยู่กับมัน
+    เดิมซ่อนอยู่ในรูปของ select สองช่อง (แหล่งเขียน / แหล่งภาพ) กลางหน้ายาว
+    คนที่เพิ่งเปิดมาไม่มีทางรู้ว่าต้องเลือกอะไรก่อน และเลือกผิดคือเจอปัญหาคนละชุดกันทั้งเส้นทาง
+  -->
+  <div id="modePicker" class="modePicker" data-step="mode">
+    <button type="button" class="modeCard" data-mode="free">
+      <b>ChatGPT ฟรี</b>
+      <span class="modeWhat">เขียนเนื้อหาผ่านหน้าเว็บ ไม่เสียเงิน</span>
+      <span class="modeNote">บัญชีฟรีสร้างภาพไม่ได้ ระบบจะเตรียม Prompt ภาพไว้ให้ แล้วค่อยสลับไปบัญชีที่สร้างภาพได้ใน Phase 2</span>
+    </button>
+    <button type="button" class="modeCard" data-mode="plus">
+      <b>ChatGPT Plus</b>
+      <span class="modeWhat">เขียนและสร้างภาพ ผ่านหน้าเว็บบัญชีเดียว</span>
+      <span class="modeNote">ไม่ต้องสลับบัญชี แต่ยังมีลิมิตข้อความต่อรอบ และช้ากว่าทาง API เพราะต้องขับหน้าเว็บจริง</span>
+    </button>
+    <button type="button" class="modeCard" data-mode="api">
+      <b>OpenAI API</b>
+      <span class="modeWhat">เขียนและสร้างภาพ ผ่าน API จ่ายตามใช้จริง</span>
+      <span class="modeNote">เร็วที่สุดและไม่มีลิมิตข้อความ ไม่ต้องเปิดแท็บ ChatGPT ค้างไว้ · ต้องใส่ API key</span>
+    </button>
+  </div>
+  <div id="modePickerNote" class="muted"></div>
+
+  <ol id="stepGuide" class="stepGuide" data-step="never">
     <li data-step="setup"><b>1 · ตั้งค่าเล่มให้ครบก่อน</b><span>ผู้อ่าน · โทน · จำนวนหน้า · ภาษา · โหมดเนื้อหา — ทุกค่าถูกล็อกเข้าไปในสารบัญ</span></li>
     <li data-step="title"><b>2 · ได้หัวข้อหรือชื่อหนังสือ</b><span>พิมพ์เอง หรือใช้ <svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>สุ่มจากกระแส / <svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT คิดชื่อ</span></li>
     <li data-step="outline"><b>3 · ได้สารบัญแล้วเลือก 1 ทาง</b><span>กด <svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>เสนอสารบัญ 3 ทาง ให้ ChatGPT คิดให้ — หรือเปิด <svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg>โหมดแรงบันดาลใจ ถ้ามีสารบัญของตัวเองอยู่แล้ว · ขั้นนี้ต้องมาหลังข้อ 1 เสมอ</span></li>
     <li data-step="create"><b>4 · กด <svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มสร้าง Ebook</b><span>ตั้งแต่จุดนี้ระบบเดินยาวจนจบเนื้อหา</span></li>
   </ol>
-  <div class="stepWarn">แก้ค่าในข้อ 1 หลังจากเลือกสารบัญไปแล้ว = ต้องกดเสนอสารบัญใหม่ ระบบจะเตือนให้เองและไม่ปล่อยให้เริ่มเขียนด้วยสารบัญที่ขัดกับค่าใหม่</div>
-  <div class="fullAutoBar">
+  <div class="stepWarn" data-step="book">แก้ค่าในข้อ 1 หลังจากเลือกสารบัญไปแล้ว = ต้องกดเสนอสารบัญใหม่ ระบบจะเตือนให้เองและไม่ปล่อยให้เริ่มเขียนด้วยสารบัญที่ขัดกับค่าใหม่</div>
+  <div class="fullAutoBar" data-step="go">
     <div>
       <b><svg class="i i-lg" aria-hidden="true"><use href="#i-robot"/></svg> โหมดอัตโนมัติเต็มรูปแบบ</b>
       <span>กดครั้งเดียวแล้วปล่อยยาว — คิดชื่อเรื่อง วางสารบัญ เขียนทั้งเล่ม สร้างภาพ แล้วส่งออกไฟล์ให้เอง โดยใช้ค่าที่ตั้งไว้ด้านล่างทั้งหมด ไม่ถามอะไรระหว่างทาง</span>
@@ -88,7 +114,7 @@
     แหล่งสร้างภาพอยู่หน้าหลัก ไม่ซ่อนในตารางตั้งค่าด้านล่าง
     เพราะเป็นตัวเลือกที่ตัดสินว่าจะเจอปัญหาการขับหน้าเว็บหรือไม่ ต้องเห็นก่อนกดเริ่ม
   -->
-  <div class="apiBar">
+  <div class="apiBar" data-step="mode">
     <div class="apiBarTop">
       <div>
         <b><svg class="i i-lg" aria-hidden="true"><use href="#i-pen"/></svg> แหล่งเขียนเนื้อหา</b>
@@ -148,23 +174,23 @@
     </div>
   </div>
 
-  <div class="row">
+  <div class="row" data-step="topic">
     <label for="title">หัวข้อหรือชื่อหนังสือ</label>
     <button id="trendRandom" type="button"><svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>สุ่มจากกระแสตอนนี้</button>
     <button id="titleIdeate" type="button"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT คิดชื่อ</button>
     <button id="outlineIdeate" type="button"><svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>เสนอสารบัญ 3 ทาง</button>
   </div>
-  <input id="title" autofocus placeholder="ใส่หัวข้อคร่าว ๆ เช่น การเงินสำหรับฟรีแลนซ์">
-  <div id="trendIdeas" class="estimate hidden"></div>
-  <div id="titleIdeas" class="estimate hidden"></div>
-  <div id="outlineDirections" class="estimate hidden"></div>
+  <input id="title" data-step="topic" autofocus placeholder="ใส่หัวข้อคร่าว ๆ เช่น การเงินสำหรับฟรีแลนซ์">
+  <div id="trendIdeas" class="estimate hidden" data-step="topic"></div>
+  <div id="titleIdeas" class="estimate hidden" data-step="topic"></div>
+  <div id="outlineDirections" class="estimate hidden" data-step="topic"></div>
 
   <!--
     โหมดแรงบันดาลใจ — ผู้ใช้กำหนดชื่อเรื่อง สารบัญ และจำนวนหน้าเอง
     แล้วให้ ChatGPT ตกแต่งเป็นตัวเลือกจนพอใจ ก่อนกดสร้าง
     ใช้กล่องตัวเลือกสารบัญร่วมกับโหมดปกติ เพื่อให้ขั้นถัดไปเหมือนกันทั้งสองทาง
   -->
-  <details class="more inspireBox" id="inspireBox">
+  <details class="more inspireBox" id="inspireBox" data-step="topic">
     <summary><svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg>โหมดแรงบันดาลใจ — ฉันมีสารบัญของตัวเองอยู่แล้ว</summary>
     <div class="muted inspireHint">ใส่ชื่อเรื่องด้านบน ตั้งจำนวนหน้าที่ต้องการ แล้วพิมพ์สารบัญของคุณบรรทัดละบท ChatGPT จะไม่คิดโครงใหม่ แต่จะตกแต่งของคุณให้เขียนเป็นหนังสือได้จริง แล้วเสนอ 3 ทางให้เลือก — ทาง A คือโครงเดิมของคุณเสมอ</div>
     <div class="field">
@@ -184,7 +210,7 @@
     </div>
   </details>
 
-  <div class="grid">
+  <div class="grid" data-step="book">
     <div class="field">
       <label for="audience">เขียนให้ใครอ่าน</label>
       <input id="audience" list="audienceOptions" placeholder="เลือกจากรายการหรือพิมพ์กลุ่มผู้อ่านเอง">
@@ -251,7 +277,7 @@
     </div>
   </div>
 
-  <details class="more" id="itemOpts" hidden>
+  <details class="more" id="itemOpts" hidden data-step="book">
     <summary>ตั้งค่าหนังสือรายชิ้น</summary>
     <div class="grid">
       <div class="field">
@@ -294,7 +320,7 @@
     <div id="itemPlanNote" class="estimate"></div>
   </details>
 
-  <details class="more">
+  <details class="more" data-step="book">
     <summary>เกี่ยวกับผู้เขียน — ระบบจะไม่แต่งข้อมูลนี้เอง</summary>
     <p class="muted" style="margin:10px 0 0">
       หน้านี้เป็นหน้าเดียวในเล่มที่เป็นข้อเท็จจริงเกี่ยวกับคนจริง ระบบจึงไม่เขียนให้เอง
@@ -308,7 +334,7 @@
     </div>
   </details>
 
-  <details class="more" id="fictionOpts" hidden>
+  <details class="more" id="fictionOpts" hidden data-step="book">
     <summary>ตั้งค่านิยาย — แนวเรื่อง มุมมอง และตอนจบ</summary>
     <div class="grid">
       <div class="field">
@@ -356,7 +382,7 @@
     <div class="muted">ระบบจะสร้าง Story Bible เก็บตัวละคร ความสัมพันธ์ กฎของโลก ไทม์ไลน์ และปมที่ยังไม่คลี่คลาย เพื่อกันเรื่องหลุดระหว่างบท</div>
   </details>
 
-  <details class="more" id="proseOpts">
+  <details class="more" id="proseOpts" data-step="look">
     <summary>ตัวเลือกเพิ่มเติม — รูปเล่ม ภาพ และวิธีคุยกับ ChatGPT</summary>
     <div class="grid">
       <div class="field nonfictionOnly">
@@ -529,9 +555,9 @@
     </div>
   </details>
 
-  <div id="estimate" class="estimate"></div>
+  <div id="estimate" class="estimate" data-step="go"></div>
 
-  <section class="projectArchive">
+  <section class="projectArchive" data-step="mode">
     <div class="row">
       <b>ประวัติโครงการหนังสือ</b>
       <button id="refreshProjects"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>รีเฟรช</button>
@@ -539,7 +565,7 @@
     <div id="projectList" class="projectList"><div class="muted">กำลังอ่านรายการ...</div></div>
   </section>
 
-  <section id="resume" class="resumeBar hidden">
+  <section id="resume" class="resumeBar hidden" data-step="always">
     <div>
       <b id="resumeTitle"></b>
       <div id="resumeInfo" class="muted"></div>
@@ -551,7 +577,7 @@
     <button id="resumeDrop"><svg class="i" aria-hidden="true"><use href="#i-trash"/></svg>ทิ้ง</button>
   </section>
 
-  <div class="folderRow">
+  <div class="folderRow" data-step="go">
     <div>
       <b>Shared Workspace + โฟลเดอร์ส่งออก</b>
       <div id="folderName" class="muted">เลือกโฟลเดอร์เดียวกันในทุก Chrome Profile เพื่อใช้ประวัติและ Phase 2 ร่วมกัน</div>
@@ -559,7 +585,7 @@
     <button id="folder"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg>เลือก Folder</button>
   </div>
 
-  <div class="folderRow">
+  <div class="folderRow" data-step="go">
     <div>
       <b>เครื่องเรียงพิมพ์</b>
       <div id="typstState" class="muted">ยังไม่ได้ตรวจ</div>
@@ -567,9 +593,15 @@
     <button id="typstTest"><svg class="i" aria-hidden="true"><use href="#i-ruler"/></svg>ทดสอบ Typst</button>
   </div>
 
-  <button id="create" class="primary"><svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มสร้าง Ebook</button>
+  <button id="create" class="primary" data-step="go"><svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มสร้าง Ebook</button>
 
-  <div class="testBar">
+  <div id="wizardBar" class="wizardBar" data-step="always">
+    <button id="wizardBack" type="button">ย้อนกลับ</button>
+    <span id="wizardWhere" class="muted"></span>
+    <button id="wizardNext" type="button" class="inline">ถัดไป</button>
+  </div>
+
+  <div class="testBar" data-step="go">
     <label><input type="checkbox" id="testMode"> <svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>โหมดทดสอบ — เดินด้วยข้อมูลปลอม ไม่ยิง ChatGPT และไม่เปลืองโควตา</label>
     <button id="systemTest" type="button"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>ทดสอบระบบทั้งสาย (เล่มจิ๋ว 12 หน้า)</button>
   </div>

@@ -293,3 +293,31 @@ button.reviewIssue:hover{border-color:#6f8cff}
 .authorRef.aimed{border-color:#6f8cff;box-shadow:0 0 0 3px #6f8cff22}
 
 .pasteHint{font-size:11.5px;color:#8f9db8;border:1px dashed #34435f;border-radius:99px;padding:4px 10px;white-space:nowrap}
+
+/* ---------- ตัวนำทางหน้าตั้งค่า ---------- */
+/* แยกกลไกออกจากคลาส hidden เพราะ hidden ถูกโค้ดเดิมใช้ซ่อน/โชว์อยู่แล้วหลายจุด ถ้าใช้ตัวเดียวกันจะแย่งกันคุม */
+#start [data-wizard-off]{display:none!important}
+
+.wizardSteps{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0 0 16px}
+.wizardStep{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid #263454;border-radius:99px;background:#0c1425;color:#7f8da8;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+.wizardStep:hover{border-color:#4b5f8c;color:#c6d2ea}
+.wizardStep .n{display:grid;place-items:center;width:20px;height:20px;border-radius:99px;background:#1b2540;color:#8f9db8;font-size:11.5px;flex:none}
+.wizardStep.past{color:#a9d9c2;border-color:#2f6d55}
+.wizardStep.past .n{background:#173f31;color:#63d5a5}
+.wizardStep.now{color:#fff;border-color:#6f8cff;background:#141f3d;box-shadow:0 0 0 3px #6f8cff22}
+.wizardStep.now .n{background:#5d78ff;color:#fff}
+
+.wizardBar{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid #263454}
+.wizardBar #wizardWhere{flex:1;margin:0;line-height:1.5}
+.wizardBar button:disabled{opacity:.4;cursor:not-allowed}
+#wizardNext{background:#5d78ff;color:#fff}
+
+.modePicker{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:10px}
+.modeCard{display:flex;flex-direction:column;gap:5px;align-items:flex-start;text-align:left;padding:14px;border:1px solid #34435f;border-radius:12px;background:#0c1425;cursor:pointer;color:#c6d2ea}
+.modeCard:hover{border-color:#4b5f8c}
+.modeCard.sel{border-color:#6f8cff;background:#141f3d;box-shadow:0 0 0 3px #6f8cff22}
+.modeCard b{font-size:15px;color:#fff}
+.modeCard .modeWhat{font-size:12.5px;font-weight:600;color:#a9b8d6}
+.modeCard .modeNote{font-size:11.5px;font-weight:400;color:#8f9db8;line-height:1.55;white-space:normal}
+.modeCard.sel .modeWhat{color:#c3d2ff}
+#modePickerNote{margin-bottom:6px;line-height:1.6}

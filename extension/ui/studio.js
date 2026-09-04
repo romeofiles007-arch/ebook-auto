@@ -1195,6 +1195,7 @@ async function loadCreatorDefaults() {
     ]);
   if (imageSource) $('imageSource').value = imageSource;
   if (textSource) $('textSource').value = textSource;
+  syncModeFromForm();
   renderModelOptions();
   if (textModel) $('textApiModel').value = textModel;
   if (priceOverride?.in > 0) {
@@ -1590,7 +1591,11 @@ async function runSystemTest() {
 
 async function create() {
   const topic = $('title').value.trim();
-  if (!topic) return $('title').focus();
+  if (!topic) {
+    // ช่องหัวข้ออยู่คนละขั้นกับปุ่มเริ่ม การ focus ของที่ซ่อนอยู่คือการไม่เกิดอะไรขึ้นเลย
+    wizardGo('topic');
+    return $('title').focus();
+  }
   if (outlineDirection?.titleBase && outlineDirection.titleBase !== topic) resetOutlineDirection();
   if (!outlineDirection) {
     const box = $('outlineDirections');
@@ -1598,9 +1603,11 @@ async function create() {
     // กล่องที่ซ่อนอยู่แล้วยังมีธง ready ค้าง จะทำให้ปุ่มนี้กดแล้วไม่มีอะไรเกิดขึ้นเลย
     if (box?.dataset.ready === '1' && !box.classList.contains('hidden')) {
       status('กรุณาเลือกสารบัญ 1 ทางก่อนเริ่มสร้าง Ebook');
+      wizardGo('topic');
       box.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
+    wizardGo('topic');
     await generateOutlineDirections();
     return;
   }
@@ -4043,6 +4050,126 @@ const savePriceOverride = async () => {
   renderTextPrice();
 };
 ['priceIn', 'priceOut', 'usdThb'].forEach((id) => $(id).addEventListener('change', savePriceOverride));
+
+/* ---------- ตัวนำทางหน้าตั้งค่า ---------- */
+/**
+ * แบ่งหน้าตั้งค่าหน้ายาวหน้าเดียวออกเป็นขั้น ๆ โดยไม่ย้าย element ใดทั้งสิ้น
+ *
+ * ของเดิมยัดทุกอย่างไว้พร้อมกัน: แถบอัตโนมัติ แหล่งเขียน/แหล่งภาพ ช่องหัวข้อ ตาราง 9 ช่อง
+ * แล้ว details อีก 4 กล่องที่ซ่อนช่องไว้อีกกว่า 20 ช่อง คนเปิดมาครั้งแรกไม่รู้ว่าต้องกรอกอะไรก่อน
+ * ในไฟล์มี stepGuide เขียนบอกลำดับ 1-2-3-4 ไว้อยู่แล้ว แปลว่าปัญหานี้เคยถูกมองเห็น
+ * แต่แก้ด้วยการเขียนอธิบาย แทนการบังคับลำดับ — คนก็ยังงงเหมือนเดิม
+ *
+ * ตัวนี้เป็นชั้นแสดงผลล้วน ๆ ไม่แตะโครง DOM เลย เพราะ readForm() อ่านค่าด้วย getElementById
+ * ซึ่งไม่สนใจว่า element อยู่ใน parent ไหน create() runFullAuto() และตัวตรวจ contract
+ * จึงทำงานเหมือนเดิมทุกบรรทัด และถอดออกได้ด้วยการลบส่วนนี้ทิ้งอย่างเดียว
+ *
+ * ใช้ data-wizard-off แทนคลาส hidden เพราะ hidden ถูกโค้ดเดิมใช้ซ่อน/โชว์อยู่หลายจุด
+ * (#resume, #titleIdeas, #outlineDirections) ถ้าใช้ตัวเดียวกันจะแย่งกันคุมแล้วพังทั้งคู่
+ */
+const WIZARD_STEPS = [
+  { key: 'mode', label: 'เลือกโหมด', hint: 'เลือกว่าจะให้ระบบทำงานผ่านทางไหน — ที่เหลือทั้งหมดขึ้นอยู่กับข้อนี้' },
+  { key: 'book', label: 'ตั้งค่าเล่ม', hint: 'ผู้อ่าน โทน จำนวนหน้า ขนาดเล่ม — ทุกค่าถูกล็อกเข้าไปในสารบัญ จึงต้องมาก่อน' },
+  { key: 'look', label: 'รูปเล่มและภาพ', hint: 'ฟอนต์ ขอบกระดาษ ปก และภาพประกอบ' },
+  { key: 'topic', label: 'หัวข้อและสารบัญ', hint: 'ตั้งชื่อเรื่อง แล้วเลือกสารบัญ 1 ทาง' },
+  { key: 'go', label: 'ตรวจแล้วเริ่ม', hint: 'ดูราคาที่ประเมินไว้ แล้วกดเริ่มสร้าง' },
+];
+
+let wizardStep = 'mode';
+
+const wizardParts = () => [...$('start').children].filter((el) => el.dataset.step);
+
+function wizardApply() {
+  for (const el of wizardParts()) {
+    const s = el.dataset.step;
+    const off = s === 'never' || (s !== 'always' && s !== wizardStep);
+    if (off) el.setAttribute('data-wizard-off', '');
+    else el.removeAttribute('data-wizard-off');
+  }
+
+  const index = WIZARD_STEPS.findIndex((s) => s.key === wizardStep);
+  $('wizardSteps').innerHTML = WIZARD_STEPS.map(
+    (s, i) =>
+      `<li class="wizardStep${i === index ? ' now' : ''}${i < index ? ' past' : ''}" data-go="${s.key}">` +
+      `<span class="n">${i + 1}</span><span class="t">${esc(s.label)}</span></li>`,
+  ).join('');
+  $('wizardSteps')
+    .querySelectorAll('[data-go]')
+    .forEach((li) => (li.onclick = () => wizardGo(li.dataset.go)));
+
+  $('wizardWhere').textContent = WIZARD_STEPS[index]?.hint || '';
+  $('wizardBack').disabled = index <= 0;
+  $('wizardNext').classList.toggle('hidden', index >= WIZARD_STEPS.length - 1);
+  $('wizardNext').textContent = `ถัดไป: ${WIZARD_STEPS[index + 1]?.label || ''}`;
+}
+
+function wizardGo(key) {
+  if (!WIZARD_STEPS.some((s) => s.key === key)) return;
+  wizardStep = key;
+  wizardApply();
+  $('wizardSteps').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+const wizardShift = (by) => {
+  const i = WIZARD_STEPS.findIndex((s) => s.key === wizardStep);
+  wizardGo(WIZARD_STEPS[Math.min(WIZARD_STEPS.length - 1, Math.max(0, i + by))].key);
+};
+
+$('wizardBack').onclick = () => wizardShift(-1);
+$('wizardNext').onclick = () => wizardShift(1);
+
+/**
+ * โหมดคือคำตอบของคำถามเดียว: จะให้ระบบคุยกับ ChatGPT ทางไหน
+ * การ์ดพวกนี้ไม่ได้เก็บค่าใหม่ที่ไหนเลย มันแค่ตั้ง select สองช่องที่มีอยู่เดิมให้ตรงกัน
+ * แล้วส่ง change เพื่อให้ตัวจัดการเดิม (กล่อง API key, ข้อความอธิบาย, การประเมินราคา) ทำงานตามปกติ
+ */
+const MODE_PRESET = {
+  free: { textSource: 'web', imageSource: 'web' },
+  plus: { textSource: 'web', imageSource: 'web' },
+  api: { textSource: 'api', imageSource: 'api' },
+};
+
+const MODE_NOTE = {
+  free: 'โหมดฟรี: เขียนผ่านหน้าเว็บ ChatGPT · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด · ภาพจะเตรียมเป็น Prompt ไว้ก่อน แล้วสลับไปบัญชีที่สร้างภาพได้ตอน Phase 2',
+  plus: 'โหมด Plus: เขียนและสร้างภาพด้วยบัญชีเดียว · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด · ยังมีลิมิตข้อความต่อรอบ',
+  api: 'โหมด API: ไม่ต้องเปิดแท็บ ChatGPT เลย เร็วที่สุดและไม่มีลิมิตข้อความ · ต้องใส่ API key และจ่ายตามจำนวน token ที่ใช้จริง',
+};
+
+function pickMode(mode) {
+  const preset = MODE_PRESET[mode];
+  if (!preset) return;
+  for (const [id, value] of Object.entries(preset)) {
+    const el = $(id);
+    if (!el || el.value === value) continue;
+    el.value = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  $('modePicker')
+    .querySelectorAll('[data-mode]')
+    .forEach((b) => b.classList.toggle('sel', b.dataset.mode === mode));
+  $('modePickerNote').textContent = MODE_NOTE[mode] || '';
+  chosenMode = mode;
+}
+
+let chosenMode = null;
+
+$('modePicker')
+  .querySelectorAll('[data-mode]')
+  .forEach((b) => (b.onclick = () => pickMode(b.dataset.mode)));
+
+/**
+ * ค่าที่โหลดกลับมาจากครั้งก่อนอาจไม่ตรงกับการ์ดใบไหนเลย (เช่นเขียนด้วย API แต่วาดภาพด้วยหน้าเว็บ)
+ * กรณีนั้นต้องไม่ไฮไลต์การ์ดมั่ว ปล่อยให้ select สองช่องเป็นคำตอบไปตามเดิม
+ */
+function syncModeFromForm() {
+  const t = val('textSource', 'web');
+  const i = val('imageSource', 'web');
+  if (t === 'api' && i === 'api') return pickMode('api');
+  if (t === 'web' && i === 'web' && chosenMode !== 'plus') return pickMode('free');
+}
+
+wizardApply();
+
 $('priceReset').onclick = async () => {
   customPrice = null;
   $('priceIn').value = '';
