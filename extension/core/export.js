@@ -7,7 +7,7 @@
 import * as db from './db.js';
 import { stripZwsp } from './thai.js';
 import { coverTextBaked } from './prompts.js';
-import { authorRefSummary } from './imageRef.js';
+import { authorRefSummary, authorRefFor } from './imageRef.js';
 import { coverGeometry } from './budget.js';
 import { packAssets, toPdf } from '../typeset/compiler.js';
 import { buildDocument, buildItemsDocument } from '../typeset/template.js';
@@ -493,13 +493,13 @@ export async function exportFigurePrompts(book) {
 ### ปกหน้า → บันทึกเป็น \`cover-front.png\`
 
 \`\`\`
-${book.coverPrompts?.front || '(ยังไม่ได้สร้างทิศทางภาพ — เดินขั้น "ทิศทางภาพปก" ก่อน)'}
+${(book.coverPrompts?.front || '(ยังไม่ได้สร้างทิศทางภาพ — เดินขั้น "ทิศทางภาพปก" ก่อน)') + authorRefFor(book, 'cover-front')}
 \`\`\`
 
 ### ปกหลัง → บันทึกเป็น \`cover-back.png\`
 
 \`\`\`
-${book.coverPrompts?.back || '(ยังไม่ได้สร้าง)'}
+${(book.coverPrompts?.back || '(ยังไม่ได้สร้าง)') + authorRefFor(book, 'cover-back')}
 \`\`\`
 
 ${book.authorPhotoOnCover ? '### รูปผู้เขียน → บันทึกเป็น `author-photo.png`\n\nใช้รูปจริงของผู้เขียน ระบบจะวางขนาดประมาณ 30 × 38 มม. บนปกหลังโดยไม่ให้โมเดลสร้างหน้าคนขึ้นใหม่\n' : ''}${authorRefSummary(book)
@@ -528,7 +528,7 @@ ${
 - บันทึกเป็นชื่อ \`${f.name}\`
 
 \`\`\`
-${f.prompt || '(ไม่มี prompt)'}
+${(f.prompt || '(ไม่มี prompt)') + authorRefFor(book, 'figures')}
 \`\`\`
 `;
         })

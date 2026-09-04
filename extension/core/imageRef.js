@@ -26,6 +26,19 @@ export function wantsAuthorRef(book, job) {
   return false;
 }
 
+/**
+ * กฎรูปผู้เขียนสำหรับช่องหนึ่งช่อง ใช้ตอนประกอบ Prompt ที่ผู้ใช้จะเอาไปสร้างภาพเอง
+ *
+ * โหมดที่ระบบวาดเองได้กฎนี้ผ่าน plannedImageJobs อยู่แล้ว
+ * แต่โหมดที่ผู้ใช้เอา Prompt ไปสร้างที่อื่นไม่ได้ผ่านทางนั้นเลย เพราะไม่มีงานภาพให้วางแผน
+ * ถ้าไม่เติมตรงนี้ คนที่เลือกแนบรูปผู้เขียนจะได้ Prompt ที่ไม่มีคำสั่งเรื่องรูปเลย
+ * แล้วต้องเดาเองว่าจะบอกโมเดลยังไง ทั้งที่ระบบรู้คำตอบอยู่แล้ว
+ *
+ * @param {'cover-front'|'cover-back'|'figures'} target
+ */
+export const authorRefFor = (book, target) =>
+  (book?.authorRefTargets || []).includes(target) ? AUTHOR_REF_RULE : '';
+
 /** สรุปเป็นข้อความไว้โชว์บนหน้าจอ */
 export function authorRefSummary(book) {
   const picked = book?.authorRefTargets || [];

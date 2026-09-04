@@ -4131,17 +4131,38 @@ $('wizardNext').onclick = () => wizardShift(1);
  * การ์ดพวกนี้ไม่ได้เก็บค่าใหม่ที่ไหนเลย มันแค่ตั้ง select สองช่องที่มีอยู่เดิมให้ตรงกัน
  * แล้วส่ง change เพื่อให้ตัวจัดการเดิม (กล่อง API key, ข้อความอธิบาย, การประเมินราคา) ทำงานตามปกติ
  */
+/**
+  * โหมดไม่ได้ตัดสินแค่ว่าเขียนด้วยอะไร แต่ตัดสินว่าภาพจะมาจากไหนด้วย
+  *
+  * บัญชีฟรีสร้างภาพไม่ได้ ทางเดียวที่ใช้ได้จริงคือระบบเขียนเนื้อหาแล้วเว้นช่องภาพไว้
+  * พร้อม Prompt ให้เอาไปสร้างที่อื่น แล้วนำไฟล์กลับมาใส่ ครบทั้งปกหน้า ปกหลัง และภาพในเล่ม
+  * ตั้งเป็น auto ให้บัญชีฟรีคือการพาไปชนกำแพงกลางทางหลังจ่ายค่าเขียนไปทั้งเล่มแล้ว
+  *
+  * ส่วน Plus กับ API สร้างภาพได้เอง จึงตั้ง auto ให้ตั้งแต่แรก
+  * แต่ยังเปลี่ยนเป็นเอา Prompt ไปสร้างเองได้ที่ขั้น "รูปเล่มและภาพ" ถ้าอยากคุมภาพเอง
+  */
 const MODE_PRESET = {
-  free: { textSource: 'web', imageSource: 'web' },
-  plus: { textSource: 'web', imageSource: 'web' },
-  api: { textSource: 'api', imageSource: 'api' },
+  free: { textSource: 'web', imageSource: 'web', coverMode: 'prompt', figureMode: 'prompt' },
+  plus: { textSource: 'web', imageSource: 'web', coverMode: 'auto', figureMode: 'auto' },
+  api: { textSource: 'api', imageSource: 'api', coverMode: 'auto', figureMode: 'auto' },
 };
 
 const MODE_NOTE = {
-  free: 'โหมดฟรี: เขียนผ่านหน้าเว็บ ChatGPT · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด · ภาพจะเตรียมเป็น Prompt ไว้ก่อน แล้วสลับไปบัญชีที่สร้างภาพได้ตอน Phase 2',
-  plus: 'โหมด Plus: เขียนและสร้างภาพด้วยบัญชีเดียว · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด · ยังมีลิมิตข้อความต่อรอบ',
-  api: 'โหมด API: ไม่ต้องเปิดแท็บ ChatGPT เลย เร็วที่สุดและไม่มีลิมิตข้อความ · ต้องใส่ API key และจ่ายตามจำนวน token ที่ใช้จริง',
+  free: 'โหมดฟรี: เขียนเนื้อหาผ่านหน้าเว็บ ChatGPT แล้วเว้นช่องภาพไว้พร้อม Prompt · เอา Prompt ไปสร้างภาพที่อื่น แล้วนำไฟล์กลับมาใส่ ทั้งปกหน้า ปกหลัง และภาพในเล่ม · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด',
+  plus: 'โหมด Plus: เขียนและสร้างภาพด้วยบัญชีเดียว ระบบดึงภาพมาใส่ให้เอง · หรือจะเปลี่ยนเป็นเอา Prompt ไปสร้างเองแล้วแนบก็ได้ที่ขั้นรูปเล่มและภาพ · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด',
+  api: 'โหมด API: เขียนและสร้างภาพผ่าน API ไม่ต้องเปิดแท็บ ChatGPT เลย · เปลี่ยนเป็นเอา Prompt ไปสร้างเองก็ได้เหมือนกัน · ต้องใส่ API key และจ่ายตามจำนวน token ที่ใช้จริง',
 };
+
+/** ไฮไลต์อย่างเดียว ไม่แตะค่าใด ๆ — ใช้ตอนอ่านค่าเดิมกลับมาแล้วอยากบอกว่าตรงกับการ์ดใบไหน */
+function highlightMode(mode) {
+  $('modePicker')
+    .querySelectorAll('[data-mode]')
+    .forEach((b) => b.classList.toggle('sel', b.dataset.mode === mode));
+  $('modePickerNote').textContent =
+    (MODE_NOTE[mode] || '') +
+    (authorRefSummary(readAuthorRefDraft()) ? ' · Prompt ของภาพที่เลือกไว้จะมีคำสั่งให้แนบรูปผู้เขียนติดไปด้วย' : '');
+  chosenMode = mode;
+}
 
 function pickMode(mode) {
   const preset = MODE_PRESET[mode];
@@ -4152,12 +4173,11 @@ function pickMode(mode) {
     el.value = value;
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  $('modePicker')
-    .querySelectorAll('[data-mode]')
-    .forEach((b) => b.classList.toggle('sel', b.dataset.mode === mode));
-  $('modePickerNote').textContent = MODE_NOTE[mode] || '';
-  chosenMode = mode;
+  highlightMode(mode);
 }
+
+/** ค่าที่ติ๊กไว้บนหน้าจอ ยังไม่ได้กลายเป็นเล่ม จึงต้องห่อให้ authorRefSummary อ่านได้ */
+const readAuthorRefDraft = () => ({ authorRefTargets: pickedAuthorRefTargets() });
 
 let chosenMode = null;
 
@@ -4172,8 +4192,8 @@ $('modePicker')
 function syncModeFromForm() {
   const t = val('textSource', 'web');
   const i = val('imageSource', 'web');
-  if (t === 'api' && i === 'api') return pickMode('api');
-  if (t === 'web' && i === 'web') return pickMode(chosenMode === 'plus' ? 'plus' : 'free');
+  if (t === 'api' && i === 'api') return highlightMode('api');
+  if (t === 'web' && i === 'web') return highlightMode(chosenMode === 'plus' ? 'plus' : 'free');
   /**
    * ผสมทาง เช่นเขียนด้วย API แต่วาดภาพด้วยหน้าเว็บ ไม่ตรงกับการ์ดใบไหนเลย
    * ห้ามไฮไลต์การ์ดมั่ว ต้องกางช่องตั้งเองให้เห็นว่าค่าจริงคืออะไร
