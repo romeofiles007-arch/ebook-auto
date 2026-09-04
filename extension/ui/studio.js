@@ -1036,6 +1036,30 @@ async function polishUserOutline() {
   }
 }
 
+/**
+ * ชื่อเล่มที่ระบบนี้เคยทำไปแล้ว
+ *
+ * ตัวคิดชื่อไม่มีความทรงจำข้ามเล่ม ถามคำถามเดิมเมื่อไรก็ได้คำตอบเดิม
+ * ซึ่งเป็นเหตุผลตรง ๆ ที่โหมดอัตโนมัติได้ชื่อซ้ำทุกครั้ง — ไม่ใช่เพราะโมเดลคิดไม่ออก
+ * แต่เพราะไม่มีใครบอกมันว่าเคยตอบอะไรไปแล้ว
+ *
+ * อ่านจากทั้งเครื่องนี้และ Shared Workspace เพราะเล่มเก่าอาจถูกทำจาก Chrome profile อื่น
+ */
+async function previousTitles() {
+  try {
+    const [books, shared] = await Promise.all([
+      db.listBooks().catch(() => []),
+      W.listProjects().catch(() => []),
+    ]);
+    const names = [...books, ...shared]
+      .map((b) => String(b?.outline?.title || b?.title || b?.topic || '').trim())
+      .filter((t) => t && t !== '(ยังไม่มีชื่อ)');
+    return [...new Set(names)].slice(-40);
+  } catch {
+    return [];
+  }
+}
+
 async function generateTitleIdeas() {
   const button = $('titleIdeate');
   const box = $('titleIdeas');
@@ -1058,6 +1082,8 @@ async function generateTitleIdeas() {
         contentMode: val('contentMode', 'prose'),
         fictionGenre: val('fictionGenre', 'fantasy'),
         trendSeed,
+        today: new Date().toISOString().slice(0, 10),
+        avoidTitles: await previousTitles(),
       }),
       { label: 'คิดชื่อหนังสือ' },
       {
@@ -1517,6 +1543,30 @@ async function runFullAuto() {
   try {
     // 1) ยังไม่มีหัวข้อ → ให้ ChatGPT คิดให้ แล้วใช้ชื่อแรก
     if (!$('title').value.trim()) {
+      /**
+       * ถามว่า "ตอนนี้ควรทำเรื่องอะไร" ก่อนเสมอ ไม่ใช่ให้คิดชื่อลอย ๆ
+       *
+       * ตัวคิดชื่อที่ไม่มีหัวข้อตั้งต้นคือคำถามที่ไม่มีอะไรให้ตอบต่างกันเลย
+       * ถามกี่ครั้งก็ได้คำตอบที่โมเดลคิดว่าปลอดภัยที่สุดชุดเดิม จึงได้ชื่อซ้ำทุกเล่ม
+       * ขั้นค้นกระแสบังคับให้ไปดูของจริงในเว็บก่อน แล้วคืนมาพร้อมแหล่งอ้างอิง
+       *
+       * แต่บัญชีหรือโมเดลที่ค้นเว็บไม่ได้จะตอบว่า verified=false ซึ่งถูกต้องแล้ว
+       * กรณีนั้นห้ามหยุดทั้งเล่ม ให้ถอยไปใช้ตัวคิดชื่อตามเดิม ที่ตอนนี้รู้วันที่และรู้ว่าเคยทำเล่มอะไรไปแล้ว
+       */
+      status('อัตโนมัติ: กำลังให้ ChatGPT ค้นว่าตอนนี้อะไรน่าสนใจ');
+      try {
+        await generateTrendIdeas();
+      } catch (e) {
+        addEvent('system', 'อัตโนมัติ: ค้นกระแสไม่สำเร็จ', e?.message || String(e));
+      }
+      if (trendSeed?.suggested_title || trendSeed?.trend) {
+        $('title').value = trendSeed.suggested_title || trendSeed.trend;
+        if ($('bm_references')) $('bm_references').checked = true;
+        addEvent('system', 'อัตโนมัติ: ได้กระแสปัจจุบัน', `${trendSeed.trend}${trendSeed.why_now ? `\n${trendSeed.why_now}` : ''}`);
+      } else {
+        addEvent('system', 'อัตโนมัติ: ไม่ได้กระแสที่ยืนยันได้', 'ใช้ตัวคิดชื่อแทน โดยเลี่ยงชื่อที่เคยทำไปแล้ว');
+      }
+
       status('อัตโนมัติ: กำลังให้ ChatGPT คิดชื่อหนังสือ');
       await generateTitleIdeas();
       // อ่านค่าจากตัวเลือกแรกตรง ๆ ไม่กดปุ่ม เพราะปุ่มนั้นสั่งวางสารบัญต่อทันที
