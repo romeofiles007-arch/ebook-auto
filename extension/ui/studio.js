@@ -1553,6 +1553,32 @@ async function create() {
     await generateOutlineDirections();
     return;
   }
+  /**
+   * ติ๊กแนบรูปผู้เขียนไว้แต่ไม่มีรูป ต้องทักตั้งแต่ตรงนี้ ไม่ใช่ไปทักตอนก่อนส่งออก
+   *
+   * โหมดอัตโนมัติผ่านประตูทุกบานให้เอง ไม่มีจังหวะไหนหยุดรอให้อัปโหลดเลย
+   * ถ้าปล่อยผ่าน ภาพทุกใบที่ควรเป็นหน้าเจ้าของเล่มจะกลายเป็นหน้าที่โมเดลแต่งขึ้นเอง
+   * แล้วกว่าจะรู้ก็ตอนภาพสร้างเสร็จหมดแล้ว ซึ่งจ่ายค่าสร้างภาพไปครบทุกใบแล้ว
+   */
+  const refTargets = pickedAuthorRefTargets();
+  if (refTargets.length && !setupAuthorPhoto) {
+    const go = confirm(
+      'เลือกให้แนบรูปผู้เขียนไปกับการสร้างภาพไว้ แต่ยังไม่ได้ใส่รูป
+
+' +
+        'ถ้าไปต่อตอนนี้ หน้าคนในภาพจะเป็นหน้าที่โมเดลแต่งขึ้นเอง
+' +
+        'โหมดอัตโนมัติจะไม่หยุดถามอีกเลยจนกว่าจะสร้างภาพเสร็จทั้งเล่ม
+
+' +
+        'กดยกเลิกเพื่อกลับไปใส่รูปก่อน · กดตกลงเพื่อไปต่อโดยไม่มีรูป',
+    );
+    if (!go) {
+      $('authorPhotoSetupPick').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+  }
+
   await saveCreatorDefaults();
 
   $('error').classList.add('hidden');
@@ -1567,6 +1593,8 @@ async function create() {
 
   book = readForm();
   await db.saveBook(book);
+  // เล่มเพิ่งมี id — บันทึกรูปผู้เขียนที่อุ้มมาจากหน้าตั้งค่าเดี๋ยวนี้ ก่อนที่ขั้นสร้างภาพจะไปหามัน
+  await saveSetupAuthorPhoto();
   await syncSharedProject(book.id);
   addEvent('system', 'เริ่มงาน', `${book.topic}\n${book.targetPages} หน้า · ${TRIM_PRESETS[book.trim.preset].label}`);
   status('กำลังเริ่มงาน');
@@ -4121,6 +4149,18 @@ function dpiNote(px, printMm) {
 }
 
 let pendingSlot = null;
+let setupAuthorPhotoUrl = null;
+
+/**
+ * รูปผู้เขียนที่เลือกไว้ตั้งแต่หน้าตั้งค่า ก่อนที่เล่มจะมีตัวตน
+ *
+ * ไฟล์ภาพถูกเก็บโดยผูกกับ book.id ซึ่งยังไม่มีจนกว่าจะกดสร้าง
+ * จึงต้องอุ้มไฟล์ไว้ในหน่วยความจำก่อน แล้วบันทึกทันทีที่เล่มเกิด
+ *
+ * ถ้าไม่ทำแบบนี้ โหมดอัตโนมัติจะรับรูปผู้เขียนไม่ได้เลย เพราะมันผ่านประตูทุกบานให้เอง
+ * ทั้ง gate_edit และ gate_images ไม่มีจังหวะไหนหยุดรอให้อัปโหลดสักจุดเดียว
+ */
+let setupAuthorPhoto = null;
 let editorPreviewUrls = [];
 let imageRenderToken = 0;
 
@@ -4250,6 +4290,58 @@ async function renderImages() {
     }));
 }
 
+/** แสดงรูปที่เลือกไว้ให้เห็นกับตา ไม่ใช่แค่เชื่อว่าเลือกแล้ว */
+function showSetupAuthorPhoto() {
+  const img = $('authorPhotoSetupPreview');
+  if (setupAuthorPhotoUrl) URL.revokeObjectURL(setupAuthorPhotoUrl);
+  setupAuthorPhotoUrl = setupAuthorPhoto ? URL.createObjectURL(setupAuthorPhoto) : null;
+  img.classList.toggle('hidden', !setupAuthorPhotoUrl);
+  if (setupAuthorPhotoUrl) img.src = setupAuthorPhotoUrl;
+  $('authorPhotoSetupState').textContent = setupAuthorPhoto
+    ? `เลือกไว้แล้ว · ${setupAuthorPhoto.name || 'รูปที่วางมา'} — จะถูกบันทึกเป็น author-photo.png ตอนเริ่มสร้างเล่ม`
+    : 'ยังไม่ได้เลือกรูป';
+}
+
+function setSetupAuthorPhoto(file) {
+  if (!file?.type?.startsWith('image/')) return;
+  setupAuthorPhoto = file;
+  showSetupAuthorPhoto();
+}
+
+/**
+ * ย้ายรูปที่อุ้มไว้ลงเป็นไฟล์จริงของเล่ม
+ *
+ * ล้มตรงนี้ห้ามล้มทั้งเล่ม — เล่มยังเขียนต่อได้ทั้งหมด เสียแค่รูปอ้างอิงหนึ่งใบ
+ * และมีที่ให้อัปโหลดซ้ำอยู่แล้วทั้งที่หน้าแก้ไขและที่ประตู Phase 2
+ */
+async function saveSetupAuthorPhoto() {
+  if (!setupAuthorPhoto || !book?.id) return;
+  try {
+    const { blob, w, h } = await normalizeImage(setupAuthorPhoto, { grayscale: false });
+    await db.saveAsset(book.id, 'author-photo.png', blob, {
+      w,
+      h,
+      dpi: dpiNote(w, 30).dpi,
+      from: setupAuthorPhoto.name || 'paste',
+    });
+    addEvent('system', 'บันทึกรูปผู้เขียน', `author-photo.png · ${w}×${h}`);
+  } catch (e) {
+    addEvent('system', 'บันทึกรูปผู้เขียนไม่สำเร็จ', `${e?.message || e} — อัปโหลดซ้ำได้ที่หน้าตรวจงานหรือประตู Phase 2`);
+  }
+}
+
+$('authorPhotoSetupPick').onclick = () => $('authorPhotoSetupFile').click();
+$('authorPhotoSetupFile').onchange = (e) => {
+  setSetupAuthorPhoto(e.target.files?.[0]);
+  e.target.value = '';
+};
+document.querySelector('.authorRef')?.addEventListener('click', (e) => {
+  if (e.target.closest('button') || e.target.closest('label')) return;
+  document.querySelectorAll('.aimed').forEach((x) => x.classList.remove('aimed'));
+  e.currentTarget.classList.add('aimed');
+  status('เล็งช่องรูปผู้เขียนไว้แล้ว — กด Ctrl+V วางรูปได้เลย');
+});
+
 function pickImage(name) {
   pendingSlot = name;
   $('imgFile').click();
@@ -4371,10 +4463,10 @@ function aimSlot(name, el) {
  * แต่ถ้าเหลือหลายช่อง ห้ามเดา เพราะเดาผิดคือไปทับไฟล์ที่ผู้ใช้ตั้งใจใส่ไว้แล้ว
  */
 async function pasteImageFromClipboard(e) {
-  if (!book?.id) return;
+  const onSetup = !$('start').classList.contains('hidden');
   const onEditor = !$('editor').classList.contains('hidden');
   const onPhase2 = !$('imagePhase').classList.contains('hidden');
-  if (!onEditor && !onPhase2) return;
+  if (!onSetup && !onEditor && !onPhase2) return;
 
   /**
    * ห้ามแย่งการวางของช่องพิมพ์
@@ -4390,6 +4482,16 @@ async function pasteImageFromClipboard(e) {
   const file = items.find((i) => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
   if (!file) return;
   e.preventDefault();
+
+  /**
+   * หน้าตั้งค่ามีช่องเดียวที่รับรูปได้ คือรูปผู้เขียน จึงไม่ต้องถามว่าจะวางที่ไหน
+   * และเล่มยังไม่มี id ให้บันทึกไฟล์ ต้องอุ้มไว้ก่อนเหมือนการเลือกไฟล์ด้วยมือ
+   */
+  if (onSetup) {
+    setSetupAuthorPhoto(file);
+    status('วางรูปผู้เขียนแล้ว — จะถูกบันทึกตอนเริ่มสร้างเล่ม');
+    return;
+  }
 
   let slot = pendingSlot;
   if (!slot) {

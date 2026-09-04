@@ -489,7 +489,13 @@
           <label class="muted"><input type="checkbox" id="authorRefFront"> ปกหน้า</label>
           <label class="muted"><input type="checkbox" id="authorRefBack"> ปกหลัง</label>
           <label class="muted"><input type="checkbox" id="authorRefFigures"> ภาพประกอบในเล่ม</label>
-          <div id="authorRefHint" class="muted">ไม่เลือก = โมเดลแต่งหน้าคนขึ้นเองเหมือนเดิม · เลือกแล้วต้องอัปโหลดไฟล์ author-photo.png ก่อนเริ่มสร้างภาพ</div>
+          <div class="authorRefFile">
+            <button type="button" id="authorPhotoSetupPick">เลือกรูปผู้เขียน</button>
+            <img id="authorPhotoSetupPreview" class="authorRefThumb hidden" alt="รูปผู้เขียนที่เลือกไว้">
+            <span id="authorPhotoSetupState" class="muted">ยังไม่ได้เลือกรูป</span>
+            <input type="file" id="authorPhotoSetupFile" accept="image/*" hidden>
+          </div>
+          <div id="authorRefHint" class="muted">ไม่เลือก = โมเดลแต่งหน้าคนขึ้นเองเหมือนเดิม · ใส่รูปตรงนี้ได้เลย จะได้ทันทั้งโหมดอัตโนมัติ (คลิกช่องนี้แล้วกด Ctrl+V ก็ได้)</div>
         </div>
       </div>
       <div class="field">
