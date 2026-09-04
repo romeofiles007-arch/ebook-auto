@@ -63,7 +63,8 @@ textarea:focus{border-color:#6f8cff}
 @media (max-width:900px){.coverSlots{grid-template-columns:1fr 1fr}}
 @media (max-width:640px){.coverSlots{grid-template-columns:1fr}}
 .slot{border:1px dashed #4a5f8c;border-radius:9px;padding:11px;display:flex;flex-direction:column;gap:6px;cursor:pointer}
-.slot.aimed,.fig.aimed{border-style:solid;border-color:#6f8cff;box-shadow:0 0 0 3px #6f8cff22}
+.p2Row,.fig{cursor:pointer}
+.slot.aimed,.fig.aimed,.p2Row.aimed{border-style:solid;border-color:#6f8cff;box-shadow:0 0 0 3px #6f8cff22}
 .fig.aimed{cursor:default}
 .slot.filled{border-style:solid;border-color:#2f6d55}
 .slotHead{font-weight:700;font-size:13px}

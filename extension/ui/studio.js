@@ -2982,6 +2982,18 @@ async function renderPhase2() {
     $('phase2List')
       .querySelectorAll('[data-p2-upload]')
       .forEach((b) => (b.onclick = () => pickImage(uploadSlotFor(b.dataset.p2Upload))));
+    /**
+     * หน้านี้คือที่ที่ผู้ใช้ยืนอยู่จริงตอนใส่รูป ไม่ใช่การ์ดภาพในหน้าแก้ไข
+     * ถ้าเล็งช่องได้เฉพาะที่นั่น การวางด้วย Ctrl+V จะใช้ไม่ได้เลยในทางปฏิบัติ
+     */
+    $('phase2List')
+      .querySelectorAll('[data-p2-row]')
+      .forEach((row) => {
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('button') || e.target.closest('details')) return;
+          aimSlot(uploadSlotFor(row.dataset.p2Row), row);
+        });
+      });
     $('phase2List')
       .querySelectorAll('[data-p2-grab]')
       .forEach((b) => (b.onclick = () => grabImageFromChat(b.dataset.p2Grab)));
@@ -4405,7 +4417,7 @@ function emptyImageSlots() {
   const have = new Set(assetNames);
   const slots = plannedImageJobs(book).map((j) => j.name);
   if (needsAuthorPhoto(book)) slots.push('author-photo.png');
-  return slots.filter((n) => !have.has(n)).map((n) => n.replace(/^(cover-front|cover-back|author-photo)\.png$/, '$1'));
+  return slots.filter((n) => !have.has(n)).map(uploadSlotFor);
 }
 
 document.addEventListener('paste', (e) => {
