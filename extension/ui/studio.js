@@ -4218,6 +4218,16 @@ async function renderImages() {
     .querySelectorAll('[data-fig]')
     .forEach((b) => (b.onclick = () => pickImage(b.dataset.fig)));
   $('figList')
+    .querySelectorAll('.fig')
+    .forEach((row) => {
+      const name = row.querySelector('[data-fig]')?.dataset.fig;
+      if (!name) return;
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button') || e.target.closest('details')) return;
+        aimSlot(name, row);
+      });
+    });
+  $('figList')
     .querySelectorAll('[data-regen-fig]')
     .forEach((b) => (b.onclick = () => regenerateImageAsset(b.dataset.regenFig)));
   $('figList')
@@ -4235,10 +4245,23 @@ function pickImage(name) {
 
 $('imgFile').onchange = async (e) => {
   const file = e.target.files?.[0];
-  if (!file || !pendingSlot) return;
-  const isCover = pendingSlot.startsWith('cover-');
-  const isAuthorPhoto = pendingSlot === 'author-photo';
-  const name = isCover || isAuthorPhoto ? pendingSlot + '.png' : pendingSlot;
+  if (file && pendingSlot) await ingestSlotFile(file, pendingSlot);
+  pendingSlot = null;
+  e.target.value = '';
+};
+
+/**
+ * รับไฟล์ภาพหนึ่งไฟล์เข้าช่องหนึ่งช่อง
+ *
+ * แยกออกมาจากตัวจัดการ onchange เพราะตอนนี้ไฟล์มาได้สองทาง
+ * ทั้งจากกล่องเลือกไฟล์ และจากการกด Ctrl+V วางรูปที่คัดลอกไว้
+ * ทั้งสองทางต้องผ่านสายตรวจ ปรับขนาด และอัปเดตหน้าจอชุดเดียวกันทุกขั้น
+ * ไม่งั้นรูปที่วางเข้ามาจะถูกบันทึกด้วย meta คนละชุดแล้วหน้าจอยังบอกว่ายังขาดอยู่
+ */
+async function ingestSlotFile(file, slot) {
+  const isCover = slot.startsWith('cover-');
+  const isAuthorPhoto = slot === 'author-photo';
+  const name = isCover || isAuthorPhoto ? slot + '.png' : slot;
 
   /**
    * ผลลัพธ์ต้องไปโผล่บนหน้าจอที่ผู้ใช้ยืนอยู่จริง
@@ -4308,13 +4331,98 @@ $('imgFile').onchange = async (e) => {
     addEvent('system', 'ใส่ภาพ', `${name} — ${note}`);
   } catch (err) {
     say('ใส่ภาพไม่สำเร็จ: ' + (err?.message || err), true);
-  } finally {
-    pendingSlot = null;
-    e.target.value = '';
   }
-};
+}
+
+/**
+ * เล็งช่องไว้ก่อนวาง
+ *
+ * การวางรูปต้องรู้ว่าจะวางลงช่องไหน แต่คลิปบอร์ดไม่ได้บอกอะไรเลยนอกจากตัวไฟล์
+ * จึงให้คลิกที่ช่องเพื่อเล็งไว้ก่อน แล้วค่อยกด Ctrl+V
+ * ช่องที่เล็งไว้ต้องเห็นได้ด้วยตา ไม่ใช่สถานะที่มีอยู่แต่ในหัวโปรแกรม
+ */
+function aimSlot(name, el) {
+  pendingSlot = name;
+  document.querySelectorAll('.aimed').forEach((x) => x.classList.remove('aimed'));
+  el?.classList.add('aimed');
+  const where = name === 'author-photo' ? 'รูปผู้เขียน' : name.replace(/\.png$/, '');
+  status(`เล็งช่อง ${where} ไว้แล้ว — กด Ctrl+V วางรูปที่คัดลอกไว้ได้เลย หรือกดปุ่มเลือกไฟล์`);
+}
+
+/**
+ * วางรูปจากคลิปบอร์ด
+ *
+ * ทางเดิมมีทางเดียวคือกดปุ่ม แล้วไปหาไฟล์ในเครื่อง ซึ่งแปลว่าภาพที่เพิ่งสร้างจากเว็บอื่น
+ * ต้องเซฟลงเครื่องก่อนเสมอ ทั้งที่มันอยู่ในคลิปบอร์ดพร้อมใช้อยู่แล้ว
+ *
+ * ถ้ายังไม่ได้เล็งช่องไว้ แต่ทั้งเล่มเหลือช่องว่างช่องเดียว ก็ไม่ต้องถาม — ลงช่องนั้นแหละ
+ * แต่ถ้าเหลือหลายช่อง ห้ามเดา เพราะเดาผิดคือไปทับไฟล์ที่ผู้ใช้ตั้งใจใส่ไว้แล้ว
+ */
+async function pasteImageFromClipboard(e) {
+  if (!book?.id) return;
+  const onEditor = !$('editor').classList.contains('hidden');
+  const onPhase2 = !$('imagePhase').classList.contains('hidden');
+  if (!onEditor && !onPhase2) return;
+
+  /**
+   * ห้ามแย่งการวางของช่องพิมพ์
+   *
+   * หน้าแก้ไขมีช่องแก้เนื้อหาอยู่ในหน้าเดียวกัน ถ้าดักการวางไว้ทั้งหน้าโดยไม่ยกเว้น
+   * การวางข้อความลงช่องนั้นจะยังทำงาน แต่การวางรูปจะถูกลากไปเข้าช่องภาพแทน
+   * ทั้งที่คนกำลังพิมพ์อยู่ในช่องข้อความ ซึ่งไม่ใช่สิ่งที่เขาสั่ง
+   */
+  const t = e.target;
+  if (t?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t?.tagName)) return;
+
+  const items = [...(e.clipboardData?.items || [])];
+  const file = items.find((i) => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
+  if (!file) return;
+  e.preventDefault();
+
+  let slot = pendingSlot;
+  if (!slot) {
+    const empty = emptyImageSlots();
+    if (empty.length === 1) slot = empty[0];
+    else {
+      const msg = empty.length
+        ? `คัดลอกรูปมาแล้ว แต่ยังไม่ได้เลือกว่าจะวางช่องไหน — คลิกที่ช่องที่ต้องการก่อน แล้วกด Ctrl+V อีกครั้ง (ยังว่างอยู่ ${empty.length} ช่อง)`
+        : 'คัดลอกรูปมาแล้ว แต่ทุกช่องมีไฟล์ครบแล้ว — คลิกช่องที่ต้องการเปลี่ยนก่อน แล้วกด Ctrl+V อีกครั้ง';
+      status(msg);
+      if (onPhase2) phase2Notice(`<b>${esc(msg)}</b>`, true);
+      else $('docxReport').textContent = msg;
+      return;
+    }
+  }
+
+  status(`กำลังวางรูปลงช่อง ${slot}`);
+  await ingestSlotFile(file, slot);
+  pendingSlot = null;
+  document.querySelectorAll('.aimed').forEach((x) => x.classList.remove('aimed'));
+}
+
+/** ช่องภาพที่ยังไม่มีไฟล์ — ใช้ตัดสินว่าวางรูปโดยไม่ต้องถามได้ไหม */
+function emptyImageSlots() {
+  const have = new Set(assetNames);
+  const slots = plannedImageJobs(book).map((j) => j.name);
+  if (needsAuthorPhoto(book)) slots.push('author-photo.png');
+  return slots.filter((n) => !have.has(n)).map((n) => n.replace(/^(cover-front|cover-back|author-photo)\.png$/, '$1'));
+}
+
+document.addEventListener('paste', (e) => {
+  pasteImageFromClipboard(e).catch((err) => status('วางรูปไม่สำเร็จ: ' + (err?.message || err)));
+});
 
 document.querySelectorAll('[data-cover]').forEach((b) => (b.onclick = () => pickImage(b.dataset.cover)));
+
+// คลิกที่ช่อง (ไม่ใช่ที่ปุ่มในช่อง) = เล็งช่องนั้นไว้รอวาง
+document.querySelectorAll('.coverSlots .slot').forEach((slot) => {
+  const name = slot.querySelector('[data-cover]')?.dataset.cover;
+  if (!name) return;
+  slot.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    aimSlot(name, slot);
+  });
+});
 $('coverRegenFront').onclick = () => confirmRegenerateCover('cover-front.png', 'front');
 $('coverRegenBack').onclick = () => confirmRegenerateCover('cover-back.png', 'back');
 $('coverRethink').onclick = () => rethinkCoverWithGpt();
