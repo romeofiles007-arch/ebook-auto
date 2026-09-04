@@ -1447,12 +1447,40 @@ export class Machine {
 
   async measure(sections) {
     const assets = await db.loadAssets(this.book.id);
-    const { pages, ms } = await compileBook({
-      book: this.book,
-      outline: this.book.outline,
-      sections,
-      assets,
-    });
+    let pages;
+    let ms;
+    try {
+      ({ pages, ms } = await compileBook({
+        book: this.book,
+        outline: this.book.outline,
+        sections,
+        assets,
+      }));
+    } catch (e) {
+      /**
+       * เครื่องเรียงพิมพ์ล้มแล้วเดินต่อไม่ได้จริง ๆ แต่ข้อความที่มันให้มาใช้หาสาเหตุไม่ได้เลย
+       * จึงต้องพ่นต้นฉบับส่วนหัวออกมาให้เห็นในบันทึกงาน พร้อมรายชื่อไฟล์ภาพที่ป้อนเข้าไป
+       * เพื่อให้ครั้งหน้าที่เจอ มีของให้ดูทันทีโดยไม่ต้องรันซ้ำเพื่อเก็บหลักฐาน
+       */
+      const src = e?.typstSrc || '';
+      this.book.lastCompileFail = {
+        at: Date.now(),
+        message: e?.message || String(e),
+        step: this.job.step,
+        srcChars: src.length,
+        srcHead: src.slice(0, 4000),
+      };
+      await this.save().catch(() => {});
+      this.log(
+        'error',
+        `เครื่องเรียงพิมพ์คอมไพล์เอกสารไม่ผ่าน: ${e?.message || e}\n` +
+          `ต้นฉบับยาว ${src.length.toLocaleString()} ตัวอักษร · ไฟล์ภาพที่ป้อนเข้าไป ${(e?.typstFiles || []).length} ไฟล์` +
+          ((e?.typstFiles || []).length ? ` (${e.typstFiles.join(', ')})` : '') +
+          `\n\n--- ต้นฉบับ Typst 2000 ตัวอักษรแรก ---\n${src.slice(0, 2000)}` +
+          (src.length > 2000 ? '\n…' : ''),
+      );
+      throw e;
+    }
     this.book.lastCompile = { pages: pages.physical, ms, at: Date.now() };
     return { pages: pages.physical, ms };
   }

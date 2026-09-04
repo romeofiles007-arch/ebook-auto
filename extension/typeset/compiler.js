@@ -200,7 +200,7 @@ export async function compileBook({ book, outline, sections, assets = [], withBl
       opts: { withBleed, padPages: book.padPages || 0 },
     });
     const t1 = performance.now();
-    const p = await pageCount(isrc);
+    const p = await withSource(isrc, [], () => pageCount(isrc));
     return { src: isrc, pages: p, files: [], items: items.length, ms: Math.round(performance.now() - t1) };
   }
 
@@ -216,8 +216,27 @@ export async function compileBook({ book, outline, sections, assets = [], withBl
   });
   const files = await packAssets(usable);
   const t0 = performance.now();
-  const pages = await pageCount(src, files);
+  const pages = await withSource(src, files, () => pageCount(src, files));
   return { src, pages, files, ms: Math.round(performance.now() - t0) };
+}
+
+/**
+ * คอมไพล์ล้มต้องพกต้นฉบับติดมากับ error ด้วย
+ *
+ * ฝั่ง Typst ตอบกลับมาเป็นข้อความเดียวสั้น ๆ เช่น "document is not compiled, with []"
+ * ซึ่งไม่มีเลขบรรทัด ไม่มีบริบท และบางครั้ง diagnostics ก็ว่างเปล่าอย่างที่เห็น
+ * เมื่อเป็นแบบนั้น ต้นฉบับที่ส่งเข้าไปคือหลักฐานชิ้นเดียวที่เหลืออยู่
+ * ถ้าไม่เก็บไว้ตรงนี้ มันหายไปพร้อมกับ stack แล้วต้องเดากันต่อว่าอะไรพัง
+ */
+async function withSource(src, files, run) {
+  try {
+    return await run();
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    err.typstSrc = src;
+    err.typstFiles = (files || []).map((f) => f.path);
+    throw err;
+  }
 }
 
 /**
