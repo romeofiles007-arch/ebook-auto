@@ -115,13 +115,15 @@
     เพราะเป็นตัวเลือกที่ตัดสินว่าจะเจอปัญหาการขับหน้าเว็บหรือไม่ ต้องเห็นก่อนกดเริ่ม
   -->
   <div class="apiBar" data-step="mode">
+    <details id="sourceAdvanced" class="more sourceAdvanced">
+    <summary>ตั้งแหล่งเขียนและแหล่งภาพเอง — เลือกคนละทางกันก็ได้</summary>
     <div class="apiBarTop">
       <div>
         <b><svg class="i i-lg" aria-hidden="true"><use href="#i-pen"/></svg> แหล่งเขียนเนื้อหา</b>
-        <span id="textSourceNote">ขับหน้าเว็บ ChatGPT ฟรีตามแพ็กเกจที่มีอยู่ แต่ช้ากว่าและมีลิมิตข้อความ</span>
+        <span id="textSourceNote">ขับหน้าเว็บ ChatGPT ตามแพ็กเกจของบัญชีที่ล็อกอินอยู่ · ช้ากว่าทาง API และมีลิมิตข้อความ</span>
       </div>
       <select id="textSource">
-        <option value="web" selected>หน้าเว็บ ChatGPT (ฟรี)</option>
+        <option value="web" selected>หน้าเว็บ ChatGPT</option>
         <option value="api">OpenAI API (จ่ายตามใช้จริง)</option>
       </select>
     </div>
@@ -135,6 +137,7 @@
         <option value="api">OpenAI API</option>
       </select>
     </div>
+    </details>
     <div id="apiKeyField" class="apiKeyBox" hidden>
       <div class="apiKeyRow">
         <input id="openaiApiKey" type="password" placeholder="วาง OpenAI API key ที่นี่ (sk-...)" autocomplete="off" spellcheck="false">

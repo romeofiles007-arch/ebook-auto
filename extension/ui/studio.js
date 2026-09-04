@@ -4024,7 +4024,7 @@ function syncApiSources() {
   $('textApiRow').hidden = !textApi;
   $('textSourceNote').textContent = textApi
     ? 'เร็วกว่าและไม่มีลิมิตข้อความรายสามชั่วโมง แต่จ่ายตามจำนวน token ที่ใช้จริง และไม่แตะบัญชี ChatGPT ของคุณ'
-    : 'ขับหน้าเว็บ ChatGPT ฟรีตามแพ็กเกจที่มีอยู่ แต่ช้ากว่าและมีลิมิตข้อความ';
+    : 'ขับหน้าเว็บ ChatGPT ตามแพ็กเกจของบัญชีที่ล็อกอินอยู่ · ช้ากว่าทาง API และมีลิมิตข้อความ';
   renderModelOptions();
   renderTextPrice();
 }
@@ -4165,7 +4165,18 @@ function syncModeFromForm() {
   const t = val('textSource', 'web');
   const i = val('imageSource', 'web');
   if (t === 'api' && i === 'api') return pickMode('api');
-  if (t === 'web' && i === 'web' && chosenMode !== 'plus') return pickMode('free');
+  if (t === 'web' && i === 'web') return pickMode(chosenMode === 'plus' ? 'plus' : 'free');
+  /**
+   * ผสมทาง เช่นเขียนด้วย API แต่วาดภาพด้วยหน้าเว็บ ไม่ตรงกับการ์ดใบไหนเลย
+   * ห้ามไฮไลต์การ์ดมั่ว ต้องกางช่องตั้งเองให้เห็นว่าค่าจริงคืออะไร
+   */
+  chosenMode = null;
+  $('modePicker')
+    .querySelectorAll('[data-mode]')
+    .forEach((b) => b.classList.remove('sel'));
+  $('modePickerNote').textContent =
+    `ตั้งเอง: เขียนด้วย${t === 'api' ? ' OpenAI API' : 'หน้าเว็บ ChatGPT'} · สร้างภาพด้วย${i === 'api' ? ' OpenAI API' : 'หน้าเว็บ ChatGPT'}`;
+  $('sourceAdvanced').open = true;
 }
 
 wizardApply();

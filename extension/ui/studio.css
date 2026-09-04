@@ -321,3 +321,6 @@ button.reviewIssue:hover{border-color:#6f8cff}
 .modeCard .modeNote{font-size:11.5px;font-weight:400;color:#8f9db8;line-height:1.55;white-space:normal}
 .modeCard.sel .modeWhat{color:#c3d2ff}
 #modePickerNote{margin-bottom:6px;line-height:1.6}
+.sourceAdvanced{margin:0}
+.sourceAdvanced>summary{font-size:12.5px;color:#8f9db8}
+.sourceAdvanced[open]>summary{margin-bottom:8px}
