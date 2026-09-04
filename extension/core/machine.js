@@ -25,6 +25,7 @@ import * as I from './items.js';
 import { compileBook, calibrate } from '../typeset/compiler.js';
 import { jitter, sleep } from '../transport/index.js';
 import { generateImage, DEFAULT_IMAGE_MODEL } from './imageApi.js';
+import { wantsAuthorRef, prepareRefImage, dataUrlToFile, AUTHOR_REF_RULE } from './imageRef.js';
 
 export const STEPS = [
   'health',
@@ -1381,6 +1382,30 @@ export class Machine {
     return added;
   }
 
+  /**
+   * รูปผู้เขียนที่เตรียมไว้แนบ — เตรียมครั้งเดียวแล้วใช้ซ้ำทั้งเล่ม
+   *
+   * ย่อรูปหนึ่งใบใช้เวลาไม่มาก แต่เล่มหนึ่งมีภาพได้หลายสิบรูป
+   * การย่อรูปเดิมซ้ำทุกครั้งคือการทำงานเดิมทิ้งหลายสิบรอบโดยไม่ได้อะไรต่างกันเลย
+   */
+  async authorRef() {
+    if (this._authorRef !== undefined) return this._authorRef;
+    this._authorRef = null;
+    try {
+      const asset = await db.loadAsset(this.book.id, 'author-photo.png');
+      if (!asset?.blob) {
+        this.log('warn', 'เลือกให้แนบรูปผู้เขียนไปกับภาพ แต่ยังไม่มีไฟล์ author-photo.png — จะสร้างภาพโดยไม่มีรูปอ้างอิง');
+        return this._authorRef;
+      }
+      const ready = await prepareRefImage(asset.blob);
+      this._authorRef = { name: 'author-photo.jpg', dataUrl: ready.dataUrl, bytes: ready.bytes, width: ready.width, height: ready.height };
+      this.log('ok', `เตรียมรูปผู้เขียนสำหรับแนบแล้ว (${ready.width}×${ready.height}px · ${Math.round(ready.bytes / 1024)} KB)`);
+    } catch (e) {
+      this.log('warn', `เตรียมรูปผู้เขียนไม่สำเร็จ (${e?.message || e}) — จะสร้างภาพโดยไม่มีรูปอ้างอิง`);
+    }
+    return this._authorRef;
+  }
+
   async measure(sections) {
     const assets = await db.loadAssets(this.book.id);
     const { pages, ms } = await compileBook({
@@ -1883,6 +1908,13 @@ export class Machine {
         let res;
 
         /**
+         * รูปอ้างอิงเป็นเรื่องของงานภาพชิ้นนี้ ไม่ใช่ของเส้นทางใดเส้นทางหนึ่ง
+         * ตัดสินใจที่เดียวตรงนี้ แล้วทั้งโหมด API และโหมดหน้าเว็บใช้คำตอบเดียวกัน
+         * ไม่งั้นผู้ใช้จะได้ผลไม่เหมือนกันเพียงเพราะสลับโหมด ทั้งที่ตั้งค่าไว้อย่างเดียวกัน
+         */
+        const ref = j.needsAuthorRef ? await this.authorRef() : null;
+
+        /**
          * ทางที่ 1: เรียก Images API ตรง ๆ
          *
          * ไม่มีช่องพิมพ์ ไม่มีปุ่มส่ง ไม่มีการเดาว่าตอบจบหรือยัง ไม่ต้องคว้าภาพจาก DOM
@@ -1902,12 +1934,14 @@ export class Machine {
               widthMm: j.widthMm,
               heightMm: j.heightMm,
               quality: this.book.imageApiQuality || 'medium',
+              refImages: ref ? [await dataUrlToFile(ref.dataUrl, ref.name)] : [],
             });
-            res = { status: 'ok', text: '', images: [], imageDataUrl: out.dataUrl, meta: { via: 'api', size: out.size } };
+            res = { status: 'ok', text: '', images: [], imageDataUrl: out.dataUrl, meta: { via: 'api', size: out.size, ref: !!ref } };
             const spent = this.recordImageUsage(out);
             this.log(
               'ok',
               `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ได้ภาพจาก API แล้ว (${model} · ${out.size} · ${Math.round(out.bytes / 1024)} KB` +
+                (ref ? ' · แนบรูปผู้เขียนไปด้วย' : '') +
                 (spent ? ` · token ${spent.toLocaleString()}` : '') +
                 ')',
             );
@@ -1932,7 +1966,25 @@ export class Machine {
             label: `สร้าง${j.what}${attempt > 1 ? ` (ลอง ${attempt})` : ''}`,
             wantImages: true,
             newThread,
+            attachments: ref ? [{ name: ref.name, dataUrl: ref.dataUrl }] : [],
           });
+
+          /**
+           * แนบไม่ติดต้องพูดออกมา ไม่ใช่ปล่อยเงียบ
+           *
+           * Prompt บอกโมเดลไปแล้วว่า "มีรูปผู้เขียนแนบมาด้วย" ถ้าไฟล์ไม่ได้ไปถึงจริง
+           * ภาพที่ได้จะเป็นหน้าคนที่โมเดลแต่งขึ้นเอง ซึ่งดูผ่านตาแล้วเหมือนใช้ได้
+           * ผู้ใช้จะรู้ตัวก็ต่อเมื่อเปิดเล่มจริงแล้วพบว่าไม่ใช่หน้าตัวเอง
+           */
+          if (ref && res?.meta?.attachment && !res.meta.attachment.attached) {
+            this.log(
+              'warn',
+              `ภาพ ${index + 1}/${jobs.length} · ${j.what}: แนบรูปผู้เขียนเข้าหน้า ChatGPT ไม่สำเร็จ ` +
+                `(${res.meta.attachment.errors?.[0] || 'ไม่ทราบสาเหตุ'}) — หน้าคนในภาพนี้จะเป็นหน้าที่โมเดลแต่งขึ้นเอง`,
+            );
+          } else if (ref && res?.meta?.attachment?.attached) {
+            this.log('ok', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: แนบรูปผู้เขียนเข้าห้องแชตแล้ว`);
+          }
         } catch (e) {
           // rate limit / ผู้ใช้กดหยุด / wrong model ต้องให้ state machine จัดการตามปกติ
           // ห้ามนับเป็น "ภาพพัง" แล้วเผาโควตาลองซ้ำอีกครั้ง
@@ -2630,7 +2682,14 @@ export function plannedImageJobs(book) {
       });
     }
   }
-  return jobs;
+  /**
+   * กฎเรื่องรูปอ้างอิงต้องติดไปกับ prompt ตั้งแต่ตรงนี้ ไม่ใช่ไปต่อท้ายตอนจะส่ง
+   *
+   * prompt ชุดเดียวกันนี้ถูกใช้สามทาง: เครื่องส่งเอง, ปุ่มส่งออกไฟล์ Prompt ทั้งหมด
+   * และช่องแสดง prompt รายรูปในหน้า Phase 2 ถ้าต่อท้ายตอนส่งอย่างเดียว
+   * คนที่เอา Prompt ไปวาดที่อื่นจะไม่มีวันรู้ว่าต้องแนบรูปผู้เขียนไปด้วย
+   */
+  return jobs.map((j) => (wantsAuthorRef(book, j) ? { ...j, prompt: j.prompt + AUTHOR_REF_RULE, needsAuthorRef: true } : j));
 }
 
 /**

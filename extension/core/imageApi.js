@@ -16,6 +16,15 @@
 const ENDPOINT = 'https://api.openai.com/v1/images/generations';
 
 /**
+ * ปลายทางคนละเส้นสำหรับ "สร้างจากคำสั่งล้วน" กับ "สร้างโดยมีรูปให้ดูด้วย"
+ *
+ * /generations รับได้แต่ข้อความ ไม่มีช่องให้ใส่ไฟล์เลย
+ * การจะให้โมเดลเห็นหน้าผู้เขียนจริง ๆ ต้องไปทาง /edits ซึ่งเป็น multipart
+ * โครงคำตอบที่ได้กลับมาเหมือนกันทั้งสองเส้น ตัวอ่านผลจึงใช้ร่วมกันได้ทั้งหมด
+ */
+const EDIT_ENDPOINT = 'https://api.openai.com/v1/images/edits';
+
+/**
  * ขนาดที่ gpt-image-1 วาดได้จริงมีสามแบบเท่านั้น
  * เลือกแบบที่ใกล้กับช่องจริงที่สุด แล้วปล่อยให้ขั้นปรับขนาดครอปให้พอดีทีหลัง
  */
@@ -57,23 +66,34 @@ export async function generateImage({
   quality = 'medium',
   model = DEFAULT_IMAGE_MODEL,
   timeoutMs = 180000,
+  refImages = [],
 }) {
   if (!apiKey) throw new Error('ยังไม่ได้ใส่ OpenAI API key');
   if (!String(prompt || '').trim()) throw new Error('ไม่มีคำสั่งภาพให้ส่ง');
 
   const size = pickApiSize(widthMm, heightMm);
+  const refs = (refImages || []).filter((f) => f);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  /**
+   * มีรูปแนบ = ต้องไป /edits และต้องส่งเป็น multipart
+   * ห้ามตั้ง Content-Type เอง เพราะ boundary ต้องให้เบราว์เซอร์เป็นคนใส่
+   */
+  const request = refs.length
+    ? { url: EDIT_ENDPOINT, headers: { Authorization: `Bearer ${apiKey}` }, body: editForm({ model, prompt, size, quality, refs }) }
+    : {
+        url: ENDPOINT,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, prompt: String(prompt), size, quality, n: 1 }),
+      };
+
   let res;
   try {
-    res = await fetch(ENDPOINT, {
+    res = await fetch(request.url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ model, prompt: String(prompt), size, quality, n: 1 }),
+      headers: request.headers,
+      body: request.body,
       signal: controller.signal,
     });
   } catch (e) {
@@ -89,7 +109,22 @@ export async function generateImage({
   } catch {
     /* บางกรณีเซิร์ฟเวอร์คืน HTML มา ปล่อยให้ตัวจัดข้อความข้างล่างจัดการ */
   }
-  if (!res.ok) throw new Error(apiErrorMessage(res.status, body));
+  if (!res.ok) {
+    /**
+     * ล้มตอนแนบรูปต้องบอกให้ชัดว่าเป็นเพราะ "เส้นทางที่รับรูป" ไม่ใช่คีย์หรือเครดิต
+     *
+     * การแนบรูปบังคับให้ต้องไป /edits ซึ่งไม่ใช่ทุกโมเดลที่รองรับ
+     * ถ้าปล่อยข้อความดิบไป ผู้ใช้จะไปไล่เช็คคีย์กับเครดิตซึ่งไม่ได้ผิดอะไรเลย
+     * ทั้งที่ทางแก้จริงคือเปลี่ยนโมเดล หรือเลิกติ๊กแนบรูปผู้เขียนกับภาพชุดนี้
+     */
+    const base = apiErrorMessage(res.status, body);
+    if (refs.length)
+      throw new Error(
+        `${base} · คำสั่งนี้แนบรูปผู้เขียนไปด้วยจึงต้องใช้เส้นทาง images/edits — ` +
+          `ถ้าโมเดล ${model} ไม่รองรับ ให้เปลี่ยนโมเดลภาพ หรือเอาช่องนี้ออกจากรายการที่แนบรูปผู้เขียน`,
+      );
+    throw new Error(base);
+  }
 
   const b64 = body?.data?.[0]?.b64_json;
   if (!b64) throw new Error('API ตอบกลับมาแต่ไม่มีไฟล์ภาพอยู่ในคำตอบ');
@@ -128,4 +163,16 @@ export async function testKey(apiKey, model = DEFAULT_IMAGE_MODEL) {
     timeoutMs: 90000,
   });
   return { ok: true, size: r.size, bytes: r.bytes, model };
+}
+
+/** ประกอบ multipart ให้ /edits — ชื่อฟิลด์ image[] คือแบบที่รับได้ทั้งรูปเดียวและหลายรูป */
+function editForm({ model, prompt, size, quality, refs }) {
+  const form = new FormData();
+  form.append('model', model);
+  form.append('prompt', String(prompt));
+  form.append('size', size);
+  form.append('quality', quality);
+  form.append('n', '1');
+  for (const f of refs) form.append('image[]', f, f.name || 'reference.jpg');
+  return form;
 }

@@ -1789,8 +1789,17 @@ export const backCoverTextBaked = (book = {}) =>
   !!book?.backCoverCopy?.hook && (book?.coverMode || 'prompt') === 'auto';
 
 export function backCoverPrompt(style, book = {}) {
-  // ปกหลังต้องวาดผู้เขียนเองเมื่อผู้ใช้เลือก "ให้ ChatGPT วาดไปในปกเลย"
-  const drawAuthor = (book.authorPhotoMode || (book.authorPhotoOnCover ? 'upload' : 'none')) === 'generated';
+  /**
+   * ปกหลังต้องวาดผู้เขียนเองเมื่อผู้ใช้เลือก "ให้ ChatGPT วาดไปในปกเลย"
+   * หรือเมื่อเลือกแนบรูปผู้เขียนไปกับปกหลัง ซึ่งแปลว่าอยากได้คนคนนี้อยู่ในภาพจริง ๆ
+   *
+   * ถ้าไม่ผูกสองอย่างนี้เข้าด้วยกัน คำสั่งจะขัดกันเองในข้อความเดียว:
+   * ท่อนหนึ่งสั่งห้ามวาดคนในมุมซ้ายบนเพราะจะเอารูปไปแปะทับ
+   * อีกท่อนแนบรูปหน้ามาแล้วสั่งให้วาดคนคนนี้ลงไป — โมเดลจะเลือกทางใดทางหนึ่งแบบเดาไม่ได้
+   */
+  const refOnBack = (book.authorRefTargets || []).includes('cover-back');
+  const drawAuthor =
+    refOnBack || (book.authorPhotoMode || (book.authorPhotoOnCover ? 'upload' : 'none')) === 'generated';
   const authorDrawn = drawAuthor
     ? ` Include a small author portrait as part of the artwork in the upper-left area, roughly 30 × 38 mm at print size: a single person seen from a natural angle, consistent with the book's visual language, not a photographic headshot pasted on top. No name, no caption, no frame around it.`
     : '';

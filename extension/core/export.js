@@ -7,6 +7,7 @@
 import * as db from './db.js';
 import { stripZwsp } from './thai.js';
 import { coverTextBaked } from './prompts.js';
+import { authorRefSummary } from './imageRef.js';
 import { coverGeometry } from './budget.js';
 import { packAssets, toPdf } from '../typeset/compiler.js';
 import { buildDocument, buildItemsDocument } from '../typeset/template.js';
@@ -501,7 +502,9 @@ ${book.coverPrompts?.front || '(ยังไม่ได้สร้างทิ
 ${book.coverPrompts?.back || '(ยังไม่ได้สร้าง)'}
 \`\`\`
 
-${book.authorPhotoOnCover ? '### รูปผู้เขียน → บันทึกเป็น `author-photo.png`\n\nใช้รูปจริงของผู้เขียน ระบบจะวางขนาดประมาณ 30 × 38 มม. บนปกหลังโดยไม่ให้โมเดลสร้างหน้าคนขึ้นใหม่\n' : ''}
+${book.authorPhotoOnCover ? '### รูปผู้เขียน → บันทึกเป็น `author-photo.png`\n\nใช้รูปจริงของผู้เขียน ระบบจะวางขนาดประมาณ 30 × 38 มม. บนปกหลังโดยไม่ให้โมเดลสร้างหน้าคนขึ้นใหม่\n' : ''}${authorRefSummary(book)
+    ? `### ต้องแนบรูปผู้เขียนไปกับคำสั่งด้วย\n\nเล่มนี้เลือกให้ ${authorRefSummary(book)} ใช้หน้าจริงของผู้เขียน\nคำสั่งของช่องเหล่านั้นมีหัวข้อ ATTACHED REFERENCE PHOTO ต่อท้ายอยู่แล้ว — ตอนสั่งวาด ให้แนบไฟล์รูปผู้เขียนไปในข้อความเดียวกันด้วย ไม่งั้นจะได้หน้าคนที่โมเดลแต่งขึ้นเอง\n`
+    : ''}
 ---
 
 ## ภาพในเล่ม

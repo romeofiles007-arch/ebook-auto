@@ -6,10 +6,11 @@ import { minInnerMargin, coverGeometry, targetPhysicalPages } from './budget.js'
 import { planItems } from './items.js';
 import { ZWSP } from './thai.js';
 import { findUndrawable } from './glyphs.js';
+import { authorRefSummary } from './imageRef.js';
 
 const KDP_MIN_PAGES = 24;
 
-export function preflight({ book, sections, pages }) {
+export function preflight({ book, sections, pages, assetNames = [] }) {
   const r = [];
   const ok = (id, label) => r.push({ id, label, level: 'ok' });
   const fail = (id, label, detail) => r.push({ id, label, level: 'fail', detail });
@@ -107,6 +108,28 @@ export function preflight({ book, sections, pages }) {
       if (issues) warn('fiction_continuity', `พบ continuity/ปมค้าง ${issues} ประเด็นจากการตรวจรายบท`, 'เปิดดูผลตรวจของบทที่เกี่ยวข้องก่อนส่งออกฉบับสุดท้าย');
       else ok('fiction_continuity', 'ตรวจ continuity รายบทแล้ว ไม่พบประเด็นที่ระบบทำเครื่องหมายค้างไว้');
     }
+  }
+
+  /**
+   * เลือกแนบรูปผู้เขียนไว้ แต่ไม่มีไฟล์ = ภาพทุกใบที่ควรมีหน้าผู้เขียน จะเป็นหน้าที่โมเดลแต่งขึ้นเอง
+   * ซึ่งดูผ่านตาแล้วเหมือนใช้ได้ กว่าจะรู้ตัวก็ตอนเปิดเล่มจริง จึงต้องทักตั้งแต่ก่อนส่งออก
+   */
+  const refWhere = authorRefSummary(book);
+  if (refWhere) {
+    const hasPhoto = assetNames.includes('author-photo.png');
+    if (book.authorPhotoOnCover && (book.authorRefTargets || []).includes('cover-back'))
+      warn(
+        'author_ref_double',
+        'ปกหลังทั้งให้โมเดลวาดผู้เขียนลงไปในภาพ และให้ระบบแปะรูปจริงทับอีกชั้น',
+        'ปกหลังจะมีผู้เขียนสองคน — เลือกอย่างใดอย่างหนึ่ง ระหว่างติ๊ก "เพิ่มรูปผู้เขียนบนปกหลัง" กับ "แนบรูปผู้เขียน · ปกหลัง"',
+      );
+    if (hasPhoto) ok('author_ref', `แนบรูปผู้เขียนไปให้โมเดลดูตอนสร้าง ${refWhere}`);
+    else
+      warn(
+        'author_ref',
+        `เลือกแนบรูปผู้เขียนไปกับ ${refWhere} แต่ยังไม่มีไฟล์ author-photo.png`,
+        'ภาพที่สร้างไปแล้วจะเป็นหน้าคนที่โมเดลแต่งขึ้นเอง — อัปโหลดรูปแล้วสั่งสร้างภาพนั้นใหม่',
+      );
   }
 
   const zwsp = sections.filter((s) => (s.md || '').includes(ZWSP));

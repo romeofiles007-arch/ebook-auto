@@ -21,6 +21,7 @@ import {
 } from '../core/pricing.js';
 import { TRIM_PRESETS, estimateTurns, targetPhysicalPages } from '../core/budget.js';
 import { bookIssues, issuesBySection, issuesForSection } from '../core/review.js';
+import { authorRefSummary } from '../core/imageRef.js';
 import {
   FIGURE_STYLES,
   polishAboutPrompt,
@@ -1096,6 +1097,28 @@ const DEPTH_LABEL = {
 const val = (id, d = '') => $(id)?.value || d;
 const on = (id) => !!$(id)?.checked;
 
+/**
+ * ช่องภาพที่เลือกให้แนบรูปผู้เขียนไปด้วย
+ *
+ * เก็บเป็นรายการคีย์ ไม่ใช่ธงจริง/เท็จสามตัว เพราะฝั่งเครื่องต้องถามว่า
+ * "งานภาพชิ้นนี้ต้องแนบไหม" ไม่ใช่ "ปกหน้าเปิดอยู่ไหม" — และรายการช่องจะยาวขึ้นได้อีก
+ */
+/**
+ * เล่มนี้ต้องมีไฟล์ author-photo.png ไหม
+ *
+ * เดิมมีเหตุผลเดียวคือเอาไปแปะปกหลัง ตอนนี้มีเหตุผลที่สองคือแนบไปให้โมเดลดู
+ * ทุกที่ที่เคยถามว่า "authorPhotoOnCover ไหม" ต้องถามคำถามนี้แทน
+ * ไม่งั้นช่องอัปโหลดจะไม่โผล่ให้คนที่เลือกแนบอย่างเดียว
+ */
+const needsAuthorPhoto = (b) => !!b?.authorPhotoOnCover || !!authorRefSummary(b);
+
+const pickedAuthorRefTargets = () =>
+  [
+    on('authorRefFront') && 'cover-front',
+    on('authorRefBack') && 'cover-back',
+    on('authorRefFigures') && 'figures',
+  ].filter(Boolean);
+
 async function saveCreatorDefaults() {
   await Promise.all([
     db.setting('defaultAudience', $('audience').value.trim()),
@@ -1214,6 +1237,7 @@ function readForm() {
     authorVoice: val('authorVoice', 'auto'),
     authorVoiceText: val('authorVoiceText', '').trim(),
     authorPhotoOnCover: on('authorPhotoCover'),
+    authorRefTargets: pickedAuthorRefTargets(),
     frontMatter,
     backMatter,
     paper: val('paper', 'white'),
@@ -2665,14 +2689,22 @@ function phase2Rows(assets) {
     };
   });
 
-  // รูปผู้เขียนไม่ได้สร้างด้วย ChatGPT แต่ปกหลังรอมันอยู่ จึงต้องอยู่ในรายการเดียวกัน
-  if (book.authorPhotoOnCover) {
+  /**
+   * รูปผู้เขียนไม่ได้สร้างด้วย ChatGPT แต่มีสองอย่างที่รอมันอยู่ จึงต้องอยู่ในรายการเดียวกัน
+   * ปกหลังรอไว้แปะ และตอนนี้ยังมีการแนบไปให้โมเดลดูตอนสร้างภาพด้วย
+   * ถ้านับแค่กรณีแรก คนที่เลือกแนบอย่างเดียวจะไม่เห็นช่องอัปโหลดเลย แล้วภาพจะออกมาเป็นหน้าคนอื่น
+   */
+  const refWhere = authorRefSummary(book);
+  if (book.authorPhotoOnCover || refWhere) {
     const ok = have.has('author-photo.png');
+    const waiting = [book.authorPhotoOnCover && 'ปกหลังรอไว้แปะ', refWhere && `แนบไปให้โมเดลดูตอนสร้าง ${refWhere}`]
+      .filter(Boolean)
+      .join(' · ');
     rows.push({
       name: 'author-photo.png',
       what: 'รูปผู้เขียน (อัปโหลดเอง)',
       state: ok ? 'done' : 'todo',
-      note: ok ? 'บันทึกแล้ว · author-photo.png' : 'ปกหลังรอรูปนี้ ต้องอัปโหลดเอง ระบบสร้างให้ไม่ได้',
+      note: ok ? `บันทึกแล้ว · ${waiting}` : `${waiting} — ต้องอัปโหลดเอง ระบบสร้างให้ไม่ได้`,
       canRegen: false,
     });
   }
@@ -2758,7 +2790,7 @@ async function grabImageFromChat(name) {
 async function bulkUploadImages(files) {
   if (!book?.id || !files.length) return;
   const jobs = plannedImageJobs(book);
-  const slots = jobs.map((j) => j.name).concat(book.authorPhotoOnCover ? ['author-photo.png'] : []);
+  const slots = jobs.map((j) => j.name).concat(needsAuthorPhoto(book) ? ['author-photo.png'] : []);
   const done = [];
   const skipped = [];
 
@@ -2816,7 +2848,7 @@ async function pullImagesFromFolder() {
   if (!book?.id) return;
   const jobs = plannedImageJobs(book);
   const slots = new Map(jobs.map((j) => [j.name, j]));
-  if (book.authorPhotoOnCover) slots.set('author-photo.png', { name: 'author-photo.png' });
+  if (needsAuthorPhoto(book)) slots.set('author-photo.png', { name: 'author-photo.png' });
 
   phase2Notice('<b>กำลังอ่านโฟลเดอร์รับรูปของโครงการ...</b>');
   let files = [];
@@ -3489,7 +3521,9 @@ async function finish() {
   }
 
   const pages = book.finalPages || book.lastCompile?.pages || book.targetPages;
-  const pf = preflight({ book, sections, pages });
+  // ด่านตรวจก่อนส่งออกดูไฟล์ภาพด้วย จึงต้องอ่านรายชื่อสด ไม่ใช่ของที่ค้างจากตอนเปิดหน้าแก้ไข
+  assetNames = (await db.loadAssets(book.id)).map((a) => a.name);
+  const pf = preflight({ book, sections, pages, assetNames });
 
   $('preflight').innerHTML = pf.checks
     .map(
@@ -4147,13 +4181,22 @@ async function renderImages() {
       : '';
 
   const authorOk = have.has('author-photo.png');
-  $('authorPhotoState').textContent = book?.authorPhotoOnCover
+  /**
+   * ช่องนี้บอกได้แค่ "จะวางบนปกหลัง" มาตลอด ซึ่งเคยเป็นการใช้งานเดียวที่มี
+   * ตอนนี้รูปเดียวกันถูกแนบไปให้โมเดลดูได้ด้วย ต้องบอกให้ครบว่ามันจะถูกใช้ทำอะไรบ้าง
+   * ไม่งั้นคนที่เลือกแนบอย่างเดียวจะอ่านว่า "ไม่ได้เลือกใช้บนปก" แล้วนึกว่าไม่ต้องอัปโหลด
+   */
+  const refWhere = authorRefSummary(book);
+  const uses = [book?.authorPhotoOnCover && 'วางบนปกหลัง', refWhere && `แนบไปให้โมเดลดูตอนสร้าง ${refWhere}`]
+    .filter(Boolean)
+    .join(' · ');
+  $('authorPhotoState').textContent = uses
     ? authorOk
-      ? 'ใส่ไฟล์แล้ว — จะวางบนปกหลัง'
-      : 'เลือกใช้รูปผู้เขียน แต่ยังไม่มีไฟล์'
+      ? `ใส่ไฟล์แล้ว — ${uses}`
+      : `ยังไม่มีไฟล์ — เล่มนี้ต้องใช้เพื่อ${uses}`
     : authorOk
-      ? 'มีไฟล์แล้ว แต่ยังไม่ได้เลือกใช้บนปก'
-      : 'ไม่ได้เลือกใช้บนปก';
+      ? 'มีไฟล์แล้ว แต่ยังไม่ได้เลือกใช้ที่ไหน'
+      : 'ไม่ได้เลือกใช้';
   $('authorPhotoSlot').classList.toggle('filled', authorOk);
 
   $('figList').innerHTML = imgs

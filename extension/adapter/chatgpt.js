@@ -21,6 +21,7 @@
     limitNotice:
       '[role="alert"], [role="dialog"], [aria-live="assertive"], [data-testid*="limit" i], [data-testid*="usage" i], [class*="toast" i]',
     images: 'img[src*="oaiusercontent"], img[alt][src^="https://"]',
+    fileInput: 'input[type="file"]',
   };
 
   // วลีที่แปลว่า "ชนลิมิต" — เพิ่มได้จากหน้าตั้งค่า
@@ -249,6 +250,82 @@
     const el = $(S.modelBadge);
     return el ? el.innerText.trim().replace(/\s+/g, ' ') : '';
   }
+
+  // ---------- แนบไฟล์ ----------
+  /**
+   * ยัดไฟล์เข้าช่องแนบของ ChatGPT
+   *
+   * หน้าเว็บไม่มี API ให้เรียก มีแต่ input[type=file] ที่ซ่อนอยู่หลังปุ่มคลิปหนีบ
+   * ทางเดียวที่ทำได้จากสคริปต์คือสร้าง DataTransfer ขึ้นมาเอง ยัดใส่ input.files
+   * แล้วส่งเหตุการณ์ change ให้ React รู้ตัว — เป็นของจริงตามสเปก ไม่ใช่เหตุการณ์สังเคราะห์
+   * ที่ Chrome ปฏิเสธแบบเดียวกับ ClipboardEvent
+   *
+   * ถ้าช่องนั้นหาไม่เจอหรือไม่ตอบสนอง ยังเหลือทางหย่อนไฟล์ใส่ช่องพิมพ์
+   * ซึ่งเป็นเส้นทางเดียวกับที่ผู้ใช้ลากรูปมาวางเอง
+   */
+  async function attachFiles(files = []) {
+    const wanted = files.filter((f) => f?.dataUrl);
+    if (!wanted.length) return { attached: 0, errors: [] };
+
+    const errors = [];
+    const before = countAttachmentThumbs();
+
+    let list;
+    try {
+      list = await buildFileList(wanted);
+    } catch (e) {
+      return { attached: 0, errors: [`สร้างไฟล์จากรูปที่ส่งมาไม่ได้: ${e?.message || e}`] };
+    }
+
+    // ทางที่ 1 — ช่องแนบไฟล์จริงของหน้าเว็บ
+    const inputs = $$(S.fileInput).filter((el) => !el.accept || /image|\*/i.test(el.accept));
+    for (const input of inputs) {
+      try {
+        input.files = list;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        if (await waitForThumbs(before + wanted.length)) return { attached: wanted.length, errors, via: 'file_input' };
+      } catch (e) {
+        errors.push(`ใส่ไฟล์ในช่องแนบไม่สำเร็จ: ${e?.message || e}`);
+      }
+    }
+
+    // ทางที่ 2 — หย่อนไฟล์ลงช่องพิมพ์ เหมือนผู้ใช้ลากรูปมาวาง
+    const box = $(S.composer);
+    if (box) {
+      try {
+        const dt = new DataTransfer();
+        for (const f of list) dt.items.add(f);
+        for (const type of ['dragenter', 'dragover', 'drop']) {
+          box.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+        }
+        if (await waitForThumbs(before + wanted.length)) return { attached: wanted.length, errors, via: 'drop' };
+      } catch (e) {
+        errors.push(`หย่อนไฟล์ลงช่องพิมพ์ไม่สำเร็จ: ${e?.message || e}`);
+      }
+    }
+
+    errors.push('แนบไฟล์แล้วแต่ไม่เห็นรูปขึ้นในช่องพิมพ์');
+    return { attached: 0, errors };
+  }
+
+  async function buildFileList(files) {
+    const dt = new DataTransfer();
+    for (const f of files) {
+      const blob = await (await fetch(f.dataUrl)).blob();
+      dt.items.add(new File([blob], f.name || 'reference.jpg', { type: blob.type || 'image/jpeg' }));
+    }
+    return dt.files;
+  }
+
+  /**
+   * รูปที่แนบสำเร็จจะถูกแสดงเป็นภาพย่อที่หน้าเว็บสร้างจาก blob: ในเครื่อง
+   * ต่างจากรูปในบทสนทนาซึ่งมาจากเซิร์ฟเวอร์ จึงใช้แยกกันได้ว่าไฟล์เข้าไปแล้วจริง
+   */
+  const countAttachmentThumbs = () => $$('img[src^="blob:"]').length;
+
+  const waitForThumbs = (want) =>
+    waitForDom(() => countAttachmentThumbs() >= want, { timeoutMs: 15000 }).then((v) => !!v);
 
   // ---------- ฉีดข้อความ ----------
   async function injectText(text) {
@@ -1174,6 +1251,26 @@
       const userBefore = $$('[data-message-author-role="user"]').length;
       const assistantBefore = $$(S.assistantTurn).length;
 
+      /**
+       * แนบไฟล์ก่อนพิมพ์ข้อความเสมอ
+       *
+       * หน้าเว็บล้างช่องพิมพ์ทิ้งได้ตอนอัปโหลดรูปเสร็จแล้ววาดใหม่
+       * ถ้าพิมพ์ก่อนแนบ Prompt ที่พิมพ์ไว้จะหายไปพร้อมการวาดใหม่นั้น
+       */
+      let attachment = null;
+      if (opts.attachments?.length) {
+        report(turnId, 'attaching', `กำลังแนบรูปอ้างอิง ${opts.attachments.length} ไฟล์`);
+        attachment = await attachFiles(opts.attachments);
+        report(
+          turnId,
+          'attaching',
+          attachment.attached
+            ? `แนบรูปอ้างอิงสำเร็จ ${attachment.attached} ไฟล์`
+            : `แนบรูปอ้างอิงไม่สำเร็จ — ${attachment.errors[0] || 'ไม่ทราบสาเหตุ'}`,
+        );
+        await waitComposerStable(600, 8000);
+      }
+
       report(turnId, 'typing', `กำลังส่ง Prompt ไป ChatGPT:\n${String(prompt).slice(0, 4000)}`);
       /**
        * เขียนข้อความไม่สำเร็จ ก็ต้องเดินต่อไปหาทางสำรองเหมือนกัน
@@ -1432,6 +1529,8 @@
           model: currentModel(),
           blocks,
           ms: Date.now() - t0,
+          // ฝั่ง Studio ต้องรู้ว่ารูปอ้างอิงเข้าไปถึง ChatGPT จริงไหม ไม่ใช่เดาเอาจากที่สั่งไป
+          attachment,
           imageCapture: opts.wantImages
             ? {
                 src: captured.src || images[0] || '',

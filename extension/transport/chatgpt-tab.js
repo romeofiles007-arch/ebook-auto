@@ -67,7 +67,9 @@ export class ChatGptTabTransport {
      * แล้วงานที่รอดได้กลายเป็น timeout ทั้งที่คนกำลังเดินไปกดอยู่พอดี
      */
     const handoffMs = opts.handoffMs ?? 180000;
-    const outerTimeoutMs = answerTimeoutMs + imageTimeoutMs + handoffMs + 30000;
+    // แนบไฟล์คือการอัปโหลดจริงผ่านหน้าเว็บ ต้องเผื่อเวลาให้ ไม่งั้นเทิร์นที่แนบรูปจะถูกตัดจบทั้งที่กำลังอัปโหลดอยู่
+    const attachMs = opts.attachments?.length ? 45000 : 0;
+    const outerTimeoutMs = answerTimeoutMs + imageTimeoutMs + handoffMs + attachMs + 30000;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pending.delete(turnId);
@@ -88,6 +90,8 @@ export class ChatGptTabTransport {
             timeoutMs: answerTimeoutMs,
             imageTimeoutMs: opts.wantImages ? imageTimeoutMs : undefined,
             handoffMs,
+            // รูปอ้างอิงที่ต้องแนบเข้าช่องพิมพ์ก่อนส่ง — ส่งเป็น data URL เพราะ Blob ข้ามขอบเขต extension ไม่ได้
+            attachments: opts.attachments?.length ? opts.attachments : undefined,
           },
         })
         .then((ack) => {
