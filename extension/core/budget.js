@@ -376,9 +376,18 @@ export function estimateTurns(book) {
    */
   const rewrites = (book.pageMode || 'soft') === 'strict' ? 6 : 0;
 
+  /**
+   * ขั้นขยายตอนที่สั้นกว่าครึ่งโควตา มีทั้งในโหมดยืดหยุ่นและโหมดเป๊ะ
+   *
+   * ราคาจริงขึ้นกับว่าโมเดลเขียนสั้นแค่ไหน โมเดลที่เขียนได้ตามเป้าจะไม่เสียเทิร์นตรงนี้เลย
+   * ส่วนโมเดลที่เขียนสั้นเป็นนิสัยจะถูกจับได้แล้วหยุดที่สองตอน ไม่ไล่จนครบเพดาน
+   * ตีเป็นศูนย์ในกรณีดีที่สุด สองในกรณีปกติ และแปดในกรณีแย่ที่สุด ตามเพดานจริงในเครื่อง
+   */
+  const grow = 2;
+
   const min = 1 + write + consistency + 1;
-  const likely = 1 + write + continues + consistency + rewrites + 1;
-  const max = 1 + write + continues * 2 + consistency + rewrites * 2 + 1;
+  const likely = 1 + write + continues + consistency + rewrites + grow + 1;
+  const max = 1 + write + continues * 2 + consistency + rewrites * 2 + 8 + 1;
 
   return { chapters, batches, budget: Math.round(budget), min, likely, max };
 }

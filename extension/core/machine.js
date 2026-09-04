@@ -59,6 +59,19 @@ const NUDGE_LIMIT = 0.04; // ปรับระยะบรรทัดได้
 const MAX_IMAGE_ATTEMPTS = 2; // ภาพหนึ่งรูปลองอัตโนมัติได้ 2 ครั้ง แล้วหยุดรอคน แทนการกินโควตาวนไม่จบ
 
 /**
+ * ขั้นขยายตอนที่สั้นกว่าโควตามาก
+ *
+ * บางโมเดลเขียนแบบโทรเลขเป็นนิสัย ส่งงานมาสั้นกว่าเป้าหลายเท่าทั้งที่ prompt สั่งความยาวไว้ชัด
+ * ปล่อยไว้จะได้เล่มบางกว่าที่สั่งทั้งเล่ม แต่ไล่แก้ทุกตอนก็เปลืองเทิร์นโดยอาจไม่ได้อะไรกลับมา
+ *
+ * จึงต้องมีทั้งเพดานและจุดเลิก: แก้เฉพาะตอนที่แย่ที่สุดก่อน และถ้าแก้แล้วไม่ยาวขึ้นติดกันสองครั้ง
+ * แปลว่าโมเดลตัวนี้ไม่ยอมเขียนยาวจริง ๆ ไล่ต่อไปก็เสียเทิร์นเปล่า ให้หยุดแล้วบอกผู้ใช้ตรง ๆ
+ */
+const SHORT_RATIO = 0.5; // ต่ำกว่าครึ่งโควตาถึงจะคุ้มค่าเทิร์นที่จ่ายไปแก้
+const MAX_SHORT_FIXES = 8;
+const SHORT_GIVEUP = 2;
+
+/**
  * ความล้มเหลวที่เกิด "ก่อน" ข้อความจะถึง ChatGPT — ยังไม่ได้ใช้โควตาแม้แต่ข้อความเดียว
  *
  * เพดานลองใหม่ทั้งหมดในระบบนี้ตั้งไว้ต่ำ เพราะทุกครั้งที่ลอง = หนึ่งข้อความจริงที่นับโควตา
@@ -788,6 +801,8 @@ export class Machine {
       this.log('ok', `เขียนตอนที่ขาดครบแล้วทั้ง ${empty.length} ตอน`);
     }
 
+    await this.growShortSections(all);
+
     this.job.cursor = 0;
     this.job.step = 'figures';
   }
@@ -1493,6 +1508,75 @@ export class Machine {
     t.lineHeight = best.lh;
     await this.measure(sections);
     return { improved: best.pages !== original, pages: best.pages };
+  }
+
+  /**
+   * ไล่ขยายตอนที่สั้นกว่าโควตามาก ก่อนปล่อยให้เดินไปขั้นถัดไป
+   *
+   * ขั้นปรับจำนวนหน้าในโหมดยืดหยุ่นตั้งใจไม่สั่งยืดตอนเดิม เพราะการยืดข้อความที่จบความคิดแล้ว
+   * ได้แต่คำฟุ่มเฟือย — แต่ตอนที่ได้มาไม่ถึงครึ่งโควตาไม่ใช่ "ข้อความที่จบความคิดแล้ว"
+   * มันคือตอนที่ยังเขียนไม่เสร็จ คนละเรื่องกัน และเป็นจุดเดียวที่ยังแก้ได้ก่อนเล่มจะถูกวางโครงหน้า
+   */
+  async growShortSections(all) {
+    const quotaOf = new Map(all.map((s) => [s.id, s.quota || 0]));
+    const recs = await db.loadSections(this.book.id);
+    const short = recs
+      .filter((r) => {
+        const quota = quotaOf.get(r.id) || r.quota || 0;
+        return quota > 0 && (r.md || '').trim() && r.chars < quota * SHORT_RATIO;
+      })
+      // แย่ที่สุดก่อน เพราะเทิร์นมีจำกัด ต้องจ่ายไปกับตอนที่ได้คืนมากที่สุด
+      .sort((a, b) => a.chars / (quotaOf.get(a.id) || a.quota) - b.chars / (quotaOf.get(b.id) || b.quota));
+
+    if (!short.length) return;
+
+    this.log(
+      'warn',
+      `มี ${short.length} ตอนที่สั้นกว่าครึ่งโควตา — จะสั่งเขียนเพิ่มให้สูงสุด ${MAX_SHORT_FIXES} ตอน โดยเรียงจากตอนที่สั้นที่สุด`,
+    );
+
+    let fixed = 0;
+    let noGain = 0;
+    for (const rec of short.slice(0, MAX_SHORT_FIXES)) {
+      if (this.stopRequested) throw new Halt('หยุดโดยผู้ใช้');
+      const quota = quotaOf.get(rec.id) || rec.quota;
+      const before = rec.chars;
+      let ok = false;
+      try {
+        ok = await this.rewrite(rec, quota, 'ตอนนี้สั้นกว่าเป้ามาก เขียนใหม่ให้ได้ความยาวตามเป้าโดยเติมเนื้อหาจริง ไม่ใช่ขยายความเดิมให้ยืดออก');
+      } catch (e) {
+        if (e instanceof RateLimited || e instanceof Halt) throw e;
+        this.log('warn', `ขยายตอน ${rec.id} ไม่สำเร็จ (${e?.message || e})`);
+      }
+      await this.save();
+
+      const now = (await db.loadSection(this.book.id, rec.id))?.chars || 0;
+      /**
+       * เขียนใหม่แล้วสั้นลงกว่าเดิม = ของใหม่แย่กว่าของเก่า ต้องเอาของเก่าคืน
+       * ไม่งั้นการ "ไล่แก้ให้ยาวขึ้น" จะกลายเป็นการทำให้เล่มบางลงกว่าตอนไม่แก้
+       */
+      if (ok && now < before) {
+        await db.saveSection(this.book.id, { ...rec });
+        this.log('warn', `ตอน ${rec.id} เขียนใหม่แล้วสั้นลง (${before} → ${now}) — เอาของเดิมคืน`);
+      }
+
+      // นับเป็นได้ผลเฉพาะเมื่อของที่เก็บไว้จริงยาวขึ้น ไม่ใช่แค่สั่งแก้แล้วผ่าน
+      const gained = now > before;
+      if (gained) {
+        fixed++;
+        noGain = 0;
+      } else if (++noGain >= SHORT_GIVEUP) {
+        this.log(
+          'warn',
+          `สั่งเขียนเพิ่มแล้วไม่ยาวขึ้นติดกัน ${SHORT_GIVEUP} ตอน — โมเดลนี้เขียนสั้นเป็นนิสัย ` +
+            `ไล่แก้ต่อก็เสียเทิร์นเปล่า หยุดขั้นนี้ไว้แค่นี้ · ถ้าอยากได้เล่มหนากว่านี้จริง ให้ลดจำนวนตอนในสารบัญ ` +
+            `เพิ่มจำนวนหน้าเป้าหมาย หรือเปลี่ยนโมเดลที่เขียนยาวกว่า`,
+        );
+        break;
+      }
+    }
+
+    if (fixed) this.log('ok', `ขยายตอนที่สั้นเกินไปได้ ${fixed} ตอน`);
   }
 
   async rewrite(rec, targetChars, instruction = '') {
