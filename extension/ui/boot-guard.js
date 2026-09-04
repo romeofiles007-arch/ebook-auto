@@ -52,6 +52,12 @@
   function restoreStart() {
     for (const id of SCREENS) document.getElementById(id)?.classList.add('hidden');
     document.getElementById('start')?.classList.remove('hidden');
+    /**
+     * หน้าตั้งค่าถูกแบ่งเป็นขั้น ๆ การโชว์การ์ดกลับมาเฉย ๆ จึงยังเห็นแค่ขั้นที่ค้างอยู่
+     * ไฟล์นี้เป็นสคริปต์ธรรมดาที่รันได้แม้ module พัง จึงเรียกผ่านตัวแปรบน window
+     * และต้องเผื่อกรณีที่ module ยังไม่ทันบูต ซึ่งเป็นกรณีที่เรียกใช้บ่อยที่สุดด้วยซ้ำ
+     */
+    window.__wizardGo?.('mode');
     document.getElementById('start')?.scrollIntoView({ behavior: 'smooth' });
   }
 

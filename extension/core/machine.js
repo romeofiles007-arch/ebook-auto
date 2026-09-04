@@ -1997,7 +1997,6 @@ export class Machine {
          */
         const useApi = this.book.imageSource === 'api';
         const newThread = !useApi && !this.job.imageThreadStarted;
-        if (newThread) this.job.lastImageInThread = null; // ห้องใหม่ = ไม่มีภาพเก่าให้อ้างอีกแล้ว
         if (!useApi) this.job.imageThreadStarted = true;
         this.book.imagePhase = {
           ...(this.book.imagePhase || {}),
@@ -2062,15 +2061,7 @@ export class Machine {
           }
         } else {
         try {
-          /**
-           * ปกหลังต้องเข้าชุดกับปกหน้า — ถ้าปกหน้าเพิ่งวาดในห้องนี้ ให้ชี้ไปที่ภาพนั้นเลย
-           * ถ้าไม่ได้อยู่ห้องเดียวกัน (ปกหน้ามาจากไฟล์เดิมหรือคนละรอบ) ค่อยกลับไปวาดจากสเปกล้วน
-           */
-          const continuation =
-            j.name === 'cover-back.png' && this.job.lastImageInThread === 'cover-front.png'
-              ? 'ปกหน้าของเล่มนี้'
-              : null;
-          res = await this.turn(P.imageTurn(j.prompt, { attempt, continuation }), {
+          res = await this.turn(P.imageTurn(j.prompt, { attempt }), {
             label: `สร้าง${j.what}${attempt > 1 ? ` (ลอง ${attempt})` : ''}`,
             wantImages: true,
             newThread,
@@ -2272,8 +2263,6 @@ export class Machine {
 
           made++;
           saved = true;
-          // จำว่าภาพล่าสุดในห้องแชตนี้คือรูปไหน เพื่อให้รูปถัดไปอ้างถึงได้ถูกตัว
-          this.job.lastImageInThread = j.name;
           // ปกหลังที่วาดตัวอักษรมาในภาพแล้ว ห้ามให้เครื่องเรียงพิมพ์วางคำโปรยทับซ้ำอีก
           // ต้องถามด้วยเกณฑ์เดียวกับตอนเขียน prompt ไม่ใช่แค่ "มีคำโปรยไหม"
           // ไม่งั้นภาพที่สั่งไปว่า "ห้ามมีตัวอักษร" จะถูกปักธงว่ามีข้อความแล้ว
@@ -2797,7 +2786,13 @@ export function plannedImageJobs(book) {
    * และช่องแสดง prompt รายรูปในหน้า Phase 2 ถ้าต่อท้ายตอนส่งอย่างเดียว
    * คนที่เอา Prompt ไปวาดที่อื่นจะไม่มีวันรู้ว่าต้องแนบรูปผู้เขียนไปด้วย
    */
-  return jobs.map((j) => (wantsAuthorRef(book, j) ? { ...j, prompt: j.prompt + AUTHOR_REF_RULE, needsAuthorRef: true } : j));
+  return jobs.map((j) => {
+    // ลวดลายพื้นหลังเป็นพื้นผิว ไม่มีคนอยู่ในภาพ การใส่กฎกายวิภาคเข้าไปมีแต่จะชวนให้วาดคนขึ้นมา
+    const prompt = j.kind === 'pattern' ? j.prompt : j.prompt + P.HUMAN_ANATOMY_RULE;
+    return wantsAuthorRef(book, j)
+      ? { ...j, prompt: prompt + AUTHOR_REF_RULE, needsAuthorRef: true }
+      : { ...j, prompt };
+  });
 }
 
 /**

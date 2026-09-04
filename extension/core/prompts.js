@@ -1965,20 +1965,37 @@ export function compactImagePrompt(text, { cap = 2600 } = {}) {
     .trim();
 }
 
-export function imageTurn(promptText, { attempt = 1, continuation = null } = {}) {
-  /**
-   * ปกหลังไม่ใช่ภาพที่สร้างจากศูนย์ มันคือ "ภาพคู่" ของปกหน้า
-   *
-   * อยู่ห้องแชตเดียวกันแล้ว ปกหน้าที่เพิ่งวาดยังอยู่ในห้อง จึงชี้ไปที่ภาพนั้นได้ตรง ๆ
-   * ไม่ต้องขออัปโหลดอะไร และไม่ต้องปฏิเสธการอ้างอิงให้ขัดกับตัวงาน
-   */
-  if (continuation) {
-    return `ใช้ภาพที่คุณเพิ่งวาดในห้องแชตนี้ (${continuation}) เป็นต้นแบบของสไตล์ แล้ววาดภาพใหม่อีกหนึ่งภาพตามคำบรรยายด้านล่าง
-เป็นภาพคู่กันของเล่มเดียวกัน ใช้สไตล์ สี แสง พื้นผิว และภาษาภาพชุดเดียวกัน แต่เป็นคนละภาพ
-ตอบกลับมาเป็นภาพอย่างเดียว
+/**
+ * กฎกายวิภาคของคน — ต่อท้ายคำสั่งภาพทุกใบที่มีคนอยู่
+ *
+ * อาการมือเกินไม่ได้มาจากโมเดลวาดพลาดแบบสุ่ม แต่มาจากคำสั่งที่ให้คนคนเดียว
+ * ทำหลายอย่างพร้อมกันในภาพเดียว เช่นเปิดตู้เซฟ เขียนเอกสาร และเปิดกล่องในเวลาเดียวกัน
+ * โมเดลแก้โจทย์นั้นด้วยการงอกแขนเพิ่ม เพราะสองแขนทำไม่ครบตามที่สั่ง
+ *
+ * จึงต้องห้ามสองชั้น: ห้ามงอกอวัยวะ และห้ามสั่งให้ทำหลายอย่างพร้อมกันตั้งแต่แรก
+ * ถ้าของในฉากมีมากกว่าที่สองมือถือไหว ให้วางของที่เหลือไว้เฉย ๆ โดยไม่มีมือแตะ
+ */
+export const HUMAN_ANATOMY_RULE = `
 
-${compactImagePrompt(promptText)}`;
-  }
+HUMAN ANATOMY — HARD CONSTRAINT
+Every person in this image has exactly one head, two arms, two hands, five fingers per hand, and two legs. Nothing more.
+Each hand must be visibly connected to an arm that belongs to that same person. No extra arm, no extra hand, no third limb, no disembodied or floating hand anywhere in the frame — not even partially behind an object.
+One person performs ONE action at a time. If the scene lists several objects, the person interacts with only one of them; every other object simply sits in the scene, closed or untouched, with no hand on it. Never grow an extra limb to make a second action possible.
+If you cannot show every listed object being used at once with only two hands, show fewer hands in use — never more hands.`;
+
+export function imageTurn(promptText, { attempt = 1 } = {}) {
+  /**
+   * เคยชี้ให้ปกหลังใช้ปกหน้าที่เพิ่งวาดในห้องเดียวกันเป็นต้นแบบ ซึ่งฟังดูถูกแต่ผิดในทางปฏิบัติ
+   *
+   * โมเดลไม่ได้ "ดูสไตล์แล้ววาดใหม่" มันเอาปกหน้าไปแปะลงบนปกหลังจริง ๆ
+   * ได้ปกหลังที่มีรูปหนังสือเล่มเล็กพร้อมชื่อเรื่องและราคาลอยอยู่มุมบน ทับองค์ประกอบที่ออกแบบไว้
+   * ทั้งที่ backCoverPrompt เขียนห้ามไว้แล้วว่า no mockup, no book shown in perspective
+   *
+   * ที่แย่กว่านั้นคือคำสั่งสองชั้นนี้ขัดกันเองในข้อความเดียว หัวคำสั่งบอกให้ใช้ภาพที่เพิ่งวาด
+   * ส่วนตัว prompt ข้างล่างบอกว่า there is no front cover file to look at and none is needed
+   * ความต่อเนื่องของสไตล์ถูกส่งผ่านสเปกที่เขียนเป็นตัวหนังสืออยู่แล้วครบทุกข้อ
+   * ทั้งสไตล์ พื้นผิว แสง และจานสี จึงไม่ต้องพึ่งการอ้างภาพเลย
+   */
 
   /**
    * ขอแบบที่คนทั่วไปพิมพ์ — ห้ามมีหัวคำสั่งกำกับ

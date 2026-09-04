@@ -1974,6 +1974,14 @@ async function startNewBook() {
   setBtn('create', 'rocket', 'เริ่มสร้าง Ebook');
   setMacroStage('start');
   status('พร้อม');
+  /**
+   * เล่มใหม่ต้องเริ่มที่ขั้นแรกจริง ๆ
+   *
+   * ของที่ถูกล้างจนหมดคือค่าในตัวแปรกับกล่องบนหน้าจอ แต่ตัวนำทางจำขั้นสุดท้ายที่ยืนอยู่ไว้
+   * ผลคือกดเล่มใหม่แล้วเด้งมาที่ "ตรวจแล้วเริ่ม" ซึ่งเป็นขั้นสุดท้ายของเล่มก่อน
+   * เห็นแต่ปุ่มเริ่มสร้างกับราคาที่ประเมินไว้ ไม่เห็นแม้แต่ช่องให้เลือกโหมด
+   */
+  wizardGo('mode');
   $('start').scrollIntoView({ behavior: 'smooth' });
   await loadProjectHistory();
 }
@@ -4178,6 +4186,9 @@ function syncModeFromForm() {
     `ตั้งเอง: เขียนด้วย${t === 'api' ? ' OpenAI API' : 'หน้าเว็บ ChatGPT'} · สร้างภาพด้วย${i === 'api' ? ' OpenAI API' : 'หน้าเว็บ ChatGPT'}`;
   $('sourceAdvanced').open = true;
 }
+
+// boot-guard เป็นสคริปต์ธรรมดาที่อยู่นอก module จึงต้องมีทางเรียกตัวนำทางเมื่อมันกู้หน้าให้
+window.__wizardGo = wizardGo;
 
 wizardApply();
 
