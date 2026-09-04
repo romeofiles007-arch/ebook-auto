@@ -4231,15 +4231,22 @@ $('wizardNext').onclick = () => wizardShift(1);
   *
   * ส่วน Plus กับ API สร้างภาพได้เอง จึงตั้ง auto ให้ตั้งแต่แรก
   * แต่ยังเปลี่ยนเป็นเอา Prompt ไปสร้างเองได้ที่ขั้น "รูปเล่มและภาพ" ถ้าอยากคุมภาพเอง
+  *
+  * illus ต้องตั้งด้วย เพราะค่าเริ่มต้นของช่องนั้นคือ "ไม่มี"
+  * ขั้นวางแผนภาพประกอบเช็คค่านี้เป็นด่านแรกแล้วข้ามทั้งขั้นถ้าเป็น none
+  * เล่มจึงได้แต่ปก ไม่มีภาพในเล่มสักรูป ทั้งที่เลือกโหมดที่ตั้งใจให้มีภาพ
+  * มีตัวซ่อมอยู่แล้วแต่ครอบเฉพาะโหมด auto ซึ่งพลาดโหมดที่ผู้ใช้สร้างภาพเองไปทั้งโหมด
+  * ตั้งจากการ์ดตรงนี้แทนการไปแก้ตัวซ่อม เพราะการกดการ์ดคือการสั่งของผู้ใช้เอง
+  * ไม่ใช่การเดาแทนคนที่ไม่เคยแตะการ์ดแล้วตั้งใจไม่เอาภาพจริง ๆ
   */
 const MODE_PRESET = {
-  free: { textSource: 'web', imageSource: 'web', coverMode: 'prompt', figureMode: 'prompt' },
-  plus: { textSource: 'web', imageSource: 'web', coverMode: 'auto', figureMode: 'auto' },
-  api: { textSource: 'api', imageSource: 'api', coverMode: 'auto', figureMode: 'auto' },
+  free: { textSource: 'web', imageSource: 'web', coverMode: 'prompt', figureMode: 'prompt', illus: 'light' },
+  plus: { textSource: 'web', imageSource: 'web', coverMode: 'auto', figureMode: 'auto', illus: 'light' },
+  api: { textSource: 'api', imageSource: 'api', coverMode: 'auto', figureMode: 'auto', illus: 'light' },
 };
 
 const MODE_NOTE = {
-  free: 'โหมดฟรี: เขียนเนื้อหาผ่านหน้าเว็บ ChatGPT แล้วเว้นช่องภาพไว้พร้อม Prompt · เอา Prompt ไปสร้างภาพที่อื่น แล้วนำไฟล์กลับมาใส่ ทั้งปกหน้า ปกหลัง และภาพในเล่ม · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด',
+  free: 'โหมดฟรี: เขียนเนื้อหาผ่านหน้าเว็บ ChatGPT แล้วเว้นช่องภาพไว้พร้อม Prompt ครบทั้งปกหน้า ปกหลัง และภาพประกอบในเล่ม (ราว 1 ภาพต่อ 2-3 ตอน) · เอา Prompt ไปสร้างที่อื่นแล้วนำไฟล์กลับมาใส่ · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด',
   plus: 'โหมด Plus: เขียนและสร้างภาพด้วยบัญชีเดียว ระบบดึงภาพมาใส่ให้เอง · หรือจะเปลี่ยนเป็นเอา Prompt ไปสร้างเองแล้วแนบก็ได้ที่ขั้นรูปเล่มและภาพ · ต้องเปิดแท็บ chatgpt.com ค้างไว้ตลอด',
   api: 'โหมด API: เขียนและสร้างภาพผ่าน API ไม่ต้องเปิดแท็บ ChatGPT เลย · เปลี่ยนเป็นเอา Prompt ไปสร้างเองก็ได้เหมือนกัน · ต้องใส่ API key และจ่ายตามจำนวน token ที่ใช้จริง',
 };
