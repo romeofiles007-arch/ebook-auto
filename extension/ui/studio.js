@@ -2825,7 +2825,9 @@ function phase2Rows(assets) {
         ? `บันทึกแล้ว · ${j.name}${colourWarn}`
         : state === 'failed'
           ? `ล้มเหลว: ${failures.get(j.name)} — ${phase2Advice(failures.get(j.name))}`
-          : `ยังไม่มีไฟล์ · ${j.name}`;
+          : j.manual
+            ? `ต้องสร้างเอง — คัดลอก Prompt ไปสร้างที่อื่น แล้วอัปโหลดกลับเข้าช่องนี้ · ตั้งชื่อไฟล์ ${j.name}`
+            : `ยังไม่มีไฟล์ · ${j.name}`;
     return {
       name: j.name,
       what: j.what,
@@ -2836,7 +2838,10 @@ function phase2Rows(assets) {
       where: j.where || '',
       spec: j.spec || '',
       caption: j.caption || '',
-      canRegen: true,
+      // ระบบวาดให้ไม่ได้ แต่ Prompt ยังต้องคัดลอกได้ ไม่งั้นโหมดสร้างเองจะไม่มีอะไรให้ทำเลย
+      canRegen: !j.manual,
+      canPrompt: true,
+      manual: !!j.manual,
     };
   });
 
@@ -3113,7 +3118,9 @@ async function renderPhase2() {
           (r.canRegen && r.state !== 'done'
             ? `<button data-p2-grab="${esc(r.name)}" title="ถ้าเห็นว่า ChatGPT วาดเสร็จแล้ว กดปุ่มนี้เพื่อดึงภาพล่าสุดมาใส่ช่องนี้เลย">ภาพเสร็จแล้ว → ดึงมาเลย</button>`
             : '') +
-          (r.canRegen ? `<button data-p2-prompt="${esc(r.name)}">คัดลอก Prompt</button>` : '') +
+          // ปุ่มนี้เคยผูกกับ canRegen ซึ่งกลับหัวกลับหางกับความจริง
+          // คนที่ต้องใช้ Prompt มากที่สุดคือคนที่ระบบวาดให้ไม่ได้ ไม่ใช่คนที่ระบบวาดให้อยู่แล้ว
+          (r.canPrompt ? `<button data-p2-prompt="${esc(r.name)}">คัดลอก Prompt</button>` : '') +
           (r.canRegen && !phase2Running ? `<button data-p2-regen="${esc(r.name)}">สร้างใหม่</button>` : '') +
           `<button data-p2-upload="${esc(r.name)}">อัปโหลด</button></div>`;
         return (
@@ -3273,14 +3280,23 @@ async function applyCoverDirection(id) {
 }
 
 // ---------- Image Workflow 2 Phase ----------
+/**
+ * ช่องภาพที่เล่มนี้ต้องมีไฟล์ ไม่ว่าใครจะเป็นคนวาด
+ *
+ * เดิมนับเฉพาะโหมด auto เล่มที่ตั้งให้ผู้ใช้สร้างภาพเองจึงถูกนับว่าไม่ต้องมีภาพเลย
+ * ประตู Phase 2 เลยว่าง ไม่มีปุ่มอัปโหลด และเล่มถูกปล่อยไปหน้าสรุปทั้งที่ยังไม่มีภาพสักรูป
+ */
 function phase2RequiredNames(b) {
   const names = [];
-  if (b?.coverMode === 'auto' && b.coverPrompts) names.push('cover-front.png', 'cover-back.png');
-  if (b?.figureMode === 'auto') {
+  if (['auto', 'prompt'].includes(b?.coverMode) && b.coverPrompts) names.push('cover-front.png', 'cover-back.png');
+  if (['auto', 'prompt'].includes(b?.figureMode)) {
     for (const f of b.figures || []) if (f.kind === 'image' && f.prompt && f.name) names.push(f.name);
   }
   return names;
 }
+
+/** เล่มนี้มีภาพที่ต้องรอคนไปสร้างเองไหม — ถ้ามี ระบบเดินต่อเองไม่ได้ ต้องหยุดรอ */
+const hasManualImages = (b) => plannedImageJobs(b || {}).some((j) => j.manual);
 
 function phase2MissingNames(b, assets = []) {
   const required = phase2RequiredNames(b);
@@ -3406,7 +3422,20 @@ async function openImagePhaseGate() {
 
   await renderPhase2();
   await renderCoverPreview();
-  if (autoPilot() && book.imagePhase?.status !== 'complete') {
+  /**
+   * อัตโนมัติผ่านประตูอื่นได้หมด แต่ประตูนี้ผ่านไม่ได้เมื่อภาพต้องรอคนไปสร้างเอง
+   *
+   * ไม่มีอะไรให้เครื่องทำต่อ กดผ่านไปก็ได้แค่เล่มที่ไม่มีภาพ แล้วไปโผล่หน้าสรุปทันที
+   * ซึ่งคือสิ่งที่เกิดขึ้นจริงและทำให้ต้องรันซ้ำหลายรอบโดยไม่รู้ว่าพลาดตรงไหน
+   */
+  if (autoPilot() && hasManualImages(book)) {
+    addEvent(
+      'system',
+      'อัตโนมัติหยุดที่ประตูภาพ',
+      'เล่มนี้ตั้งให้คุณสร้างภาพเอง — คัดลอก Prompt ของแต่ละรูปไปสร้างที่อื่น แล้วอัปโหลดกลับเข้าช่องเดิม จากนั้นกดไปต่อ',
+    );
+    status('รอคุณใส่ภาพ — คัดลอก Prompt ไปสร้างแล้วอัปโหลดกลับ');
+  } else if (autoPilot() && book.imagePhase?.status !== 'complete') {
     addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ทดสอบระบบ', 'เริ่ม Phase 2 อัตโนมัติ');
     setTimeout(() => startPhase2(), 400);
     return;

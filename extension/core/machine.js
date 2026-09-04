@@ -1954,7 +1954,19 @@ export class Machine {
 
     await this.ensureBackCoverCopy();
 
-    const jobs = plannedImageJobs(this.book);
+    /**
+     * งานที่ผู้ใช้เป็นคนวาดเอง เครื่องไม่แตะ แต่ต้องไม่หายไปจากรายการของหน้าจอ
+     * จึงกรองที่นี่จุดเดียว ไม่ใช่ไปตัดออกตั้งแต่ตอนวางแผน
+     */
+    const manualJobs = plannedImageJobs(this.book).filter((j) => j.manual);
+    if (manualJobs.length)
+      this.log(
+        'warn',
+        `${manualJobs.length} รูปในเล่มนี้ตั้งไว้ให้คุณสร้างเอง — เครื่องจะไม่วาดให้ ` +
+          `คัดลอก Prompt จากหน้า Phase 2 ไปสร้างที่อื่น แล้วอัปโหลดกลับเข้าช่องเดิม`,
+      );
+
+    const jobs = plannedImageJobs(this.book).filter((j) => !j.manual);
     if (!jobs.length) {
       this.book.imagePhase = { ...(this.book.imagePhase || {}), status: 'complete', completedAt: Date.now(), total: 0, remaining: [] };
       this.job.step = 'done';
@@ -2742,7 +2754,21 @@ export function plannedImageJobs(book) {
   const coverH = (Number(book.trim?.heightMm) || 210) + bleed * 2;
   const coverRatio = `${Math.round(coverW * 10)}:${Math.round(coverH * 10)}`;
 
-  if (book.coverMode === 'auto' && book.coverPrompts) {
+  /**
+   * ช่องภาพมีอยู่จริงทั้งสองโหมด ต่างกันแค่ใครเป็นคนวาด
+   *
+   * เดิมสร้างรายการงานภาพเฉพาะโหมด auto ทำให้โหมด "เว้นช่องพร้อม Prompt" ไม่มีรายการเลย
+   * ขั้น style จึงเห็นว่าไม่มีงานภาพ แล้วปิดเล่มเป็น done ทันที
+   * ประตู Phase 2 ไม่เคยถูกเปิด ไม่มี Prompt ให้คัดลอก ไม่มีช่องให้อัปโหลด
+   * ผู้ใช้จึงเดินจากขั้นเขียนมาโผล่หน้าสรุปเลย ทั้งที่ยังไม่มีภาพสักรูป
+   *
+   * manual คือธงเดียวที่แยกสองโหมดออกจากกัน เครื่องข้ามงานที่ติดธงนี้ตอนวาด
+   * แต่หน้าจอยังเห็นครบ เพราะช่องที่รอไฟล์กับงานที่เครื่องต้องวาด เป็นคนละเรื่องกัน
+   */
+  const coverManual = book.coverMode === 'prompt';
+  const figureManual = book.figureMode === 'prompt';
+
+  if ((book.coverMode === 'auto' || coverManual) && book.coverPrompts) {
     const baked = P.coverTextBaked(book);
 
     /**
@@ -2770,6 +2796,7 @@ export function plannedImageJobs(book) {
       aspect: coverRatio,
       grayscale: false,
       kind: 'cover',
+      manual: coverManual,
     });
     /**
      * ปกหลังเคยถูกต่อท้ายด้วย "ห้ามมีตัวอักษรใด ๆ" เสมอ แม้ตัว prompt จะเพิ่งสั่งให้
@@ -2789,6 +2816,7 @@ export function plannedImageJobs(book) {
       aspect: coverRatio,
       grayscale: false,
       kind: 'cover',
+      manual: coverManual,
     });
   }
   /**
@@ -2813,7 +2841,7 @@ export function plannedImageJobs(book) {
     });
   }
 
-  if (book.figureMode === 'auto') {
+  if (book.figureMode === 'auto' || figureManual) {
     for (const f of book.figures || []) {
       if (f.kind !== 'image' || !f.prompt) continue;
       const grayscale = !P.figureColorOn(book);
@@ -2837,6 +2865,7 @@ export function plannedImageJobs(book) {
         aspect: f.aspect || null,
         grayscale,
         kind: 'interior',
+        manual: figureManual,
       });
     }
   }
