@@ -251,3 +251,28 @@ b:has(.i) {
 .secItem .i { margin-top: 2px; }
 .secItem .i { color: #63d5a5; }
 .secItem.off .i { color: #e0b464; }
+
+/* ผลตรวจจากบรรณาธิการ — ต้องอ่านได้จริงในหน้าที่ใช้แก้ ไม่ใช่แค่ตัวเลขในบันทึกงาน */
+.reviewPanel{margin-top:14px;border:1px solid #6b5a30;border-radius:10px;background:#171205;overflow:hidden}
+.reviewHead{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;padding:12px 13px;cursor:pointer;color:#f0e3c2;font-size:13px}
+.reviewHead:hover{background:#1e1808}
+.reviewHead .t{flex:1;min-width:0}
+.reviewHead .muted{display:block;margin-top:3px;font-size:11.5px;color:#c2ae82}
+.reviewHead .i{color:#e0b464}
+.reviewHead .chev{transition:transform .15s ease}
+.reviewHead[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.reviewList{padding:0 13px 12px;border-top:1px solid #3b3016}
+.reviewChapter{margin-top:12px}
+.reviewChapter>b{font-size:12.5px;color:#f0e3c2}
+.reviewChapter .sum{font-size:11.5px;color:#9e8f6d;margin:3px 0 7px}
+.reviewIssue{display:flex;gap:9px;align-items:flex-start;width:100%;text-align:left;background:#0f1526;border:1px solid #2b3956;border-radius:8px;padding:9px 11px;margin-top:6px;font-size:12.5px;color:#dbe4f6}
+button.reviewIssue{cursor:pointer}
+button.reviewIssue:hover{border-color:#6f8cff}
+.reviewIssue .k{flex:none;font-size:11px;font-weight:700;color:#e0b464}
+.reviewIssue.hint .k{color:#7f93bb}
+.reviewIssue .b{min-width:0;flex:1}
+.reviewIssue .fix{display:block;margin-top:4px;color:#8fc9a8;font-size:11.5px}
+.reviewIssue .at{display:block;margin-top:4px;color:#8f9db8;font-size:11px}
+.secReview{margin-top:10px;padding:10px 11px;border:1px solid #6b5a30;border-radius:10px;background:#171205}
+.secReview>b{font-size:12px;color:#f0e3c2}
+.secItem.flag .i{color:#e0b464}

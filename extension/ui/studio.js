@@ -20,6 +20,7 @@ import {
   formatCost,
 } from '../core/pricing.js';
 import { TRIM_PRESETS, estimateTurns, targetPhysicalPages } from '../core/budget.js';
+import { bookIssues, issuesBySection, issuesForSection } from '../core/review.js';
 import {
   FIGURE_STYLES,
   polishAboutPrompt,
@@ -2150,10 +2151,19 @@ async function openEditor() {
   status('รอคุณตรวจงาน');
   setMacroStage('edit');
   $('editor').classList.remove('hidden');
+  $('secReview').classList.add('hidden');
+  renderReviewPanel();
   renderSecList();
   if (sections.length && !sections.some((s) => s.id === selected)) selectSection(sections[0].id);
   $('editPages').textContent = `${book.lastCompile?.pages ?? '?'} / ${book.targetPages} หน้า`;
-  addEvent('system', 'ถึงขั้นตอนแก้ไข', 'แก้ตอนไหนก็ได้ แล้วกดนับหน้าใหม่ เมื่อพอใจจึงไปต่อ');
+  const flagged = bookIssues(book?.review);
+  addEvent(
+    'system',
+    'ถึงขั้นตอนแก้ไข',
+    flagged.total
+      ? `แก้ตอนไหนก็ได้ แล้วกดนับหน้าใหม่ · บรรณาธิการทำเครื่องหมายไว้ ${flagged.totalCounted} ประเด็นใน ${flagged.chapters.length} บท เปิดดูได้ที่กล่องผลตรวจ`
+      : 'แก้ตอนไหนก็ได้ แล้วกดนับหน้าใหม่ เมื่อพอใจจึงไปต่อ',
+  );
   if (autoPilot()) {
     addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ทดสอบระบบ', 'ผ่านประตูตรวจงานอัตโนมัติ');
     setTimeout(() => proceed(), 400);
@@ -2169,10 +2179,13 @@ const cmpId = (a, b) => {
 };
 
 function renderSecList() {
+  // ตอนที่บรรณาธิการทำเครื่องหมายไว้ ต้องเห็นได้จากรายการ ไม่ใช่ต้องเปิดทีละตอนหา
+  const flagged = issuesBySection(book?.review);
   $('secList').innerHTML = sections
     .map((s) => {
       const off = s.quota ? Math.round(((s.chars - s.quota) / s.quota) * 100) : 0;
       const bad = Math.abs(off) > 25 ? ' off' : '';
+      const flags = (flagged.get(s.id) || []).length;
       /**
        * สถานะของตอนต้องอ่านออกก่อนอ่านตัวหนังสือ
        * รายการยาวหลายสิบตอน การไล่อ่านคำว่า blocked/draft ทีละบรรทัดคือการค้นหา ไม่ใช่การเห็น
@@ -2183,8 +2196,10 @@ function renderSecList() {
           : 'clock'
         : Math.abs(off) > 25
           ? 'alert'
-          : 'check-circle';
-      return `<button class="secItem${bad}${s.id === selected ? ' sel' : ''}" data-id="${s.id}"><svg class="i" aria-hidden="true"><use href="#i-${mark}"/></svg><span class="t">${esc(s.id)} ${esc(s.title)}<span class="n">${s.chars.toLocaleString()} หน่วย · ${off >= 0 ? '+' : ''}${off}% · ${s.status} · ประวัติ ${(s.history || []).length}</span></span></button>`;
+          : flags
+            ? 'doc-check'
+            : 'check-circle';
+      return `<button class="secItem${bad}${flags ? ' flag' : ''}${s.id === selected ? ' sel' : ''}" data-id="${s.id}"><svg class="i" aria-hidden="true"><use href="#i-${mark}"/></svg><span class="t">${esc(s.id)} ${esc(s.title)}<span class="n">${s.chars.toLocaleString()} หน่วย · ${off >= 0 ? '+' : ''}${off}% · ${s.status}${flags ? ` · บรรณาธิการทำเครื่องหมาย ${flags}` : ''} · ประวัติ ${(s.history || []).length}</span></span></button>`;
     })
     .join('');
   $('secList')
@@ -2201,7 +2216,73 @@ function selectSection(id) {
   $('secStat').textContent = `โควตา ${s.quota?.toLocaleString() ?? '-'} · ตอนนี้ ${s.chars.toLocaleString()} หน่วย`;
   $('secHistory').textContent = `ประวัติตอน (${(s.history || []).length})`;
   $('historyPanel').classList.add('hidden');
+  renderSecReview(id);
   renderSecList();
+}
+
+/**
+ * ประเด็นที่บรรณาธิการทำเครื่องหมายไว้กับตอนที่กำลังเปิดอยู่
+ * วางไว้ใต้ช่องแก้ข้อความ เพราะจุดที่คนแก้คือจุดที่ต้องเห็นว่าจะแก้อะไร
+ */
+function renderSecReview(id) {
+  const box = $('secReview');
+  const { mine, chapterWide } = issuesForSection(book?.review, id);
+  if (!mine.length && !chapterWide.length) return box.classList.add('hidden');
+  box.classList.remove('hidden');
+  box.innerHTML =
+    `<b>บรรณาธิการทำเครื่องหมายไว้ ${mine.length + chapterWide.length} ประเด็น</b>` +
+    mine.map((i) => issueHtml(i, false)).join('') +
+    chapterWide.map((i) => issueHtml(i, false, `ทั้งบทที่ ${i.chapter}`)).join('');
+}
+
+/** ประเด็นหนึ่งข้อ — ถ้าผูกกับตอนได้ ทำเป็นปุ่มกดกระโดดไปตอนนั้น */
+function issueHtml(i, clickable, at = '') {
+  const tag = clickable && i.section ? 'button' : 'div';
+  const attr = clickable && i.section ? ` type="button" data-review-go="${esc(i.section)}"` : '';
+  const where = at || (clickable && i.section ? `ตอน ${esc(i.section)}` : '');
+  return (
+    `<${tag} class="reviewIssue${i.counted ? '' : ' hint'}"${attr}>` +
+    `<span class="k">${esc(i.label)}</span>` +
+    `<span class="b">${esc(i.text)}` +
+    (i.fix ? `<span class="fix">แนวทางแก้: ${esc(i.fix)}</span>` : '') +
+    (where ? `<span class="at">${esc(where)}</span>` : '') +
+    `</span></${tag}>`
+  );
+}
+
+/**
+ * ผลตรวจทั้งเล่ม — เดิมถูกเก็บลง book.review แล้วไม่มีหน้าจอไหนอ่านกลับมาเลย
+ * ผู้ใช้จ่ายค่าตรวจไปหนึ่งเทิร์นต่อบท เห็นแค่ "พบ 13 ประเด็นที่ควรดู" วิ่งผ่านในบันทึกงาน
+ * แล้วไม่มีทางรู้ว่าคืออะไร ประตูตรวจงานจึงต้องเปิดผลตรวจนั้นให้ดูได้
+ */
+function renderReviewPanel() {
+  const panel = $('reviewPanel');
+  const { chapters, total, totalCounted } = bookIssues(book?.review);
+  if (!total) return panel.classList.add('hidden');
+  panel.classList.remove('hidden');
+  $('reviewSummary').textContent =
+    `${totalCounted} ประเด็นที่ควรดู จาก ${chapters.length} บท` +
+    (total > totalCounted ? ` · ข้อเสนอเรื่องลำดับอีก ${total - totalCounted} ข้อ` : '') +
+    ' — กดเพื่อดูรายละเอียด แล้วคลิกแต่ละข้อเพื่อไปยังตอนนั้น';
+  $('reviewList').innerHTML = chapters
+    .map(
+      (c) =>
+        `<div class="reviewChapter"><b>บทที่ ${esc(c.n)} · ${c.counted} ประเด็น</b>` +
+        (c.summary ? `<div class="sum">${esc(c.summary)}</div>` : '') +
+        c.issues.map((i) => issueHtml(i, true)).join('') +
+        `</div>`,
+    )
+    .join('');
+  $('reviewList')
+    .querySelectorAll('[data-review-go]')
+    .forEach((b) => {
+      b.onclick = () => {
+        const id = b.dataset.reviewGo;
+        if (!sections.some((x) => x.id === id)) return;
+        selectSection(id);
+        $('secBody').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+    });
 }
 
 async function saveSection() {
@@ -3651,6 +3732,10 @@ $('secSave').onclick = saveSection;
 $('secRegen').onclick = regenerateSection;
 $('fillEmptySections').onclick = fillEmptySections;
 $('secHistory').onclick = renderHistory;
+$('reviewToggle').onclick = () => {
+  const open = $('reviewList').classList.toggle('hidden');
+  $('reviewToggle').setAttribute('aria-expanded', String(!open));
+};
 $('openHistory').onclick = openEditor;
 $('doneCoverRedo').onclick = async () => {
   if (!book?.id) return;

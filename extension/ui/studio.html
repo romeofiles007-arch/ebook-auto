@@ -645,6 +645,15 @@
   </div>
   <div id="docxReport" class="muted"></div>
 
+  <div id="reviewPanel" class="reviewPanel hidden">
+    <button type="button" id="reviewToggle" class="reviewHead" aria-expanded="false" aria-controls="reviewList">
+      <svg class="i i-lg" aria-hidden="true"><use href="#i-doc-check"/></svg>
+      <span class="t"><b>ผลตรวจจากบรรณาธิการ</b><span id="reviewSummary" class="muted"></span></span>
+      <svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg>
+    </button>
+    <div id="reviewList" class="reviewList hidden"></div>
+  </div>
+
   <div class="editSplit">
     <div id="secList" class="secList"></div>
     <div class="secPane">
@@ -656,6 +665,7 @@
         <button id="secRegen"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg>ให้ AI เขียนตอนนี้ใหม่</button>
         <button id="secSave"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>บันทึกตอนนี้</button>
       </div>
+      <div id="secReview" class="secReview hidden"></div>
       <div id="historyPanel" class="historyPanel hidden"></div>
     </div>
   </div>
