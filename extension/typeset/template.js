@@ -7,7 +7,7 @@
  */
 
 import { prepareForTypeset, THAI_GAP } from '../core/thai.js';
-import { coverTextBaked } from '../core/prompts.js';
+import { coverTextBaked, backCoverTextBaked } from '../core/prompts.js';
 
 const mm = (v) => `${round(v)}mm`;
 const pt = (v) => `${round(v)}pt`;
@@ -665,12 +665,25 @@ function backCoverPage(book, outline, opts = {}) {
   const authorPhotoName = opts.authorPhotoName || 'author-photo.png';
   const showAuthorPhoto = !!book.authorPhotoOnCover && (opts.assetNames || []).includes(authorPhotoName);
 
+  /**
+   * ถามด้วยเกณฑ์เดียวกับตอนเขียน prompt ไม่ใช่เชื่อธงที่ตั้งไว้ตอนบันทึกไฟล์อย่างเดียว
+   *
+   * ธง backCoverTextBaked ถูกตั้งที่จุดเดียวในทั้งระบบ คือตอนที่เครื่องบันทึกภาพผ่านเส้นทางปกติ
+   * แต่ไฟล์ปกหลังเข้าระบบได้อีกอย่างน้อยสามทาง — ใช้ไฟล์เดิมที่มีอยู่แล้ว กู้ภาพจากห้องแชต
+   * และผู้ใช้อัปโหลดเอง ทั้งสามทางไม่เคยตั้งธงนี้ ธงจึงเป็นเท็จทั้งที่ prompt สั่งวาดตัวอักษรลงไปแล้ว
+   * ผลคือเครื่องเรียงพิมพ์วางคำโปรยกับชื่อผู้เขียนทับลงบนข้อความชุดเดียวกันที่อยู่ในภาพอยู่แล้ว
+   *
+   * ตัวตัดสินที่ถูกต้องคือ "เล่มนี้สั่งให้วาดตัวอักษรลงภาพหรือเปล่า" ซึ่งเป็นคำถามเดียว
+   * กับที่ใช้ตอนประกอบ prompt — ไม่ใช่ "ไฟล์เดินทางเข้ามาทางไหน"
+   */
+  const textInImage = !!book.backCoverTextBaked || backCoverTextBaked(book);
+
   const photoBlock = showAuthorPhoto
     ? `#place(top + left, dx: 12mm, dy: 14mm)[
       #image("/img/${authorPhotoName}", width: 30mm, height: 38mm, fit: "cover")
     ]`
     : '';
-  const authorBlock = book.author && !book.backCoverTextBaked
+  const authorBlock = book.author && !textInImage
     ? `#place(bottom + left, dx: 12mm, dy: -12mm)[
       #block(fill: rgb("${panelFill}"), inset: (x: 5mm, y: 3mm), radius: 2mm)[
         #text(size: ${pt(book.typography.sizePt * 0.95)}, fill: rgb("${textColor}"))[${T(book.author)}]
@@ -681,7 +694,7 @@ function backCoverPage(book, outline, opts = {}) {
    * ปกหลังที่ ChatGPT วาดตัวอักษรมาในภาพแล้ว ห้ามวางคำโปรยทับซ้ำ
    * ไม่งั้นจะได้ข้อความสองชุดซ้อนกันบนปกเดียว ซึ่งแย่กว่าไม่มีเลย
    */
-  const blurbBlock = book.blurb && !book.backCoverTextBaked
+  const blurbBlock = book.blurb && !textInImage
     ? `#place(top + left, dx: ${round(coverW * 0.1)}mm, dy: ${round(coverH * (showAuthorPhoto ? 0.34 : 0.16))}mm)[
       #block(width: ${round(coverW * 0.8)}mm, fill: rgb("${panelFill}"), inset: (x: 7mm, y: 6mm), radius: 3mm)[
         #set par(leading: 0.62em, spacing: 0.7em, first-line-indent: 0pt)
