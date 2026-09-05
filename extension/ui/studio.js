@@ -1524,8 +1524,26 @@ let systemTestRunning = false;
 let fullAutoRunning = false;
 const autoPilot = () => systemTestRunning || fullAutoRunning;
 
+/**
+ * ปลดธงอัตโนมัติเมื่อรอบนั้นเลิกเดินแล้ว
+ *
+ * ธงนี้ทำสองหน้าที่พร้อมกัน คือกันการกดปุ่มซ้ำระหว่างเดิน และสั่งให้ประตูทุกบานผ่านไปเอง
+ * แต่เดิมมันถูกปลดแค่สองทาง คือเดินจบครบเล่ม กับ error ที่โยนออกมาถึงปุ่มเท่านั้น
+ * ทางออกอื่นทุกทาง — ยกเลิกที่กล่องถาม · กดหยุด · หยุดรอคน · ล้มกลางทาง —
+ * ทิ้งธงไว้เป็นจริงค้าง ผลคือปุ่มอัตโนมัติกดแล้วเงียบสนิทเพราะโดน guard ตัดตั้งแต่บรรทัดแรก
+ * และประตูที่ควรรอคนกลับผ่านไปเองในการรันครั้งถัดไปโดยไม่มีใครสั่ง
+ */
+function stopAutoPilot() {
+  fullAutoRunning = false;
+  systemTestRunning = false;
+}
+
 async function runFullAuto() {
-  if (fullAutoRunning) return;
+  // ปุ่มที่กดแล้วไม่มีอะไรเกิดขึ้นเลยคือปุ่มเสีย ต้องบอกเสมอว่าทำไมถึงยังกดไม่ได้
+  if (fullAutoRunning) {
+    status('โหมดอัตโนมัติกำลังทำงานอยู่แล้ว — กด "หยุด" ก่อนถ้าจะเริ่มรอบใหม่');
+    return;
+  }
   const pages = Number($('pages').value) || 120;
   if (!confirm(
     'เริ่มสร้างทั้งเล่มแบบอัตโนมัติ\n\n' +
@@ -1590,9 +1608,15 @@ async function runFullAuto() {
     addEvent('system', 'อัตโนมัติ: เลือกสารบัญ', outlineDirection?.name || '-');
 
     // 3) เดินยาว ประตูทุกบานถูกผ่านให้เองด้วยธง fullAutoRunning
-    await create();
+    //    ถ้าหน้าตั้งค่ายังมีอย่างที่ต้องตัดสินใจก่อน create() จะคืนเท็จโดยไม่เริ่มอะไรเลย
+    //    ต้องปลดธงตรงนี้ ไม่งั้นการกดปุ่มครั้งต่อไปจะถูก guard ตัดทิ้งเงียบ ๆ
+    if (!(await create())) {
+      stopAutoPilot();
+      status('อัตโนมัติยังไม่เริ่ม — จัดการสิ่งที่ค้างบนหน้าตั้งค่าแล้วกดใหม่ได้เลย');
+      addEvent('system', 'อัตโนมัติยังไม่เริ่ม', 'ถูกยกเลิกที่หน้าตั้งค่า ยังไม่มีข้อความ ChatGPT ถูกใช้ไป — แก้แล้วกดปุ่มเดิมได้ทันที');
+    }
   } catch (e) {
-    fullAutoRunning = false;
+    stopAutoPilot();
     status('อัตโนมัติหยุด: ' + (e?.message || e));
     addEvent('system', 'อัตโนมัติหยุดกลางทาง', e?.message || String(e));
   } finally {
@@ -1633,18 +1657,28 @@ async function runSystemTest() {
   const first = $('outlineDirections')?.querySelector('[data-outline-index="0"]');
   if (!first) {
     status('ทดสอบระบบ: ขอสารบัญไม่สำเร็จ');
+    stopAutoPilot();
     return;
   }
   first.click();
-  await create();
+  if (!(await create())) {
+    stopAutoPilot();
+    status('ทดสอบระบบยังไม่เริ่ม — ถูกยกเลิกที่หน้าตั้งค่า');
+  }
 }
 
+/**
+ * @returns {Promise<boolean>} จริงเมื่อเริ่มเดินงานจริงแล้วเท่านั้น
+ *   เท็จแปลว่ายังมีอย่างที่ต้องตัดสินใจก่อน (ไม่มีหัวข้อ · ยังไม่เลือกสารบัญ · ยกเลิกที่กล่องถามรูป)
+ *   ผู้เรียกที่ถือธงอัตโนมัติต้องปลดธงเมื่อได้เท็จ ไม่งั้นธงจะค้างทั้งที่ไม่มีงานเดินอยู่เลย
+ */
 async function create() {
   const topic = $('title').value.trim();
   if (!topic) {
     // ช่องหัวข้ออยู่คนละขั้นกับปุ่มเริ่ม การ focus ของที่ซ่อนอยู่คือการไม่เกิดอะไรขึ้นเลย
     wizardGo('topic');
-    return $('title').focus();
+    $('title').focus();
+    return false;
   }
   if (outlineDirection?.titleBase && outlineDirection.titleBase !== topic) resetOutlineDirection();
   if (!outlineDirection) {
@@ -1655,11 +1689,11 @@ async function create() {
       status('กรุณาเลือกสารบัญ 1 ทางก่อนเริ่มสร้าง Ebook');
       wizardGo('topic');
       box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
+      return false;
     }
     wizardGo('topic');
     await generateOutlineDirections();
-    return;
+    return false;
   }
   /**
    * ติ๊กแนบรูปผู้เขียนไว้แต่ไม่มีรูป ต้องทักตั้งแต่ตรงนี้ ไม่ใช่ไปทักตอนก่อนส่งออก
@@ -1682,7 +1716,7 @@ async function create() {
     );
     if (!go) {
       $('authorPhotoSetupPick').scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
+      return false;
     }
   }
 
@@ -1714,6 +1748,7 @@ async function create() {
   } catch (e) {
     fail(e);
   }
+  return true;
 }
 
 async function runMachine() {
@@ -1780,6 +1815,12 @@ async function runMachine() {
 
 /** หยุดแบบตั้งใจ ไม่ใช่พัง — งานอยู่ครบ กดทำต่อได้ */
 async function halted() {
+  /**
+   * จุดนี้คือ "ต้องให้คนมาจัดการก่อน" เสมอ (ชนลิมิต · สุขภาพไม่ผ่าน · ห้องแชตหาย)
+   * ถ้ายังถือธงอัตโนมัติไว้ ประตูภาพข้างล่างจะสั่งเริ่ม Phase 2 ใหม่ทันทีที่เปิด
+   * แล้วชนเหตุเดิมซ้ำวนไปเรื่อย ๆ โดยไม่มีใครกดสักครั้ง
+   */
+  stopAutoPilot();
   $('create').disabled = false;
 
   // Phase 2 ห้ามจบที่หน้า Progress เปล่า: ถ้าหยุด/สะดุดระหว่าง images
@@ -1988,7 +2029,7 @@ async function startNewBook() {
     : 'เริ่มเล่มใหม่หรือไม่? เล่มปัจจุบันถูกบันทึกไว้แล้ว กลับมาทำต่อได้ภายหลังจาก "ดูประวัติโครงการ"')) return;
 
   try { machine?.stop(); } catch {}
-  systemTestRunning = false;
+  stopAutoPilot();
   setMode('');
   book = null;
   machine = null;
@@ -2307,6 +2348,7 @@ async function openSavedProject(id) {
 }
 
 const fail = (e) => {
+  stopAutoPilot(); // รอบอัตโนมัติจบลงตรงนี้แล้ว ห้ามทิ้งธงไว้ให้ประตูรอบหน้าผ่านไปเอง
   setMode(currentMode); // คงชื่อโหมดไว้ให้รู้ว่าพลาดตอนทำอะไร แต่เลิกแสดงว่ากำลังทำงาน
   $('error').textContent = 'เกิดข้อผิดพลาด: ' + (e?.message || e);
   $('error').classList.remove('hidden');
@@ -3494,6 +3536,8 @@ async function startPhase2() {
 
 async function recoverPhase2Gate() {
   machine?.stop();
+  // ปุ่มนี้คือการที่คนขอคุมเอง ประตูภาพจึงต้องรอจริง ๆ ไม่ใช่เห็นธงอัตโนมัติแล้วสั่งเริ่มใหม่ทันที
+  stopAutoPilot();
   if (!book?.id) return;
   book = await db.loadBook(book.id);
   book.job ||= {};
@@ -3961,7 +4005,7 @@ $('chat').onclick = () => chrome.runtime.sendMessage({ type: 'sw.focusChat' });
 $('stop').onclick = () => {
   machine?.stop();
   status('หยุดแล้ว');
-  systemTestRunning = false;
+  stopAutoPilot(); // ผู้ใช้สั่งหยุดเอง = เลิกโหมดอัตโนมัติด้วย ไม่ใช่หยุดแค่เครื่องแต่ธงยังค้าง
   addEvent('system', 'หยุด', 'ผู้ใช้สั่งหยุดงาน');
   $('create').disabled = false;
 };
