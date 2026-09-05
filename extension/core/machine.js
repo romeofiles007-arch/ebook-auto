@@ -2039,6 +2039,16 @@ export class Machine {
       let saved = false;
       let freeRetries = 0;
       let dupeHits = 0;
+      /**
+       * โหมด API ไม่ต้องยุ่งกับหน้าเว็บเลย จึงไม่มีเรื่องห้องแชตให้จัดการ
+       *
+       * ต้องประกาศนอกลูปลองใหม่ เพราะด่านหลังลูป (ตัวทดสอบว่าบัญชีสร้างภาพได้ไหม) ใช้ค่านี้ด้วย
+       * เดิมประกาศไว้ในลูป พอทุกครั้งที่ลองล้มเหลวจนหลุดออกมา จะอ่านค่าไม่เจอแล้วโยน
+       * ReferenceError: useApi is not defined ทับความล้มเหลวจริงที่ระบบกำลังจะรายงาน
+       * ผู้ใช้จึงเห็นแต่ข้อความของ JavaScript แทนที่จะเห็นว่าภาพนั้นสร้างไม่สำเร็จเพราะอะไร
+       * และค่านี้ไม่ขึ้นกับรอบที่ลองอยู่แล้ว จึงไม่มีเหตุผลที่จะคำนวณใหม่ทุกรอบ
+       */
+      const useApi = this.book.imageSource === 'api';
       for (let attempt = 1; attempt <= MAX_IMAGE_ATTEMPTS && !saved; attempt++) {
         this.emit({
           type: 'image.progress',
@@ -2064,11 +2074,7 @@ export class Machine {
          * บวกกับตัวกันภาพซ้ำที่จำลายนิ้วมือของทุกภาพที่ใช้ไปแล้ว) จึงอยู่ห้องเดิมได้
          * เปิดห้องใหม่เมื่อรูปก่อนหน้ามีปัญหาเท่านั้น — ตัวที่ตั้ง imageThreadStarted = false
          */
-        /**
-         * โหมด API ไม่ต้องยุ่งกับหน้าเว็บเลย จึงไม่มีเรื่องห้องแชตให้จัดการ
-         * ตัวแปรเกี่ยวกับห้องยังต้องคงค่าไว้ เผื่อผู้ใช้สลับกลับไปโหมดหน้าเว็บกลางคัน
-         */
-        const useApi = this.book.imageSource === 'api';
+        // ตัวแปรเกี่ยวกับห้องแชตยังต้องคงค่าไว้ เผื่อผู้ใช้สลับกลับไปโหมดหน้าเว็บกลางคัน
         const newThread = !useApi && !this.job.imageThreadStarted;
         if (!useApi) this.job.imageThreadStarted = true;
         this.book.imagePhase = {
