@@ -337,6 +337,18 @@
     </div>
   </details>
 
+  <details class="more" data-step="book">
+    <summary>บรรณานุกรม — ระบบจะไม่แต่งแหล่งอ้างอิงเอง</summary>
+    <p class="muted" style="margin:10px 0 0">
+      ด้วยเหตุผลเดียวกับหน้าเกี่ยวกับผู้เขียน — โมเดลที่ถูกสั่งว่า “ใส่แหล่งอ้างอิงมาด้วย”
+      จะแต่งชื่อสำนักพิมพ์ ปี และลิงก์ที่ไม่มีอยู่จริงมาให้ครบชุด พิมพ์เองที่นี่บรรทัดละหนึ่งรายการ
+      ถ้าเล่มนี้เริ่มจากโหมดกระแส แหล่งที่ค้นมาจริงจะถูกต่อท้ายให้เอง
+    </p>
+    <textarea id="references" style="min-height:110px;margin-top:10px"
+      placeholder="เช่น&#10;สมชาย ใจดี. การเงินฉบับฟรีแลนซ์. สำนักพิมพ์ตัวอย่าง, 2567&#10;ธนาคารแห่งประเทศไทย. รายงานเศรษฐกิจ 2568. https://example.org/report"></textarea>
+    <div class="row" style="margin-top:8px"><span id="referencesState" class="muted"></span></div>
+  </details>
+
   <details class="more" id="fictionOpts" hidden data-step="book">
     <summary>ตั้งค่านิยาย — แนวเรื่อง มุมมอง และตอนจบ</summary>
     <div class="grid">

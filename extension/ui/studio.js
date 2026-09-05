@@ -1344,6 +1344,8 @@ function readForm() {
     themeCount: Number(val('themeCount')) || 5,
     // ประวัติผู้เขียนมาจากผู้ใช้เท่านั้น ระบบไม่แต่งเอง
     aboutAuthor: $('aboutAuthor').value.trim(),
+    // บรรณานุกรมก็เหมือนกัน — บรรทัดละรายการ ส่วนแหล่งจากโหมดกระแสถูกต่อท้ายตอนเรียงพิมพ์
+    references: $('references').value.split('\n').map((s) => s.trim()).filter(Boolean),
     calibration: { charsPerPage: p.seedCPP },
     transport: { delayMs: [4000, 9000] },
     threadMode: val('threadMode', 'single'),
@@ -3972,6 +3974,13 @@ function updateItemPlan() {
 $('aboutAuthor').addEventListener('input', () => {
   const n = $('aboutAuthor').value.trim().length;
   $('aboutState').textContent = n ? `${n} ตัวอักษร` : 'ยังว่าง — ถ้าเลือกใส่หน้านี้ในเล่ม ต้องกรอกก่อนส่งออก';
+});
+
+$('references').addEventListener('input', () => {
+  const n = $('references').value.split('\n').filter((s) => s.trim()).length;
+  $('referencesState').textContent = n
+    ? `${n} รายการ — จะขึ้นหน้าบรรณานุกรมท้ายเล่ม`
+    : 'ยังว่าง — ถ้าติ๊ก "บรรณานุกรม" ไว้แต่ไม่มีรายการ หน้านี้จะไม่ถูกพิมพ์';
 });
 
 $('aboutPolish').onclick = async () => {

@@ -181,6 +181,38 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
       'บางเกินกว่าจะใส่ตัวหนังสือบนสัน เพราะการเข้าเล่มคลาดได้ราว 1.6 มม.',
     );
 
+  /**
+   * ช่องท้ายเล่มที่ติ๊กไว้แต่ไม่มีข้อมูลให้พิมพ์ ต้องเห็นตรงนี้ก่อนส่งออก
+   *
+   * ทั้งสามช่องเงียบเหมือนกันหมด คือไม่มีข้อมูลก็ข้ามหน้านั้นไปเฉย ๆ
+   * ผู้ใช้ที่ติ๊กไว้จึงเปิดเล่มที่เสร็จแล้วมาหาไม่เจอ โดยไม่มีอะไรบอกว่าทำไม
+   */
+  if ((book.backMatter || []).includes('glossary')) {
+    const defined = (book.bible?.glossary || []).filter((g) => String(g?.def || '').trim()).length;
+    const bare = (book.bible?.glossary || []).length - defined;
+    if (defined)
+      ok('glossary', `หน้าอภิธานศัพท์มีศัพท์พร้อมนิยาม ${defined} คำ`);
+    else
+      warn(
+        'glossary',
+        'เลือกใส่หน้าอภิธานศัพท์ แต่ยังไม่มีศัพท์ที่มีนิยาม',
+        bare
+          ? `เก็บศัพท์ไว้ ${bare} คำแต่ไม่มีนิยามสักคำ — เล่มนี้เขียนก่อนที่ระบบจะเริ่มขอนิยามมาด้วย หน้านี้จะไม่ถูกพิมพ์`
+          : 'ศัพท์มาจากที่ ChatGPT บัญญัติไว้ระหว่างเขียน เล่มนี้ยังไม่มีเลย หน้านี้จะไม่ถูกพิมพ์',
+      );
+  }
+
+  if ((book.backMatter || []).includes('references')) {
+    const n = (book.references || []).length + (book.trendSeed?.sources || []).length;
+    if (n) ok('references', `หน้าบรรณานุกรมมี ${n} รายการ`);
+    else
+      warn(
+        'references',
+        'เลือกใส่หน้าบรรณานุกรม แต่ยังไม่มีรายการ',
+        'ระบบไม่แต่งแหล่งอ้างอิงเอง เพราะจะได้ลิงก์และปีที่ไม่มีอยู่จริง — พิมพ์เองในหน้าตั้งค่า หรือเอาหน้านี้ออก',
+      );
+  }
+
   if ((book.backMatter || []).includes('about_author')) {
     const bio = (book.aboutAuthor || '').trim();
     if (bio.length >= 40)

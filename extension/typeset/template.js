@@ -704,14 +704,49 @@ function backMatter(book, outline) {
   const T = (v) => inline(prepareForTypeset(v || '', lang));
   const parts = [];
 
+  /**
+   * อภิธานศัพท์ — ประกอบจากศัพท์ที่ Book Bible เก็บไว้ระหว่างเขียน
+   *
+   * ช่องนี้ติ๊กแล้วไม่เคยมีอะไรโผล่ในเล่มเลย เพราะไม่มีใครเขียนส่วนที่พิมพ์มันออกมา
+   * ทั้งที่ทุกตอนส่ง new_terms กลับมาใน META และ absorb() เก็บ term/def ไว้ให้ครบตลอดทั้งเล่ม
+   * ข้อมูลมีอยู่แล้ว ขาดแค่หน้าที่พิมพ์มัน — ส่วน budget ก็กันหน้าไว้ให้ 2 หน้ามาตลอดด้วย
+   *
+   * เอาเฉพาะศัพท์ที่มีนิยามจริง รายการศัพท์เปล่าที่ไม่มีคำอธิบายไม่ใช่อภิธานศัพท์
+   */
+  if (has('glossary')) {
+    const seen = new Set();
+    const terms = (book.bible?.glossary || [])
+      .map((g) => ({ term: String(g?.term || '').trim(), def: String(g?.def || '').trim() }))
+      .filter((g) => {
+        if (!g.term || !g.def) return false;
+        const key = g.term.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.term.localeCompare(b.term, lang === 'th' ? 'th' : undefined));
+    if (terms.length) {
+      const body = terms.map((g) => `*${T(g.term)}* — ${T(g.def)}`).join('\n\n');
+      parts.push(`#pagebreak(to: "odd", weak: true)
+= อภิธานศัพท์
+
+${body}`);
+    }
+  }
+
   if (has('references')) {
+    /**
+     * รับได้ทั้งบรรทัดที่ผู้ใช้พิมพ์เอง และแหล่งที่ค้นมาจริงจากโหมดกระแส
+     * ระบบไม่แต่งบรรณานุกรมขึ้นเอง ด้วยเหตุผลเดียวกับหน้าเกี่ยวกับผู้เขียน —
+     * โมเดลที่ถูกสั่งว่า "ใส่แหล่งอ้างอิงมาด้วย" จะแต่งสำนักพิมพ์ ปี และ URL ที่ไม่มีอยู่จริงมาให้ครบชุด
+     */
     const refs = [
       ...(book.references || []),
       ...(book.trendSeed?.sources || []),
     ];
     const seen = new Set();
     const unique = refs.filter((r) => {
-      const key = String(r?.url || r?.title || '').trim();
+      const key = String(typeof r === 'string' ? r : r?.url || r?.title || '').trim();
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -719,6 +754,7 @@ function backMatter(book, outline) {
     if (unique.length) {
       const title = book.trendSeed?.trend ? 'แหล่งข้อมูลตั้งต้นและอ้างอิง' : 'บรรณานุกรม';
       const lines = unique.map((r) => {
+        if (typeof r === 'string') return `- ${T(r)}`;
         const label = [r.publisher, r.title, r.date].filter(Boolean).join(' · ');
         const url = r.url ? ` \\\ ${T(r.url)}` : '';
         return `- ${T(label || r.url || 'แหล่งข้อมูล')}${url}`;
@@ -730,11 +766,16 @@ ${book.trendSeed?.trend ? `${T(`กระแสตั้งต้น: ${book.tre
     }
   }
 
-  if (has('about_author') && book.author) {
+  /**
+   * เดิมด่านนี้เช็ค book.author ทั้งที่เนื้อหาที่พิมพ์จริงคือ book.aboutAuthor
+   * คนที่พิมพ์ประวัติมาเต็มหน้าแต่เว้นช่อง "ชื่อผู้เขียน" ไว้ จึงไม่ได้หน้านี้เลยโดยไม่มีใครทัก
+   */
+  const bio = String(book.aboutAuthor || '').trim() || String(book.author || '').trim();
+  if (has('about_author') && bio) {
     parts.push(`#pagebreak(to: "odd", weak: true)
 = เกี่ยวกับผู้เขียน
 
-${T(book.aboutAuthor || book.author)}`);
+${T(bio)}`);
   }
   return parts.join('\n\n');
 }
