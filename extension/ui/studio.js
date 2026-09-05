@@ -5,7 +5,7 @@
  */
 
 import * as db from '../core/db.js';
-import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage } from '../core/machine.js';
+import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage, isModernCoverDesign } from '../core/machine.js';
 import { makeTransport, hasPendingTurn } from '../transport/index.js';
 import {
   MODEL_PRICES,
@@ -2773,14 +2773,54 @@ async function recount() {
 }
 
 async function proceed() {
-  $('editor').classList.add('hidden');
   book = await db.loadBook(book.id);
   if (book.job?.step === 'gate_images') {
+    $('editor').classList.add('hidden');
     await openImagePhaseGate();
     return;
   }
+
+  /**
+   * เล่มเก่าที่ยังไม่มีแนวปกรุ่นปัจจุบัน "ไปต่อ" จะกลายเป็นงานใหญ่ ไม่ใช่การเดินหน้าหนึ่งก้าว
+   *
+   * ขั้นถัดจากหน้าตรวจงานคือ style ซึ่งเรียก GPT Art Director และขั้นนั้นจะย่อเนื้อหาทั้งเล่ม
+   * ออกแบบปก 3 ทาง แล้วให้กรรมการตรวจให้คะแนน รวมสามข้อความ ก่อนจะได้เริ่มวาดภาพจริงเสียอีก
+   * เล่มที่ทำไว้ครบแล้วข้ามขั้นนี้เอง (isModernCoverDesign) จึงไม่มีใครเห็นราคาของมัน
+   * แต่เล่มเก่าจ่ายเต็มทุกครั้ง และคนที่เปิดเข้ามาเพื่อ "เปลี่ยนแค่ปกหลัง" ไม่มีทางเดาได้เลย
+   *
+   * ต้องบอกก่อนกด และบอกทางที่ถูกกว่าไปด้วย ตามกติกาว่าความเสี่ยงต้องมองเห็นก่อนกด
+   */
+  if ((book.coverMode || 'prompt') === 'auto' && !isModernCoverDesign(book)) {
+    const go = confirm(
+      [
+        'เล่มนี้ยังไม่มีแนวปกรุ่นปัจจุบัน',
+        '',
+        'ถ้าไปต่อตอนนี้ ระบบจะให้ GPT ย่อเนื้อหาทั้งเล่ม ออกแบบปกใหม่ 3 ทาง',
+        'แล้วตรวจให้คะแนนก่อนเลือก — ใช้ข้อความ ChatGPT ราว 3 ข้อความ ก่อนจะเริ่มวาดภาพ',
+        '',
+        'ถ้าตั้งใจจะเปลี่ยนแค่ปกหน้าหรือปกหลัง กดยกเลิกแล้วใช้ปุ่ม “สร้างใหม่”',
+        'ที่ช่องปกในหน้านี้แทน — สร้างเฉพาะรูปนั้นรูปเดียว ไม่ต้องออกแบบใหม่ทั้งชุด',
+      ].join('\n'),
+    );
+    if (!go) {
+      status('ยังไม่ไปต่อ — ใช้ปุ่ม “สร้างใหม่” ที่ช่องปกเพื่อเปลี่ยนเฉพาะรูปนั้น');
+      $('coverActions')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+  }
+
+  $('editor').classList.add('hidden');
+  /**
+   * ต้องเปิดการ์ดความคืบหน้าด้วย ไม่ใช่ซ่อนหน้าตรวจงานแล้วจบ
+   *
+   * เส้นทางที่เข้ามาจากการเปิดโครงการเก่าซ่อนการ์ดนี้ไว้ (openSavedProject) และ proceed()
+   * ก็ไม่เคยเปิดคืน กด "ไปต่อ" จากเล่มเก่าจึงได้หน้าจอว่างเปล่าทั้งหน้า ระหว่างที่ระบบ
+   * กำลังคุยกับ ChatGPT อยู่จริง ๆ หลายนาที — ไม่มีอะไรบอกเลยว่าเกิดอะไรขึ้นหรือกดหยุดตรงไหน
+   */
+  $('progress').classList.remove('hidden');
   book.job.step = 'style';
   await db.saveBook(book);
+  setPhase('style', 'กำลังเตรียมแนวปกก่อนเข้าขั้นสร้างภาพ');
   showRunningCost();
   makeMachine();
   try {

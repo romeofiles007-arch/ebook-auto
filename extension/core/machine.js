@@ -2585,7 +2585,13 @@ function applyCoverRevision(dir, revision) {
 }
 
 /** เช็คว่าปกเล่มนี้ผ่านการออกแบบโดย GPT Art Director รุ่นปัจจุบันครบทุกฟิลด์แล้วหรือยัง ใช้เกณฑ์เดียวทั้งไฟล์เพื่อไม่ให้หลุดไม่ตรงกัน */
-function isModernCoverDesign(book) {
+/**
+ * เล่มนี้มีแนวปกรุ่นปัจจุบันครบแล้วหรือยัง
+ *
+ * ส่งออกไปให้หน้าจอใช้ด้วย เพราะ "ไปต่อ" จากหน้าตรวจงานจะพาไปเจอการออกแบบปกใหม่ทั้งชุด
+ * เมื่อคำตอบเป็นเท็จ ผู้ใช้ต้องรู้ล่วงหน้า ไม่ใช่ไปรู้ตอนโควตาถูกใช้ไปแล้ว
+ */
+export function isModernCoverDesign(book) {
   return (
     Number(book.coverDesignVersion || 0) >= 6 &&
     Array.isArray(book.coverConsultation?.directions) &&
