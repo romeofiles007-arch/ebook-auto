@@ -172,6 +172,46 @@ export async function listProjects() {
 }
 
 /**
+ * บันทึกการลบ — ไฟล์เดียวที่บอกทุกโปรไฟล์ว่าโครงการไหนถูกลบไปแล้วเมื่อไร
+ *
+ * การลบเดิมทำแค่ "เอาไฟล์ออกจากโฟลเดอร์กลาง" ซึ่งเป็นการบอกว่า *ไม่มี* ไม่ใช่บอกว่า *ถูกลบ*
+ * สองอย่างนี้แยกกันไม่ออกจากฝั่งที่มาอ่านทีหลัง โปรไฟล์ที่ยังมีสำเนาในเครื่องจึงอ่านว่า
+ * "โครงการนี้ยังไม่เคยถูกเผยแพร่" แล้วเผยแพร่กลับให้เองตามหน้าที่ ของที่ลบแล้วก็คืนชีพ
+ */
+const DELETED = 'deleted.json';
+
+async function readTombstones() {
+  const dir = await projectsDir({ create: false });
+  if (!dir) return {};
+  try {
+    const data = await readJsonFile(dir, DELETED);
+    return data && typeof data === 'object' ? data.projects || {} : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeTombstones(projects) {
+  const dir = await projectsDir({ create: true });
+  if (!dir) return false;
+  await writeFile(dir, DELETED, JSON.stringify({ version: 1, projects }));
+  return true;
+}
+
+/**
+ * ตัดสินชะตาของสำเนาในเครื่องเมื่อเจอบันทึกการลบ — แยกออกมาให้ทดสอบได้
+ * เพราะผลของมันคือการลบงานของผู้ใช้ถาวร กติกาแบบนี้ห้ามฝังอยู่กลางลูปโดยไม่มีใครตรวจ
+ *
+ * 'none'   = ไม่มีบันทึกการลบ ทำตามปกติ
+ * 'prune'  = ถูกลบไปแล้ว และสำเนานี้ไม่ได้ถูกแตะหลังจากนั้น → สำเนาค้าง ล้างตามให้
+ * 'revive' = สำเนานี้ถูกแก้หลังเวลาที่ลบ → เจ้าของเครื่องนี้ตั้งใจทำต่อ ให้เผยแพร่และถอนบันทึกการลบ
+ */
+export function tombstoneVerdict(localUpdated, deletedAt) {
+  if (!deletedAt) return 'none';
+  return (Number(localUpdated) || 0) > deletedAt ? 'revive' : 'prune';
+}
+
+/**
  * Publish legacy/local-only projects into the shared folder without overwriting
  * a newer snapshot created by another Chrome profile.
  */
@@ -179,22 +219,44 @@ export async function mergeLocalProjectsToWorkspace() {
   const info = await ensureWorkspaceInfo();
   if (!info) return { ok: false, published: 0, shared: 0 };
 
-  const [locals, shared] = await Promise.all([db.listBooks(), listProjects()]);
+  const [locals, shared, tombstones] = await Promise.all([db.listBooks(), listProjects(), readTombstones()]);
   const sharedById = new Map(shared.map((m) => [m.id, m]));
   let published = 0;
+  let pruned = 0;
+  const revived = {};
 
   for (const local of locals) {
     const remote = sharedById.get(local.id);
     const localUpdated = Number(local.updatedAt) || 0;
     const remoteUpdated = Number(remote?.updatedAt) || 0;
+
+    /**
+     * ถูกลบไปแล้วและสำเนาในเครื่องไม่ได้ใหม่กว่าตอนที่ลบ = สำเนาค้าง ไม่ใช่งานที่ยังทำอยู่
+     * ต้องล้างตามให้ ไม่ใช่เผยแพร่กลับ ส่วนสำเนาที่ใหม่กว่าเวลาที่ลบแปลว่าเจ้าของเครื่องนี้
+     * ทำงานต่อหลังจากนั้นจริง ๆ อันนั้นถือว่าตั้งใจกู้กลับมา ให้เผยแพร่แล้วถอนบันทึกการลบ
+     */
+    const verdict = tombstoneVerdict(localUpdated, Number(tombstones[local.id]?.at) || 0);
+    if (verdict === 'prune') {
+      await db.deleteBook(local.id).catch(() => {});
+      pruned++;
+      continue;
+    }
+    if (verdict === 'revive') revived[local.id] = true;
+
     if (!remote || localUpdated >= remoteUpdated) {
       const r = await syncProject(local.id);
       if (r?.ok) published++;
     }
   }
 
+  if (Object.keys(revived).length) {
+    const next = { ...tombstones };
+    for (const id of Object.keys(revived)) delete next[id];
+    await writeTombstones(next).catch(() => {});
+  }
+
   const metas = await listProjects();
-  return { ok: true, published, shared: metas.length, workspaceId: info.id };
+  return { ok: true, published, pruned, shared: metas.length, workspaceId: info.id };
 }
 
 /**
@@ -212,6 +274,9 @@ export async function deleteProject(bookId) {
       removed++;
     } catch {}
   }
+  // เขียนบันทึกการลบไว้เสมอ แม้ไฟล์จะไม่มีอยู่แล้ว เพราะโปรไฟล์อื่นอาจยังถือสำเนาในเครื่องอยู่
+  const tombstones = await readTombstones();
+  await writeTombstones({ ...tombstones, [bookId]: { at: Date.now() } }).catch(() => {});
   return { ok: true, removed };
 }
 

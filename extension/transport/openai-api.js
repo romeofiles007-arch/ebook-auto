@@ -180,7 +180,16 @@ export class OpenAiApiTransport {
    * ทุก 200 มิลลิวินาทีคือจังหวะที่ตายังเห็นว่าข้อความกำลังงอกอยู่ โดยไม่กินแรงเครื่อง
    */
   async readStream(res, report, startedAt) {
-    const reader = res.body?.getReader?.();
+    /**
+     * ตัดสินจาก Content-Type ว่าจะอ่านแบบไหน ไม่ใช่จากการมี body.getReader()
+     *
+     * เดิมด่านนี้เช็ค !reader ซึ่งไม่มีวันเป็นจริงในเบราว์เซอร์ — Response.body เป็น ReadableStream
+     * เสมอเมื่อมีเนื้อหา ทางสำรองสำหรับเซิร์ฟเวอร์ที่ไม่สตรีมจึงเป็นโค้ดที่ไม่เคยทำงาน
+     * และคำตอบ JSON ก้อนเดียวถูกส่งเข้าตัวแยก SSE ซึ่งหาหัว "data:" ไม่เจอ แล้วคืนข้อความว่าง
+     * ผลคือระบบรายงานว่า "โมเดลตอบกลับมาว่าง" ทั้งที่เซิร์ฟเวอร์ตอบมาครบแล้ว
+     */
+    const isSse = /text\/event-stream/i.test(res.headers?.get?.('content-type') || '');
+    const reader = isSse ? res.body?.getReader?.() : null;
     if (!reader) {
       // เซิร์ฟเวอร์ที่ไม่รองรับสตรีม ยังต้องอ่านคำตอบทั้งก้อนได้ตามปกติ
       const body = await res.json().catch(() => null);
@@ -206,7 +215,14 @@ export class OpenAiApiTransport {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        /**
+         * ปรับบรรทัดให้เป็น LF ก่อนเสมอ
+         *
+         * สเปก SSE ให้จบบรรทัดด้วย CRLF, LF หรือ CR ก็ได้ แต่ตัวแยกข้างล่างรู้จักแค่ LF
+         * เซิร์ฟเวอร์ที่ส่ง CRLF มาจะไม่ถูกตัดเป็นชิ้นเลย buffer โตไปเรื่อย ๆ จนจบสตรีม
+         * แล้วของที่ค้างใน buffer ถูกทิ้ง ได้ข้อความว่างทั้งที่ข้อมูลมาครบทุกไบต์
+         */
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, '\n');
 
         // ข้อความ SSE คั่นด้วยบรรทัดว่าง ชิ้นสุดท้ายอาจยังมาไม่ครบ เก็บไว้รอรอบหน้า
         const parts = buffer.split('\n\n');

@@ -120,7 +120,45 @@ export async function importProject(payload) {
   for (const s of sections) await saveSection(book.id, s);
   for (const t of turns) await saveTurn(book.id, t.n, t);
   for (const a of assets) await saveAsset(book.id, a.name, await dataUrlToBlob(a.dataUrl), a.meta);
+  await pruneAfterImport(book, sections, assets);
   return book.id;
+}
+
+/**
+ * ล้างของที่ snapshot ไม่มีแล้ว
+ *
+ * เดิม import เพิ่มกับทับอย่างเดียว ไม่เคยลบ ซึ่งพังตรงที่ระบบนี้ "ลบไฟล์ภาพ" อยู่สิบกว่าจุด
+ * เช่นสั่งคิดแนวปกใหม่ก็ลบ cover-front.png / cover-back.png ทิ้งก่อนวาดใหม่ทุกครั้ง
+ * โปรไฟล์ที่ import จึงเก็บปกเก่าไว้ในเครื่อง แล้วประกอบเล่มด้วยปกที่ถูกทิ้งไปแล้วโดยไม่มีอะไรเตือน
+ * ปลายทางของบั๊กนี้คือไฟล์ที่เอาไปขายจริง จึงต้องลบให้ตรงกับ snapshot ไม่ใช่แค่ทับทับไป
+ *
+ * แต่ห้ามลบแบบเหมารวม เพราะรูปที่เพิ่งวางในเครื่องนี้เมื่อกี้ยังไม่มีใน snapshot ที่กำลังอ่านอยู่
+ * ลบมันทิ้งก็เท่ากับแก้บั๊ก "ได้ไฟล์ผิด" ด้วยบั๊ก "งานหาย" ซึ่งแย่กว่าเดิม
+ * จึงลบเฉพาะแถวที่เก่ากว่าเวลาของ snapshot — ของที่เพิ่งเพิ่มในเครื่องนี้รอดเสมอ
+ */
+async function pruneAfterImport(book, sections, assets) {
+  const snapshotAt = Number(book?.updatedAt) || 0;
+  if (!snapshotAt) return; // ไม่รู้เวลาของ snapshot ก็ไม่มีสิทธิ์ตัดสินว่าอะไรเก่ากว่า
+
+  const plans = [
+    { store: 'sections', keep: sections.map((s) => s.id), idField: 'id', timeField: 'updatedAt' },
+    { store: 'assets', keep: assets.map((a) => a.name), idField: 'name', timeField: 'at' },
+  ];
+  for (const p of plans) {
+    const rows = await byBook(p.store, book.id);
+    for (const key of staleKeys(rows, p.keep, snapshotAt, p.idField, p.timeField)) await del(p.store, key);
+  }
+}
+
+/**
+ * แถวที่ต้องล้างทิ้งหลัง import — แยกออกมาเป็นฟังก์ชันบริสุทธิ์เพื่อให้ทดสอบกติกาได้จริง
+ * โดยไม่ต้องมี IndexedDB เพราะกติกานี้ตัดสินว่าข้อมูลของผู้ใช้จะถูกลบหรือไม่
+ */
+export function staleKeys(rows, keepIds, snapshotAt, idField, timeField) {
+  const keep = new Set(keepIds);
+  return rows
+    .filter((r) => !keep.has(r[idField]) && (Number(r[timeField]) || 0) <= snapshotAt)
+    .map((r) => r.key);
 }
 
 export function blobToDataUrl(blob) {

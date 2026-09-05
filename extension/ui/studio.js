@@ -2504,6 +2504,23 @@ function renderReviewPanel() {
     });
 }
 
+/**
+ * ปิดท้ายทุกการแก้ตอนด้วยมือ — เขียนตอน ขยับ revision ของเล่ม แล้วส่งขึ้น Shared Workspace
+ *
+ * เดิมปุ่มบันทึกเรียก db.saveSection อย่างเดียว ไม่แตะ book.updatedAt และไม่ sync
+ * ทั้งที่เส้นทางที่ AI เขียนตอนให้ (writeSectionWithAi) ทำครบทั้งสามอย่างมาตลอด
+ * หน้าจอเดียวกันจึงบันทึกไม่เท่ากัน ขึ้นกับว่าใครเป็นคนพิมพ์
+ *
+ * ผลไม่ใช่แค่ "อีกโปรไฟล์เห็นของเก่า" แต่ถึงขั้นงานหาย —
+ * openSavedProject เทียบ updatedAt ของ snapshot กับของในเครื่อง ถ้าฝั่งแชร์ใหม่กว่าก็ import ทับทั้งชุด
+ * เล่มที่แก้ด้วยมือจึงมี revision ค้างอยู่ที่เวลาก่อนแก้ตลอดไป และถูกทับด้วย snapshot ที่ไม่มีงานที่แก้
+ */
+async function persistSectionEdit(s) {
+  await db.saveSection(book.id, s);
+  await db.saveBook(book); // ขยับ updatedAt ของเล่ม ไม่งั้น snapshot ฝั่งแชร์จะดู "ใหม่กว่า" เสมอ
+  await syncSharedProject(book.id);
+}
+
 async function saveSection() {
   if (!selected) return;
   const s = sections.find((x) => x.id === selected);
@@ -2516,7 +2533,7 @@ async function saveSection() {
   s.md = nextMd;
   s.chars = countUnits(s.md, book.language);
   s.status = 'edited';
-  await db.saveSection(book.id, s);
+  await persistSectionEdit(s);
   renderSecList();
   $('secStat').textContent = `บันทึกแล้ว · ${s.chars.toLocaleString()} หน่วย`;
   $('secHistory').textContent = `ประวัติตอน (${s.history.length})`;
@@ -2726,7 +2743,7 @@ async function restoreVersion(old) {
   s.md = old.md || '';
   s.chars = countUnits(s.md, book.language);
   s.status = 'restored';
-  await db.saveSection(book.id, s);
+  await persistSectionEdit(s);
   $('secBody').value = s.md;
   $('secStat').textContent = `กู้คืนแล้ว · ${s.chars.toLocaleString()} หน่วย · กดนับหน้าใหม่ก่อนส่งออก`;
   $('secHistory').textContent = `ประวัติตอน (${s.history.length})`;
@@ -3880,7 +3897,9 @@ async function chooseFolder() {
     const merged = await W.mergeLocalProjectsToWorkspace();
     const info = await W.getWorkspaceInfo();
     const shortId = info?.id ? info.id.slice(0, 8) : 'ไม่ทราบ';
-    $('folderName').textContent = `${dir.name || 'เลือกแล้ว'} · Shared Workspace ${shortId} · ${merged.shared || 0} โครงการ`;
+    // การล้างสำเนาค้างคือการลบงานในเครื่องนี้ ต้องบอกเป็นตัวเลข ไม่ใช่ทำเงียบ ๆ แล้วให้สังเกตเอาเอง
+    const prunedNote = merged.pruned ? ` · ล้างสำเนาที่ถูกลบไปแล้ว ${merged.pruned} โครงการ` : '';
+    $('folderName').textContent = `${dir.name || 'เลือกแล้ว'} · Shared Workspace ${shortId} · ${merged.shared || 0} โครงการ${prunedNote}`;
 
     await loadProjectHistory();
   } catch (e) {
@@ -4966,6 +4985,9 @@ $('docxFile').onchange = async (e) => {
 
     const applied = await X.importDocx(book, file, { apply: true });
     sections = (await db.loadSections(book.id)).sort((a, b) => cmpId(a.id, b.id));
+    // ทับทั้งเล่มจากไฟล์เวิร์ดคือการแก้ครั้งใหญ่ที่สุดที่ทำด้วยมือได้ ต้องขยับ revision และ sync เหมือนกัน
+    await db.saveBook(book);
+    await syncSharedProject(book.id);
     renderSecList();
     $('docxReport').textContent = `นำเข้าแล้ว ${applied.changes.length} ตอน — กดนับหน้าใหม่เพื่อดูว่ากี่หน้า`;
     addEvent('system', 'นำเข้า .docx', `${applied.changes.length} ตอนถูกแทนที่ด้วยฉบับที่แก้ในเวิร์ด`);
