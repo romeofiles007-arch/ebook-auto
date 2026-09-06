@@ -11,6 +11,7 @@ import * as W from './workspace.js';
 import * as P from './prompts.js';
 import * as X from './extract.js';
 import * as B from './bible.js';
+import * as R from './review.js';
 import { countUnits } from './thai.js';
 import {
   assignQuotas,
@@ -757,9 +758,14 @@ export class Machine {
         if (rec?.status === 'approved' || rec?.locked || (rec?.md || '').trim()) continue;
         pending.push(s);
       }
-      if (!pending.length) continue;
+      const endsChapter = !batches[i + 1] || batches[i + 1].chapter.n !== b.chapter.n;
+      if (!pending.length) {
+        if (endsChapter) this.rollUpChapter(b.chapter);
+        continue;
+      }
 
       await this.writeBatch({ chapter: b.chapter, sections: pending, isChapterStart: b.first });
+      if (endsChapter) this.rollUpChapter(b.chapter);
 
       /**
        * เตือนทันทีที่ตอนออกมาสั้นกว่าเป้ามาก อย่ารอไปเจอตอนเปิดไฟล์
@@ -987,6 +993,38 @@ export class Machine {
     return out;
   }
 
+  /**
+   * ปิดบทแล้วสรุปบทไว้ทันที ไม่ต้องรอขั้นตรวจความสอดคล้อง
+   *
+   * เดิม chapterSummaries ถูกเติมที่ consistency() ที่เดียว ซึ่งรันหลังเขียนครบทั้งเล่มแล้ว
+   * ระหว่างเขียนจริงช่องนี้จึงว่างตลอด บล็อก "เรื่องที่ผ่านมาแล้ว" ใน bookContext ไม่เคยถูกพิมพ์ออกมาเลย
+   * เวลาเขียนบทที่ 7 โมเดลจึงไม่รู้ว่าบท 1-6 พูดอะไรไปบ้าง เห็นแค่สรุปสามตอนหลังสุด
+   * ผลคือเนื้อหาข้ามบทไม่เชื่อมกัน วนพูดเรื่องเดิม และไม่มีอะไรอ้างถึงสิ่งที่ตกลงกันไว้ตอนต้นเล่ม
+   *
+   * ต่อยอดจากสรุปรายตอนที่ absorb() เก็บไว้อยู่แล้ว จึงไม่ต้องจ่ายเทิร์นเพิ่มแม้แต่เทิร์นเดียว
+   * ขั้นตรวจความสอดคล้องยังเขียนทับด้วยสรุปที่ดีกว่าได้ทีหลังตามเดิม
+   */
+  rollUpChapter(chapter) {
+    const bible = this.book.bible;
+    bible.chapterSummaries ||= [];
+    if (bible.chapterSummaries[chapter.n - 1]) return;
+    const parts = (chapter.sections || []).map((s) => bible.sectionSummaries?.[s.id]).filter(Boolean);
+    if (!parts.length) return;
+    const text = parts.join(' ');
+    bible.chapterSummaries[chapter.n - 1] = text.length > 400 ? text.slice(0, 400).trim() + '…' : text;
+  }
+
+  /**
+   * ท้ายตอนก่อนหน้าแบบคำต่อคำ ให้ตอนถัดไปต่อประโยคแรกได้ถูก
+   * สรุปสองประโยคใน bible บอกได้แค่ "เรื่องอะไร" ไม่ได้บอกว่าค้างไว้ตรงไหน
+   */
+  async tailBefore(flat, firstId) {
+    const at = flat.findIndex((x) => x.id === firstId);
+    if (at <= 0) return '';
+    const rec = await db.loadSection(this.book.id, flat[at - 1].id);
+    return String(rec?.md || rec?.text || '').trim().slice(-400);
+  }
+
   async writeBatch({ chapter, sections, isChapterStart }) {
     const outline = this.book.outline;
     const bible = this.book.bible;
@@ -1002,7 +1040,12 @@ export class Machine {
       chapter,
       sections,
       prevSummaries: B.prevSummaries(bible, outline, sections[0].id),
+      prevTail: await this.tailBefore(flat, sections[0].id),
       nextSection: next,
+      // เดิมส่งบริบทของเล่มเฉพาะตอนแรกของบท ซึ่งในโหมด 'section' (ค่าเริ่มต้น) แปลว่า
+      // ตอนที่เหลือทั้งบทเขียนโดยไม่เห็น thesis วัตถุประสงค์บท ศัพท์ที่บัญญัติไว้ หรือปมที่ยังค้าง
+      // ทั้งหมดฝากไว้กับความจำของแชทที่ยาวสามสิบกว่าเทิร์น ซึ่งจางลงเรื่อย ๆ จนเนื้อหาหลุดจากแกน
+      // ตอนนี้ส่งทุกเทิร์น กลางบทส่งแบบย่อ — เปลืองความยาว prompt แต่ไม่เปลืองจำนวนข้อความ
       withContext: isChapterStart,
     });
 
@@ -1183,16 +1226,84 @@ export class Machine {
           (r.duplicates?.length || 0) +
           (r.term_conflicts?.length || 0) +
           (r.continuity_issues?.length || 0) +
-          (r.unpaid_promises?.length || 0);
+          (r.unpaid_promises?.length || 0) +
+          (r.readability_issues?.length || 0);
         this.log(issues ? 'warn' : 'ok', `บทที่ ${ch.n}: พบ ${issues} ประเด็นที่ควรดู`);
         this.book.review ||= {};
         this.book.review[ch.n] = r;
+        if (issues) await this.repairChapter(ch, r);
       }
       await this.save();
     }
     this.job.cursor = 0;
     this.job.round = 0;
     this.job.step = 'fit';
+  }
+
+  /**
+   * เอาผลตรวจของบรรณาธิการไปแก้จริง
+   *
+   * เดิมขั้นตรวจจ่ายไปหนึ่งเทิร์นต่อหนึ่งบท ได้รายการปัญหากลับมาครบ เก็บลง book.review
+   * แล้วจบแค่นั้น — เล่มถูกส่งออกทั้งที่ระบบชี้เองว่าตอนไหนซ้ำ ตอนไหนไม่ต่อเนื่อง
+   * ผู้ใช้เห็นแค่ "บทที่ 4: พบ 2 ประเด็นที่ควรดู" แล้วต้องไปแก้เองในเวิร์ด
+   * เท่ากับจ่ายค่าตรวจครบทุกบทแต่ไม่ได้ผลตรวจไปใช้
+   *
+   * แก้เฉพาะประเด็นที่ "นับเป็นปัญหา" และผูกกับตอนได้จริง — ข้อเสนอให้สลับลำดับไม่แตะ
+   * เพราะเป็นความเห็นเรื่องการเรียบเรียง ไม่ใช่ข้อผิดพลาด และการสลับตอนกระทบสารบัญทั้งบท
+   *
+   * จำกัดจำนวนตอนต่อบทไว้ เพราะทุกตอนที่แก้คือหนึ่งข้อความที่เผาโควตา
+   * ตอนที่ผู้ใช้ล็อกหรืออนุมัติแล้วห้ามแตะเด็ดขาด งานแก้ด้วยมือต้องไม่หายไปกับการแก้อัตโนมัติ
+   */
+  async repairChapter(chapter, review) {
+    if (this.book.autoRepair === false) return;
+
+    const bySection = new Map();
+    for (const it of R.chapterIssues(review, chapter.n)) {
+      if (!it.counted || !it.section) continue;
+      if (!bySection.has(it.section)) bySection.set(it.section, []);
+      bySection.get(it.section).push(it);
+    }
+    if (!bySection.size) return;
+
+    const cap = this.book.maxRepairsPerChapter ?? 3;
+    const targets = [...bySection.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, cap);
+    const skipped = bySection.size - targets.length;
+
+    for (const [sid, issues] of targets) {
+      if (this.stopRequested) return;
+      const rec = await db.loadSection(this.book.id, sid);
+      if (!rec || !(rec.md || '').trim()) continue;
+      if (rec.locked || rec.status === 'approved') {
+        this.log('warn', `ตอน ${sid} มี ${issues.length} ประเด็น แต่ถูกล็อก/อนุมัติไว้ ไม่แก้ทับให้`);
+        continue;
+      }
+
+      const res = await this.turnWithRetry(
+        P.repairPrompt({ book: this.book, section: rec, currentText: rec.md, issues }),
+        { label: `แก้ตอน ${sid} ตามผลตรวจ` },
+      );
+      const ex = X.extractSection(res.text || '', sid);
+      if (ex.status !== 'ok') {
+        this.log('warn', `ตอน ${sid} แก้ไม่สำเร็จ (${ex.status}) เก็บของเดิมไว้ ประเด็นยังค้างให้ดูในผลตรวจ`);
+        continue;
+      }
+
+      const before = rec.chars || 0;
+      rec.md = ex.body;
+      rec.chars = countUnits(ex.body, this.book.language);
+      rec.status = 'repaired';
+      rec.repairedAt = Date.now();
+      rec.repairedFor = issues.map((it) => it.label);
+      await db.saveSection(this.book.id, rec);
+      this.log(
+        'ok',
+        `ตอน ${sid} แก้แล้ว ${issues.length} ประเด็น (${issues.map((it) => it.label).join(', ')}) · ` +
+          `${before.toLocaleString()} → ${rec.chars.toLocaleString()} หน่วย`,
+      );
+    }
+
+    if (skipped)
+      this.log('warn', `บทที่ ${chapter.n} ยังมีอีก ${skipped} ตอนที่มีประเด็นค้าง เกินเพดาน ${cap} ตอนต่อบท ดูรายการได้ในผลตรวจ`);
   }
 
   // 6) ลูปนับหน้า — หัวใจของระบบ
@@ -2727,7 +2838,17 @@ const PLACEMENT_LABEL = { top: 'ต้นตอน', middle: 'กลางตอ
  * ความเข้มของลวดลายพื้นหลังหลังผสมกับกระดาษขาว
  * เกินกว่านี้เริ่มแย่งสายตากับเนื้อหา และเปลืองหมึกทั้งเล่มโดยไม่ได้อะไรกลับมา
  */
-export const PATTERN_ALPHA = { soft: 0.04, medium: 0.07, strong: 0.1 };
+/**
+ * ความเข้มของลายพื้นหลัง
+ *
+ * ค่าเดิม 4/7/10% จางเกินกว่าจะเห็นบนกระดาษจริง — ลายสีดำสนิทที่ 4% ออกมาเป็น RGB 245
+ * ต่างจากกระดาษขาวแค่ 10 ระดับ ซึ่งตาแทบแยกไม่ออกแม้แต่บนจอ ส่วน "เข้มสุด" ที่ 10%
+ * ก็ได้ RGB 230 ต่างจากขาว 25 ระดับ ซึ่งเป็นขอบล่างสุดของสิ่งที่มองเห็น
+ * ผู้ใช้จึงเลือกลายไว้ จ่ายค่าสร้างภาพไปแล้ว แต่เปิดเล่มมาเหมือนไม่มีอะไรเลย
+ *
+ * ค่าใหม่ผ่านการเรนเดอร์จริงกับตัวคอมไพล์ Typst แล้วว่าลายเห็นชัดขึ้นโดยตัวหนังสือยังอ่านสบาย
+ */
+export const PATTERN_ALPHA = { soft: 0.08, medium: 0.14, strong: 0.2 };
 
 /** มม. → พิกเซลที่ 300 dpi ตัวเลขที่เอาไปตั้งขนาดในเครื่องมือสร้างภาพอื่นได้ตรง ๆ */
 const px300 = (mm) => (mm ? Math.round((Number(mm) / 25.4) * 300) : 0);

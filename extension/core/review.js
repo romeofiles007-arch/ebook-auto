@@ -28,7 +28,7 @@ const list = (v) => (Array.isArray(v) ? v : []);
  * สี่ประเภทที่ machine.js นับเป็น "ประเด็นที่ควรดู"
  * ต้องตรงกับที่นับไว้ตอน log ไม่งั้นตัวเลขบนหน้าจอกับในบันทึกงานจะไม่ตรงกัน
  */
-const COUNTED = ['duplicates', 'term_conflicts', 'continuity_issues', 'unpaid_promises'];
+const COUNTED = ['duplicates', 'term_conflicts', 'continuity_issues', 'unpaid_promises', 'readability_issues'];
 
 /**
  * แผ่ผลตรวจของหนึ่งบทเป็นรายการประเด็นเรียงเดี่ยว
@@ -53,6 +53,14 @@ export function chapterIssues(review, chapterN) {
   for (const c of list(review.continuity_issues)) {
     const type = typeof c === 'object' && c?.type ? ` (${c.type})` : '';
     push('continuity_issues', `ความต่อเนื่อง${type}`, c?.section, asText(c), typeof c === 'object' ? asText(c?.fix) : '');
+  }
+  /**
+   * จุดที่อ่านแล้วสะดุด — ต้องพกข้อความที่ยกมาไปด้วย
+   * ถ้าเหลือแต่คำวิจารณ์ลอย ๆ ("อ่านวกวน") ขั้นแก้จะไม่รู้ว่าต้องแก้ตรงไหนของตอน
+   */
+  for (const r of list(review.readability_issues)) {
+    const quote = typeof r === 'object' && r?.quote ? `“${String(r.quote).trim()}” — ` : '';
+    push('readability_issues', 'อ่านแล้วสะดุด', r?.section, `${quote}${asText(r)}`, typeof r === 'object' ? asText(r?.fix) : '');
   }
   for (const p of list(review.unpaid_promises)) {
     push('unpaid_promises', 'ปมค้าง / คำสัญญาที่ยังไม่จ่ายคืน', typeof p === 'object' ? p?.section : '', asText(p));
