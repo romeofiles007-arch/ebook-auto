@@ -101,10 +101,8 @@ function setMode(label = '', { busy = false } = {}) {
   currentMode = label;
   const el = $('mode');
   if (!el) return;
-  // โหมดทดสอบต้องเห็นชัดตลอดเวลา ไม่งั้นจะเผลอคิดว่าผลลัพธ์ที่ได้เป็นของจริง
-  const tag = testing() ? '🧪 ทดสอบ' : '';
-  el.textContent = label ? `โหมด: ${label}${tag ? ` · ${tag}` : ''}` : tag;
-  el.classList.toggle('hidden', !label && !tag);
+  el.textContent = label ? `โหมด: ${label}` : '';
+  el.classList.toggle('hidden', !label);
   el.classList.toggle('busy', !!label && busy);
 }
 
@@ -115,6 +113,28 @@ const status = (s) => {
     .sendMessage({ type: 'ui.status', message: currentMode ? `[${currentMode}] ${s}` : s })
     .catch(() => {});
 };
+/**
+ * ถามยืนยันแบบที่ "เงียบไม่ได้"
+ *
+ * ปุ่มสำคัญ 15 จุดในหน้านี้ถามยืนยันก่อนทำงาน แล้วเขียนว่า if (!ยืนยัน) return;
+ * ซึ่งแปลว่า "ผู้ใช้กดยกเลิก" กับ "กล่องไม่เคยขึ้นเลย" ให้ผลเหมือนกันเป๊ะ คือเงียบแล้วออก
+ *
+ * Chrome ขึ้นช่องติ๊ก "ป้องกันไม่ให้หน้านี้สร้างกล่องโต้ตอบเพิ่มเติม" หลังเจอ dialog ติด ๆ กัน
+ * พอผู้ใช้ติ๊กไปแล้ว confirm() ของเบราว์เซอร์จะคืน false ทันทีโดยไม่แสดงอะไร และคืนแบบนั้นตลอดไป
+ * ปุ่มทั้ง 15 จุดจึงตายเงียบพร้อมกัน ผู้ใช้เห็นเป็น "กดแล้วนิ่งสนิท" โดยไม่มีอะไรอธิบาย
+ *
+ * กล่องจริงที่คนอ่านแล้วตัดสินใจ ใช้เวลาอย่างน้อยหลักสิบมิลลิวินาทีเสมอ
+ * ถ้าตอบ false กลับมาภายในไม่กี่มิลลิวินาที แปลว่ากล่องไม่เคยขึ้น ไม่ใช่ผู้ใช้ปฏิเสธ
+ */
+function ask(message) {
+  const t0 = performance.now();
+  const ok = confirm(message);
+  if (!ok && performance.now() - t0 < 8) {
+    status('เบราว์เซอร์กำลังบล็อกกล่องยืนยันของหน้านี้อยู่ ปุ่มจึงกดแล้วไม่มีอะไรเกิดขึ้น — รีโหลดหน้านี้หนึ่งครั้งแล้วอย่าติ๊ก "ป้องกันไม่ให้หน้านี้สร้างกล่องโต้ตอบเพิ่มเติม"');
+  }
+  return ok;
+}
+
 const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const short = (v, max = 900) => {
@@ -1311,7 +1331,6 @@ function readForm() {
     coverMode: val('coverMode', 'prompt'),
     coverTextMode: val('coverTextMode', 'baked'),
     figureColor: val('figureColor', 'color'),
-    testMode: on('testMode'),
     authorVoice: val('authorVoice', 'auto'),
     authorVoiceText: val('authorVoiceText', '').trim(),
     authorPhotoOnCover: on('authorPhotoCover'),
@@ -1406,11 +1425,6 @@ function updateEstimate() {
 }
 
 /**
- * โหมดทดสอบใช้ transport ปลอมซึ่งตอบทันทีโดยไม่ยิง ChatGPT
- * มีไว้ไล่ดูว่าทุกขั้นตอนต่อกันครบไหมภายในไม่กี่วินาที แทนการรอของจริงเป็นชั่วโมง
- */
-const testing = () => (book ? !!book.testMode : on('testMode'));
-/**
  * เครื่องยนต์การเขียนมีสองบริบท และเอามาปนกันไม่ได้
  *
  *   งานของ "เล่มที่กำลังทำ"  → ใช้ค่าที่ล็อกไว้กับเล่มนั้น ห้ามสลับกลางเล่ม
@@ -1428,9 +1442,9 @@ const bookUsesApi = (b) => (b?.textSource || 'web') === 'api';
 const bookDrawsInTab = (b) =>
   (b?.imageSource || 'web') !== 'api' && !['none', 'upload'].includes(b?.coverMode || 'prompt');
 const uiUsesApi = () => val('textSource', 'web') === 'api';
-const useTextApi = (forBook = null) => !testing() && (forBook ? bookUsesApi(forBook) : uiUsesApi());
+const useTextApi = (forBook = null) => (forBook ? bookUsesApi(forBook) : uiUsesApi());
 const transportKind = (forBook = null) =>
-  testing() ? 'fake' : useTextApi(forBook) ? 'openai_api' : 'chatgpt_tab';
+  useTextApi(forBook) ? 'openai_api' : 'chatgpt_tab';
 
 /**
  * ตัวเลือกที่ transport ต้องใช้ รวมไว้ที่เดียว
@@ -1451,7 +1465,7 @@ const transportOpts = (extra = {}, forBook = null) => ({
 /** โหมดทดสอบไม่ต้องไปยุ่งกับแท็บ ChatGPT เลย */
 const focusChat = async (forBook = null) => {
   // ทาง API ไม่มีแท็บ ChatGPT ให้ต้องเรียกขึ้นมา การสลับหน้าต่างตอนนั้นมีแต่จะรบกวนคนใช้งาน
-  if (testing() || useTextApi(forBook)) return;
+  if (useTextApi(forBook)) return;
   await chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 };
 
@@ -1499,32 +1513,19 @@ function makeMachine() {
    * ภาพที่ให้ ChatGPT วาดในแท็บ ต้องออกทางแท็บ ไม่ว่าเนื้อหาจะเขียนด้วยทางไหน
    * (โหมดภาพแบบ API ไม่ผ่านสายนี้เลย มันเรียก Images API ตรงจาก core/imageApi.js)
    */
-  const imageTransport = testing()
-    ? transport
-    : makeTransport('chatgpt_tab', { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
+  const imageTransport = makeTransport('chatgpt_tab', { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
   machine = new Machine({ book, transport, imageTransport, onEvent: logMachine });
 }
 
 /**
- * ทดสอบระบบทั้งสายด้วยการกดครั้งเดียว
- *
- * ของจริงกินเวลาเป็นชั่วโมงและเผาโควตา ทำให้ไม่มีใครกล้าทดสอบหลังแก้โค้ด
- * ตัวนี้ตั้งเล่มจิ๋วที่เปิดครบทุกแผนก (มีปก มีภาพในเล่ม) แล้วเดินให้จบเอง
- * ใช้ดูว่าทั้ง 7 แผนกต่อกันติดไหม ก่อนจะเอาของจริงเดิน
- */
-/** ระหว่างทดสอบระบบ ให้ผ่านประตูที่รอคนกดไปเองจนจบสาย */
-let systemTestRunning = false;
-
-/**
  * โหมดอัตโนมัติเต็มรูปแบบ — กดครั้งเดียวแล้วเดินยาวจนจบเล่ม
  *
- * ต่างจากโหมดทดสอบตรงที่ใช้ ChatGPT จริงและค่าที่ผู้ใช้ตั้งไว้จริงทุกช่อง
- * แต่ใช้จุดผ่านประตูชุดเดียวกัน เพราะสิ่งที่ต้องการเหมือนกันคือ "ห้ามหยุดรอคนกด"
+ * ทุกจุดที่ปกติค้างรอการตัดสินใจจะถูกเลือกให้เอง เพราะสิ่งที่ต้องการคือ "ห้ามหยุดรอคนกด"
  * ทุกจุดที่ปกติค้างรอการตัดสินใจ (เลือกชื่อ · เลือกสารบัญ · ตรวจงาน · เริ่ม Phase 2 · ส่งออก)
  * จะถูกเลือกให้ด้วยตัวเลือกแรกที่ระบบเสนอ ซึ่งเป็นตัวที่ ChatGPT จัดว่าเหมาะที่สุดอยู่แล้ว
  */
 let fullAutoRunning = false;
-const autoPilot = () => systemTestRunning || fullAutoRunning;
+const autoPilot = () => fullAutoRunning;
 
 /**
  * ปลดธงอัตโนมัติเมื่อรอบนั้นเลิกเดินแล้ว
@@ -1537,7 +1538,6 @@ const autoPilot = () => systemTestRunning || fullAutoRunning;
  */
 function stopAutoPilot() {
   fullAutoRunning = false;
-  systemTestRunning = false;
 }
 
 async function runFullAuto() {
@@ -1547,7 +1547,7 @@ async function runFullAuto() {
     return;
   }
   const pages = Number($('pages').value) || 120;
-  if (!confirm(
+  if (!ask(
     'เริ่มสร้างทั้งเล่มแบบอัตโนมัติ\n\n' +
       `· ${pages} หน้า · ${$('audience').value.trim() || 'ผู้อ่านทั่วไป'}\n` +
       '· ระบบจะตัดสินใจแทนทุกจุด โดยเลือกตัวเลือกแรกที่ ChatGPT เสนอ\n' +
@@ -1627,48 +1627,6 @@ async function runFullAuto() {
   }
 }
 
-async function runSystemTest() {
-  if (
-    !confirm(
-      'ทดสอบระบบทั้งสายด้วยข้อมูลปลอม\n\n' +
-        '· ไม่ยิง ChatGPT และไม่เปลืองโควตาเลย\n' +
-        '· สร้างเล่มจิ๋ว 12 หน้า เปิดครบทุกแผนก (ปก + ภาพในเล่ม)\n' +
-        '· เนื้อหาที่ได้เป็นข้อความสุ่มสำหรับทดสอบเท่านั้น\n\n' +
-        'เริ่มเลยไหม',
-    )
-  )
-    return;
-
-  systemTestRunning = true;
-  $('testMode').checked = true;
-  $('title').value = 'เล่มทดสอบระบบ';
-  if (!$('audience').value.trim()) $('audience').value = 'ผู้อ่านทั่วไป';
-  $('pages').value = 12;
-  $('contentMode').value = 'prose';
-  $('coverMode').value = 'auto';
-  $('figureMode').value = 'auto';
-  $('illus').value = 'light';
-  syncMode();
-  updateEstimate();
-
-  resetOutlineDirection();
-  status('ทดสอบระบบ: กำลังขอสารบัญ');
-  await generateOutlineDirections();
-
-  // เลือกทางแรกให้เอง เพราะการทดสอบไม่ควรค้างรอคนกด
-  const first = $('outlineDirections')?.querySelector('[data-outline-index="0"]');
-  if (!first) {
-    status('ทดสอบระบบ: ขอสารบัญไม่สำเร็จ');
-    stopAutoPilot();
-    return;
-  }
-  first.click();
-  if (!(await create())) {
-    stopAutoPilot();
-    status('ทดสอบระบบยังไม่เริ่ม — ถูกยกเลิกที่หน้าตั้งค่า');
-  }
-}
-
 /**
  * @returns {Promise<boolean>} จริงเมื่อเริ่มเดินงานจริงแล้วเท่านั้น
  *   เท็จแปลว่ายังมีอย่างที่ต้องตัดสินใจก่อน (ไม่มีหัวข้อ · ยังไม่เลือกสารบัญ · ยกเลิกที่กล่องถามรูป)
@@ -1706,7 +1664,7 @@ async function create() {
    */
   const refTargets = pickedAuthorRefTargets();
   if (refTargets.length && !setupAuthorPhoto) {
-    const go = confirm(
+    const go = ask(
       [
         'เลือกให้แนบรูปผู้เขียนไปกับการสร้างภาพไว้ แต่ยังไม่ได้ใส่รูป',
         '',
@@ -1910,7 +1868,6 @@ function showResume(b) {
     `${b.targetPages} หน้า · เขียนด้วย ${engine} · ใช้ไป ${b.job?.turnNo || 0} ${(b.textSource || 'web') === 'api' ? 'เทิร์น' : 'ข้อความ'} · ค้างที่ขั้น ${STEP_NAMES[b.job?.step] || b.job?.step || '-'}` +
     (seen ? ` · แตะล่าสุด${sinceText(seen)}` : '') +
     (why ? ` — ${why}` : '');
-  setBtn('resumeGo', ['gate_images', 'images'].includes(b.job?.step) ? 'image' : 'play', ['gate_images', 'images'].includes(b.job?.step) ? 'เปิด Image Phase 2' : 'ทำต่อจากที่ค้าง');
   /**
    * ถ้าผู้ใช้ตั้งค่าบนหน้าจอไว้อย่างหนึ่ง แต่เล่มนี้ล็อกไว้อีกอย่าง ต้องบอกและให้ทางเลือก
    * ไม่ใช่เงียบแล้วทำตามเล่ม จนผู้ใช้สงสัยว่าทำไมเลือก API แล้วยังไปหน้าเว็บอยู่
@@ -1952,7 +1909,7 @@ async function switchBookEngine() {
   if (!book?.id) return;
   const toApi = uiUsesApi();
   const label = toApi ? `OpenAI API (${textApiModel()})` : 'หน้าเว็บ ChatGPT';
-  if (!confirm(
+  if (!ask(
     `เปลี่ยนแหล่งเขียนของเล่มนี้เป็น ${label} หรือไม่?
 
 ` +
@@ -2026,7 +1983,7 @@ async function resumeGo() {
  */
 async function startNewBook() {
   const busy = machine && book?.job?.status === 'running';
-  if (!confirm(busy
+  if (!ask(busy
     ? 'หยุดงานที่กำลังทำอยู่แล้วเริ่มเล่มใหม่หรือไม่? เล่มเดิมถูกบันทึกไว้แล้ว กลับมาทำต่อได้ภายหลังจาก "ดูประวัติโครงการ"'
     : 'เริ่มเล่มใหม่หรือไม่? เล่มปัจจุบันถูกบันทึกไว้แล้ว กลับมาทำต่อได้ภายหลังจาก "ดูประวัติโครงการ"')) return;
 
@@ -2293,7 +2250,7 @@ async function renameSavedProject(id) {
 async function deleteSavedProject(id) {
   const saved = await db.loadBook(id).catch(() => null);
   const name = saved?.outline?.title || saved?.topic || id;
-  if (!confirm(`ลบโครงการ “${name}” ถาวรหรือไม่?
+  if (!ask(`ลบโครงการ “${name}” ถาวรหรือไม่?
 เนื้อหา ภาพ และประวัติทั้งหมดของเล่มนี้จะหายไป กู้คืนไม่ได้`)) return;
 
   await db.deleteBook(id).catch(() => null);
@@ -2553,7 +2510,7 @@ async function regenerateSection() {
   if (!book?.id || !selected) return;
   const rec = sections.find((x) => x.id === selected);
   const had = (rec?.md || '').trim();
-  if (!confirm(had
+  if (!ask(had
     ? `ให้ AI เขียนตอน ${selected} ใหม่ทั้งตอนหรือไม่?
 
 เนื้อหาปัจจุบันจะถูกเก็บไว้ในประวัติตอน กู้กลับได้`
@@ -2603,7 +2560,7 @@ async function fillEmptySections() {
   const todo = emptySections();
   if (!todo.length) return;
   const list = todo.map((s) => `${s.id} ${s.title}`).join('\n');
-  if (!confirm(`ให้ AI เขียน ${todo.length} ตอนที่ยังว่างหรือไม่?
+  if (!ask(`ให้ AI เขียน ${todo.length} ตอนที่ยังว่างหรือไม่?
 
 ${list}`)) return;
 
@@ -2735,7 +2692,7 @@ async function renderHistory() {
 
 async function restoreVersion(old) {
   const s = sections.find((x) => x.id === selected);
-  if (!old || !confirm('กู้คืนเนื้อหาฉบับนี้หรือไม่? ฉบับปัจจุบันจะถูกเก็บไว้ในประวัติ ไม่สูญหาย')) return;
+  if (!old || !ask('กู้คืนเนื้อหาฉบับนี้หรือไม่? ฉบับปัจจุบันจะถูกเก็บไว้ในประวัติ ไม่สูญหาย')) return;
   s.history = [
     ...(s.history || []),
     { md: s.md || '', chars: s.chars || 0, at: Date.now(), reason: 'ก่อนกู้คืน' },
@@ -2791,7 +2748,7 @@ async function proceed() {
    * ต้องบอกก่อนกด และบอกทางที่ถูกกว่าไปด้วย ตามกติกาว่าความเสี่ยงต้องมองเห็นก่อนกด
    */
   if ((book.coverMode || 'prompt') === 'auto' && !isModernCoverDesign(book)) {
-    const go = confirm(
+    const go = ask(
       [
         'เล่มนี้ยังไม่มีแนวปกรุ่นปัจจุบัน',
         '',
@@ -3357,7 +3314,7 @@ async function applyCoverDirection(id) {
   const dirs = book?.coverConsultation?.directions || [];
   const dir = dirs.find((d, n) => (d.id || String.fromCharCode(65 + n)) === id);
   if (!dir) return;
-  if (!confirm(`เปลี่ยนไปใช้แนว “${dir.name || id}” หรือไม่?\n\nภาพปกหน้า/ปกหลังเดิมจะถูกลบ แล้วต้องกดสร้างใหม่ตามแนวนี้`)) return;
+  if (!ask(`เปลี่ยนไปใช้แนว “${dir.name || id}” หรือไม่?\n\nภาพปกหน้า/ปกหลังเดิมจะถูกลบ แล้วต้องกดสร้างใหม่ตามแนวนี้`)) return;
 
   book = await db.loadBook(book.id);
   book.style = dir;
@@ -3582,7 +3539,7 @@ async function startPhase2() {
 
   // ไม่ await ตรงนี้ เพราะถ้าการ focus หน้าต่าง ChatGPT ช้าหรือ browser กำลังสลับหน้าต่าง
   // Studio จะไม่ถูกทิ้งไว้ที่หน้า Progress ว่าง ๆ; transport ของเทิร์นแรกจะ ensure/focus ChatGPT ซ้ำให้อีกชั้น
-  if (!testing() && bookDrawsInTab(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (bookDrawsInTab(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
 
   showRunningCost();
   makeMachine();
@@ -3610,7 +3567,7 @@ async function recoverPhase2Gate() {
 }
 
 async function skipPhase2() {
-  if (!confirm('ข้าม Phase 2 หรือไม่? ภาพที่ยังขาดจะคงเป็นช่องว่าง/Prompt ในเล่ม แต่โครงการและ Prompt ทั้งหมดจะยังอยู่')) return;
+  if (!ask('ข้าม Phase 2 หรือไม่? ภาพที่ยังขาดจะคงเป็นช่องว่าง/Prompt ในเล่ม แต่โครงการและ Prompt ทั้งหมดจะยังอยู่')) return;
   phase2Running = false;
   phase2Stage = null;
   book = await db.loadBook(book.id);
@@ -3628,7 +3585,7 @@ async function rethinkCoverWithGpt() {
   if (!book?.id) return;
   book = await db.loadBook(book.id);
   if (!book || ['none', 'upload'].includes(book.coverMode || 'prompt')) return;
-  if (!confirm('ให้ GPT คิดทิศทางปกใหม่หรือไม่? ปกหน้า/ปกหลังเดิมจะถูกลบ แต่ภาพประกอบในเล่มจะไม่ถูกแตะ')) return;
+  if (!ask('ให้ GPT คิดทิศทางปกใหม่หรือไม่? ปกหน้า/ปกหลังเดิมจะถูกลบ แต่ภาพประกอบในเล่มจะไม่ถูกแตะ')) return;
 
   await db.deleteAsset(book.id, 'cover-front.png').catch(() => {});
   await db.deleteAsset(book.id, 'cover-back.png').catch(() => {});
@@ -3656,7 +3613,7 @@ async function rethinkCoverWithGpt() {
   renderSteps();
   setPhase('style', 'กำลังส่งข้อมูลทั้งเล่มให้ GPT Art Director คิดปกใหม่ 3 ทางและเลือกแนวที่แนะนำ');
   status('กำลังปรึกษา GPT เรื่องปก');
-  if (!testing() && bookDrawsInTab(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
+  if (bookDrawsInTab(book)) chrome.runtime.sendMessage({ type: 'sw.focusChat' }).catch(() => {});
   showRunningCost();
   makeMachine();
   try {
@@ -3669,7 +3626,7 @@ async function rethinkCoverWithGpt() {
 /** สั่งวาดปกใหม่จากหน้าตรวจงาน — ถามก่อนเพราะไฟล์เดิมจะถูกลบและต้องใช้เทิร์นสร้างภาพจริง */
 async function confirmRegenerateCover(name, which) {
   const label = which === 'back' ? 'ปกหลัง' : 'ปกหน้า';
-  if (!confirm(`สร้าง${label}ใหม่ด้วยแนวปกเดิมหรือไม่?\n\nไฟล์${label}เดิมจะถูกลบ แล้วระบบจะพาไปหน้าสร้างภาพเพื่อวาดใหม่ทันที`)) return;
+  if (!ask(`สร้าง${label}ใหม่ด้วยแนวปกเดิมหรือไม่?\n\nไฟล์${label}เดิมจะถูกลบ แล้วระบบจะพาไปหน้าสร้างภาพเพื่อวาดใหม่ทันที`)) return;
   await regenerateImageAsset(name);
 }
 
@@ -3746,10 +3703,6 @@ async function autoExportFinished() {
 async function finish() {
   const wasFullAuto = fullAutoRunning;
   fullAutoRunning = false;
-  if (systemTestRunning) {
-    systemTestRunning = false;
-    addEvent('system', 'ทดสอบระบบเสร็จ', 'เดินครบทั้ง 7 แผนกแล้ว — ดูกระดานทีมงานว่ามีแผนกไหนขึ้นสีแดงหรือไม่');
-  }
   phase2Running = false;
   phase2Stage = null;
   $('imagePhase').classList.add('hidden');
@@ -3890,7 +3843,7 @@ async function runExport(kind) {
   const empty = sections.filter((s) => !(s.md || s.text || '').trim());
   if (empty.length && kind !== 'project') {
     const ids = empty.map((s) => s.id).join(', ');
-    const go = confirm(
+    const go = ask(
       `ยังมี ${empty.length} ตอนที่ไม่มีเนื้อหา: ${ids}\n\n` +
         `ถ้าส่งออกตอนนี้ หนังสือจะมีข้อความ "(ยังไม่มีเนื้อหาของตอน ...)" อยู่ในเล่มจริง\n\n` +
         `แนะนำให้กลับไปเขียนตอนที่ขาดก่อน ยืนยันจะส่งออกเลยหรือไม่`,
@@ -4068,7 +4021,6 @@ $('trim').innerHTML = Object.entries(TRIM_PRESETS)
 $('folder').onclick = chooseFolder;
 $('typstTest').onclick = testTypst;
 $('create').onclick = create;
-$('systemTest').onclick = runSystemTest;
 $('chat').onclick = () => chrome.runtime.sendMessage({ type: 'sw.focusChat' });
 $('stop').onclick = () => {
   machine?.stop();
@@ -5016,7 +4968,7 @@ $('docxFile').onchange = async (e) => {
       .slice(0, 12)
       .map((c) => `  ${c.id} ${c.title}: ${c.before.toLocaleString()} → ${c.after.toLocaleString()} (${c.delta >= 0 ? '+' : ''}${c.delta})`)
       .join('\n');
-    const ok = confirm(
+    const ok = ask(
       `จะทับเนื้อหา ${preview.changes.length} ตอนจากไฟล์นี้\n\n${lines}` +
         (preview.changes.length > 12 ? `\n  ...และอีก ${preview.changes.length - 12} ตอน` : '') +
         '\n\nของเดิมจะถูกเก็บไว้ย้อนกลับได้ ยืนยันหรือไม่',
@@ -5038,7 +4990,6 @@ $('docxFile').onchange = async (e) => {
   }
 };
 
-$('resumeGo').onclick = resumeGo;
 $('refreshProjects').onclick = loadProjectHistory;
 $('resumeHistory').onclick = async () => {
   await loadProjectHistory();
