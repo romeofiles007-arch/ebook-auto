@@ -186,7 +186,17 @@ export async function packAssets(assets = []) {
 // ---------- ระดับเล่ม ----------
 
 export async function compileBook({ book, outline, sections, assets = [], withBleed = false }) {
-  const usable = assets.filter((a) => a?.blob && a.name?.startsWith('fig-'));
+  /**
+   * ลวดลายพื้นหลังต้องผ่านด่านนี้ด้วย ไม่ใช่แค่ภาพในเล่ม
+   *
+   * ตัวกรองเดิมรับเฉพาะชื่อที่ขึ้นต้นด้วย fig- ส่วนลายชื่อ page-pattern.png จึงตกทุกครั้ง
+   * ผลคือ assetNames ที่ส่งให้ buildDocument ไม่เคยมีลายอยู่เลย pageBackground() จึงคืนค่าว่างเสมอ
+   * และไฟล์ลายก็ไม่ถูกแพ็กเข้าไปด้วย — เท่ากับโค้ดวางพื้นหลังใน template.js เป็นโค้ดที่ไม่มีวันทำงาน
+   * ฝั่ง export.js แก้เรื่องนี้ไปแล้ว (interiorAsset) แต่ฝั่งคอมไพล์ตกหล่น เกณฑ์สองที่จึงต้องตรงกัน
+   */
+  const usable = assets.filter(
+    (a) => a?.blob && (a.name?.startsWith('fig-') || a.name === 'page-pattern.png'),
+  );
 
   // โหมดรายชิ้นใช้เอกสารคนละแบบทั้งหมด ไม่ใช่แค่ปรับค่า
   if (book.contentMode === 'items' || (outline?.themes?.length && !outline?.chapters?.length)) {

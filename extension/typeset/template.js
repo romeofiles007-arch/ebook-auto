@@ -261,9 +261,9 @@ export function buildDocument({ book, outline, sections, opts = {} }) {
   const isFiction = book.contentMode === 'fiction';
 
   for (const ch of outline.chapters) {
-    const chapterTitle = isFiction
-      ? `${lang === 'th' ? 'บทที่' : 'Chapter'} ${ch.n}${ch.title ? ` · ${ch.title}` : ''}`
-      : ch.title;
+    // เล่มสารคดีเคยขึ้นบทด้วยชื่อบทเปล่า ๆ ไม่มีเลข สารบัญจึงเป็นรายการชื่อยาว ๆ ที่ไล่ลำดับไม่ได้
+    // และผู้อ่านที่เปิดกลางเล่มไม่มีทางรู้ว่าตัวเองอยู่บทไหนของกี่บท
+    const chapterTitle = `${lang === 'th' ? 'บทที่' : 'Chapter'} ${ch.n}${ch.title ? ` · ${ch.title}` : ''}`;
     body.push(`= ${inline(prepareForTypeset(chapterTitle, lang))}`, '');
     for (let sceneIndex = 0; sceneIndex < ch.sections.length; sceneIndex++) {
       const s = ch.sections[sceneIndex];
@@ -321,6 +321,9 @@ export function buildDocument({ book, outline, sections, opts = {} }) {
 // ภาพประกอบ: คำบรรยายอยู่ใต้ภาพและห้ามพรากจากกัน
 #show figure: set block(breakable: false, above: 1.4em, below: 1.4em)
 #show figure.caption: set text(size: ${pt(t.sizePt * 0.82)}, fill: luma(90))
+// คำบรรยายใต้ภาพชิดซ้าย ไม่ใช่จัดกลางตามค่าเริ่มต้นของ Typst
+// คำบรรยายภาษาไทยมักยาวเกินหนึ่งบรรทัด พอจัดกลางแล้วบรรทัดสุดท้ายจะเหลือคำสองสามคำลอยอยู่กลางหน้า
+#show figure.caption: set align(left)
 // ไม่มีเลข "รูปที่ N" — ในเล่มไม่มีข้อความอ้างถึงเลขรูปอยู่แล้ว
 // เลขที่ไม่มีใครอ้างถึงจึงเป็นแค่คำรกหน้ากระดาษ ใต้ภาพเหลือเฉพาะคำบรรยายจริงถ้ามี
 #set figure(numbering: none, supplement: none, gap: 0.8em)
@@ -631,6 +634,10 @@ function frontMatter(book, outline, opts = {}) {
   #block[
     #set text(size: ${pt(book.typography.sizePt * 0.82)})
     #set par(leading: 0.42em, spacing: 0.42em, first-line-indent: 0pt)
+    // ไม่ใส่จุดไข่ปลาลากไปหาเลขหน้า และไม่ใส่จุดนำหน้าชื่อตอน
+    // เลขบทที่ขึ้นต้นว่า "บทที่ N ·" กับการเยื้องของตอนย่อย แยกลำดับชั้นได้ชัดพออยู่แล้ว
+    // จุดเต็มหน้าเป็นลวดลายที่ดังกว่าเนื้อหาที่มันพาไปหา
+    #set outline.entry(fill: none)
     #outline(title: none, depth: ${book.contentMode === 'fiction' ? 1 : 2}, indent: auto)
   ]
 ]`);
