@@ -134,6 +134,15 @@ function stripRendererNoise(s) {
   return String(s)
     .replace(/\ue200[\s\S]*?[\ue201\ue202]/g, '') // บล็อกอ้างอิงที่ห่อด้วยอักขระเขตส่วนตัว
     .replace(/(?:cite)?turn\d+(?:search|news|view|image|video|forecast|finance|academia|product)\d+/gi, '')
+    /**
+     * เครื่องหมายอ้างอิงแบบข้อความล้วนของ ChatGPT
+     *
+     * รูปนี้ไม่ได้ห่อด้วยอักขระเขตส่วนตัวเหมือนแบบข้างบน จึงรอดทุกด่านมาได้
+     * แล้วถูกพิมพ์ลงหนังสือจริง — ตรวจไฟล์โรงพิมพ์พบโผล่กลางหน้า 10 ว่า
+     * "เพราะบนโต๊ะมีของจริงวางอยู่ให้หยิบมาเล่นต่อได้แล้ว :contentReference[oaicite:0]{index=0}"
+     */
+    .replace(/:?contentReference\[[^\]]*\](?:\{[^}]*\})?/gi, '')
+    .replace(/\[oaicite:\s*\d+\]/gi, '')
     .replace(/[\ue000-\uf8ff]/g, '')
     .replace(/[\u00a0\u2007\u202f]/g, ' ');
 }
@@ -300,7 +309,9 @@ export function parseJson(raw) {
 }
 
 function cleanBody(s) {
-  return String(s)
+  // ขยะจากตัวแสดงผลของ ChatGPT เคยถูกกวาดเฉพาะตอนซ่อม JSON เนื้อหาตอนจึงไม่เคยผ่านด่านนี้เลย
+  // ผลคือเครื่องหมายอ้างอิงหลุดไปพิมพ์ลงหนังสือให้ผู้อ่านเห็น
+  return stripRendererNoise(String(s))
     .replace(/^\s*```[\w]*\s*$/gm, '') // เผื่อมีรั้วโค้ดหลงมาในเนื้อ
     .replace(/<<<META[\s\S]*$/, '') // ตัดบล็อก META ออกจากเนื้อหา
     // เครื่องหมายคั่นที่หลงเข้ามาอยู่กลางเนื้อหา ต้องกวาดออกให้หมด
