@@ -23,9 +23,18 @@ test('Vancouver uses real fields without a network call; IEEE numbering follows 
 test('legacy or partially formatted bibliography cannot pass as ready', () => {
   const b={backMatter:['references'],references:['invented book']};
   assert.ok(referenceProblem(b));
-  b.referenceStyle='apa'; b.referenceSources=[{...normalizeWork(work),reviewed:true,citations:{apa:'Real formatted entry'}}];
+  const ready = (n) => Array.from({length:n},(_,i)=>({...normalizeWork(work),doi:`10.1038/nrd${842+i}`,reviewed:true,citations:{apa:`Real formatted entry ${i+1}`}}));
+  b.referenceStyle='apa'; b.referenceSources=ready(5);
   assert.equal(referenceProblem(b),'');
   b.referenceStyle='ieee'; assert.ok(referenceProblem(b));
+});
+test('บรรณานุกรมที่มีไม่ถึงห้าแหล่งยังไม่นับว่าพร้อม', () => {
+  const source=(i)=>({...normalizeWork(work),doi:`10.1038/nrd${842+i}`,reviewed:true,citations:{apa:`Entry ${i}`}});
+  const book=(n)=>({backMatter:['references'],referenceStyle:'apa',referenceSources:Array.from({length:n},(_,i)=>source(i))});
+  for (const n of [1,2,3,4]) assert.match(referenceProblem(book(n)),/อย่างน้อย 5 แหล่ง/,`${n} แหล่งต้องไม่ผ่าน`);
+  assert.equal(referenceProblem(book(5)),'','ครบห้าแหล่งต้องผ่าน');
+  // ไม่ติ๊กบรรณานุกรมก็ไม่ต้องมีแหล่งเลย กติกานี้ใช้เฉพาะกับเล่มที่จะพิมพ์หน้าอ้างอิงจริง
+  assert.equal(referenceProblem({backMatter:[],referenceSources:[]}),'');
 });
 test('all export formats can consume the same selected back matter', () => {
   const b={backMatter:['glossary','references','about_author'],bible:{glossary:[{term:'Test',def:'Definition'},{term:'Empty'}]},aboutAuthor:'ข้อมูลจริง',referenceStyle:'apa',referenceSources:[{citations:{apa:'Same reference'}}]};

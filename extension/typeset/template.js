@@ -139,6 +139,31 @@ ${header}
 }
 
 // ---------- block ----------
+const MD_LIST_RE = /^(\s*)(?:[-*+]|\d+[.)])\s+\S/;
+
+/**
+ * ระดับการซ้อนของรายการต้องคำนวณเป็นขั้น ไม่ใช่ลอกช่องว่างจากต้นฉบับมาทั้งดุ้น
+ *
+ * ใน Typst ช่องว่างหน้ารายการคือโครงสร้าง ไม่ใช่การจัดหน้า ข้อที่โมเดลเผลอเคาะเว้นวรรคนำ
+ * หนึ่งหรือสามที จึงกลายเป็นรายการซ้อนชั้น เห็นเป็นข้อ 2 เยื้องไม่ตรงกับข้อ 1 (เล่มจริงหน้า 54)
+ * ใช้เกณฑ์สี่ช่องต่อหนึ่งชั้น เพราะเป็นระดับที่คนตั้งใจย่อหน้าจริง ๆ เท่านั้นถึงจะถึง
+ * เว้นวรรคนำหนึ่งถึงสามช่องที่หลุดมาจึงถูกดึงกลับมาอยู่ระดับเดียวกับพี่น้องของมัน
+ * และไม่ให้ลึกเกินสามชั้น ซึ่งลึกกว่านั้นก็อ่านไม่รู้เรื่องอยู่ดี
+ */
+const listIndent = (raw) =>
+  '  '.repeat(Math.min(3, Math.floor(String(raw).replace(/\t/g, '    ').length / 4)));
+
+/** บรรทัดว่างนี้คั่นกลางระหว่างข้อของรายการเดียวกันหรือไม่ */
+function betweenListItems(out, lines, idx) {
+  const prev = [...out].reverse().find((x) => x.trim());
+  if (!prev || !/^\s*[-+]\s+\S/.test(prev)) return false;
+  for (let j = idx + 1; j < lines.length; j++) {
+    if (!lines[j].trim()) continue; // เว้นหลายบรรทัดติดกันก็ยังนับเป็นช่องว่างเดียว
+    return MD_LIST_RE.test(lines[j]);
+  }
+  return false;
+}
+
 export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 }, prompts = new Map()) {
   const lines = String(md).replace(/\r\n/g, '\n').split('\n');
   const out = [];
@@ -164,6 +189,14 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
     }
 
     if (!line.trim()) {
+      /**
+       * บรรทัดว่างระหว่างข้อของรายการเดียวกัน ต้องไม่ถูกส่งต่อไปให้ Typst
+       *
+       * Typst ตัดรายการขาดจากกันทันทีที่เจอบรรทัดว่าง แล้วเริ่มนับใหม่จาก 1 ทุกก้อน
+       * โมเดลชอบเว้นบรรทัดระหว่างข้อ ผลคือ "4 ข้อ" ในหนังสือจริงขึ้นเป็น 1. 1. 1. 1. ทั้งหมด
+       * (เห็นในเล่มจริงหน้า 9) — บรรทัดว่างตรงนี้เป็นแค่การจัดหน้าใน markdown ไม่ใช่โครงสร้าง
+       */
+      if (betweenListItems(out, lines, idx)) continue;
       out.push('');
       continue;
     }
@@ -217,13 +250,13 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
 
     const ul = line.match(/^(\s*)[-*+]\s+(.*)$/);
     if (ul) {
-      out.push(ul[1] + '- ' + inline(ul[2]));
+      out.push(listIndent(ul[1]) + '- ' + inline(ul[2]));
       continue;
     }
 
     const ol = line.match(/^(\s*)\d+[.)]\s+(.*)$/);
     if (ol) {
-      out.push(ol[1] + '+ ' + inline(ol[2]));
+      out.push(listIndent(ol[1]) + '+ ' + inline(ol[2]));
       continue;
     }
 

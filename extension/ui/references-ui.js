@@ -1,4 +1,4 @@
-import { searchReferences, formatReference, referenceLines, referenceProblem, REFERENCE_STYLES, REFERENCE_EXAMPLES } from '../core/references.js';
+import { searchReferences, formatReference, referenceLines, referenceProblem, MIN_REFERENCES, REFERENCE_STYLES, REFERENCE_EXAMPLES } from '../core/references.js';
 import { BOOK_EXAMPLES } from './reference-book-examples.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -37,7 +37,12 @@ $('referenceResults').addEventListener('change', (event) => {
   selected = selected.filter((s) => s.doi !== source.doi);
   if (event.target.checked) selected.push({ ...source, reviewed: true });
   renderSelected();
-  message(`เลือก ${selected.length} รายการแล้ว · ระบบจัดรูปแบบให้เมื่อเริ่มสร้าง ไม่ต้องกดยืนยันซ้ำ`);
+  const left = MIN_REFERENCES - selected.length;
+  message(
+    left > 0
+      ? `เลือก ${selected.length} รายการแล้ว · ยังขาดอีก ${left} จึงจะครบเกณฑ์ ${MIN_REFERENCES} แหล่ง (ภาษาใดก็ได้)`
+      : `เลือก ${selected.length} รายการแล้ว · ครบเกณฑ์ ${MIN_REFERENCES} แหล่งแล้ว ระบบจัดรูปแบบให้เมื่อเริ่มสร้าง`,
+  );
 });
 function lock(value) {
   busy = value;
@@ -83,7 +88,7 @@ $('bm_references').addEventListener('change', () => {
   renderReferenceExample();
   if ($('bm_references').checked && !selected.length) {
     $('referenceOptions').open = true; // ข้อความข้างล่างอยู่ในกล่องนี้ ถ้าไม่กางก็เท่ากับไม่ได้บอก
-    message('ติ๊กบรรณานุกรมไว้แล้ว — ขั้นต่อไปคือค้นแล้วติ๊กเลือกแหล่งอย่างน้อย 1 รายการ ระบบไม่แต่งรายการอ้างอิงขึ้นเอง ถ้าไม่เลือก หน้านี้จะไม่ถูกใส่ในเล่ม');
+    message(`ติ๊กบรรณานุกรมไว้แล้ว — ขั้นต่อไปคือค้นแล้วติ๊กเลือกแหล่งที่อ่านต้นทางแล้วอย่างน้อย ${MIN_REFERENCES} แหล่ง (ภาษาใดก็ได้) ระบบไม่แต่งรายการอ้างอิงขึ้นเอง ถ้าไม่ครบ หน้านี้จะไม่ถูกใส่ในเล่ม`);
   }
 });
 renderReferenceExample();
@@ -97,9 +102,10 @@ export async function validateBackMatterSetup() {
     return 'เลือกเกี่ยวกับผู้เขียนไว้ กรุณากรอกข้อมูลจริงอย่างน้อย 40 ตัวอักษรก่อนเริ่ม';
   if (!$('bm_references').checked) return '';
   if (busy) return 'กำลังค้นหรือจัดรูปแบบบรรณานุกรม กรุณารอให้เสร็จ';
-  if (!selected.length) {
-    $('referenceOptions').open = true; await findReferences();
-    return 'กรุณาอ่านต้นทางแล้วติ๊กเลือกแหล่งอ้างอิง จากนั้นเริ่มสร้างได้เลย รูปแบบที่เลือกยังอยู่';
+  if (selected.length < MIN_REFERENCES) {
+    $('referenceOptions').open = true;
+    if (!selected.length) await findReferences();
+    return `บรรณานุกรมต้องมีอย่างน้อย ${MIN_REFERENCES} แหล่งที่อ่านต้นทางแล้ว (ภาษาใดก็ได้) ตอนนี้เลือกไว้ ${selected.length} แหล่ง — ค้นเพิ่มแล้วติ๊กเลือก หรือเอาบรรณานุกรมออกจากเล่มนี้`;
   }
   lock(true);
   try {

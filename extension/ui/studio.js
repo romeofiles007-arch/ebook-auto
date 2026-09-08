@@ -7,6 +7,7 @@
 import * as db from '../core/db.js';
 import { crewMarkup } from './crew-sprites.js';
 import { readReferenceSettings, validateBackMatterSetup, resetReferenceSources } from './references-ui.js';
+import { MIN_REFERENCES } from '../core/references.js';
 import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage, isModernCoverDesign, clearFigurePlan } from '../core/machine.js';
 import { makeTransport, hasPendingTurn } from '../transport/index.js';
 import {
@@ -1917,13 +1918,13 @@ async function create() {
     );
   }
 
-  if (autoPilot() && on('bm_references') && !readReferenceSettings().referenceSources.length) {
+  if (autoPilot() && on('bm_references') && readReferenceSettings().referenceSources.length < MIN_REFERENCES) {
     $('bm_references').checked = false;
     $('bm_references').dispatchEvent(new Event('change', { bubbles: true }));
     addEvent(
       'system',
       'อัตโนมัติ: ปิดบรรณานุกรมให้',
-      'ยังไม่มีแหล่งที่คุณอ่านต้นทางและติ๊กยืนยันไว้ ระบบติ๊กแทนไม่ได้ จึงปิดหน้าอ้างอิงแล้วเดินต่อ — ถ้าต้องการหน้านี้ ให้ค้นและติ๊กแหล่งก่อนแล้วกดใหม่',
+      `ยังมีแหล่งที่คุณอ่านต้นทางและติ๊กยืนยันไว้ไม่ถึง ${MIN_REFERENCES} แหล่ง ระบบติ๊กแทนไม่ได้ จึงปิดหน้าอ้างอิงแล้วเดินต่อ — ถ้าต้องการหน้านี้ ให้ค้นและติ๊กแหล่งให้ครบก่อนแล้วกดใหม่`,
     );
   }
 
