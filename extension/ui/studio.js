@@ -43,7 +43,7 @@ import * as B from '../core/bible.js';
 import { ITEM_KINDS, planItems, suggestItemSize } from '../core/items.js';
 import { countUnits } from '../core/thai.js';
 import { preflight } from '../core/preflight.js';
-import { compileBook, selfTest } from '../typeset/compiler.js';
+import { compileBook } from '../typeset/compiler.js';
 import * as X from '../core/export.js';
 import * as W from '../core/workspace.js';
 import { testKey as testImageApiKey, DEFAULT_IMAGE_MODEL } from '../core/imageApi.js';
@@ -4216,20 +4216,6 @@ async function chooseFolder() {
   }
 }
 
-// ---------- ทดสอบคอมไพเลอร์ ----------
-async function testTypst() {
-  const el = $('typstState');
-  el.textContent = 'กำลังโหลดคอมไพเลอร์ (ไฟล์ wasm ราว 28 MB ครั้งแรกช้าหน่อย)...';
-  try {
-    const r = await selfTest();
-    el.textContent = r.ok
-      ? `ใช้งานได้ · เรียงพิมพ์ไทยและนับหน้าถูกต้อง · ${r.ms} ms`
-      : `คอมไพล์ได้แต่ผลไม่ตรงที่คาด (ได้ ${r.pages} หน้า ควรได้ 2)`;
-  } catch (e) {
-    el.textContent = 'ใช้ไม่ได้: ' + (e?.message || e);
-  }
-}
-
 // ---------- ผูกปุ่ม ----------
 $('figureStyle').innerHTML = Object.entries(FIGURE_STYLES)
   .map(([k, v]) => `<option value="${k}"${k === 'box' ? ' selected' : ''}>${v.label}</option>`)
@@ -4335,7 +4321,6 @@ $('trim').innerHTML = Object.entries(TRIM_PRESETS)
   .join('');
 
 $('folder').onclick = chooseFolder;
-$('typstTest').onclick = testTypst;
 $('create').onclick = create;
 $('chat').onclick = () => chrome.runtime.sendMessage({ type: 'sw.focusChat' });
 function stopRun(from = 'ผู้ใช้สั่งหยุดงาน') {

@@ -261,19 +261,6 @@ export async function calibrate({ book, sampleText, sampleChars }) {
   return { charsPerPage: Math.round(sampleChars / physical), pages: physical };
 }
 
-/** ตรวจว่าคอมไพเลอร์ใช้งานได้จริง เรียกตอนเปิดหน้า Studio */
-export async function selfTest() {
-  const t0 = performance.now();
-  await init();
-  const src = `#set text(font: "Sarabun", lang: "th")
-ทดสอบการเรียงพิมพ์ภาษาไทย ตัดบรรทัดถูกต้องหรือไม่
-#pagebreak()
-หน้าที่สอง
-#context [#metadata((physical: here().page(), numbered: counter(page).final().first())) <pagecount>]`;
-  const { physical } = await pageCount(src);
-  return { ok: physical === 2, pages: physical, ms: Math.round(performance.now() - t0) };
-}
-
 function cmpItemId(a, b) {
   const [a1, a2] = String(a).split('.').map(Number);
   const [b1, b2] = String(b).split('.').map(Number);
