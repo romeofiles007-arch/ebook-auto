@@ -63,6 +63,23 @@ Render the person in the illustration style, palette, lighting and composition d
 Do not add the author's name or any caption next to the person.`;
 
 /**
+ * คำสั่งฉบับนี้ยังขอรูปผู้เขียนอยู่ไหม — อ่านจากตัวคำสั่งจริง ไม่ใช่จากธงที่ตั้งไว้ตอนวางแผน
+ *
+ * แผนกพิสูจน์คำสั่งภาพมีสิทธิ์เขียนคำสั่งใหม่ทั้งฉบับ และมันใช้สิทธิ์นั้นจริงเมื่อเจอ
+ * คำสั่งที่ขัดกันเอง เช่น ภาพที่บรีฟไว้ว่า "no people, faces" แต่มีหัวข้อรูปอ้างอิง
+ * ต่อท้ายสั่งให้ใส่คนลงไป มันจะแก้เหลือประโยคเดียวว่าให้เมินรูปที่แนบมา
+ *
+ * แต่ธง needsAuthorRef ถูกตั้งไว้ตั้งแต่ตอนวางแผนและไม่มีใครแก้ตาม รูปผู้เขียนจึงยัง
+ * ถูกแนบไปกับคำสั่งที่เพิ่งบอกว่าไม่ต้องใช้รูป — เปลืองอัปโหลดทุกรูป และเสี่ยงกว่านั้นคือ
+ * โมเดลที่ได้รูปคนมาพร้อมคำสั่งมักสลับไปทำงานแก้ภาพแทนการวาดใหม่
+ */
+export function promptWantsAuthorRef(prompt) {
+  const t = String(prompt || '');
+  if (/ignore\s+(any|the)?\s*attached\s+(author\s+)?photograph/i.test(t)) return false;
+  return /ATTACHED REFERENCE PHOTO|attached\s+(?:author\s+)?reference\s+photo(?:graph)?|person from the attached/i.test(t);
+}
+
+/**
  * ย่อรูปก่อนแนบ
  *
  * รูปจากมือถือใบเดียวหนัก 4-8 MB ซึ่งเป็นปัญหาคนละอย่างกันในสองเส้นทาง:

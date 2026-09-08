@@ -54,6 +54,7 @@ export class ChatGptTabTransport {
    */
   send(prompt, opts = {}) {
     const turnId = `t${Date.now().toString(36)}-${++seq}`;
+    this.lastTurnId = turnId;
     const answerTimeoutMs = opts.timeoutMs ?? this.timeoutMs;
     // เทิร์นที่ขอภาพต้องรอ "ตอบข้อความ" จบก่อน แล้วค่อยรอภาพเรนเดอร์ต่อ (adapter รอสองช่วงต่อกัน)
     // เดิม timer รอบนอกนี้ใช้ answerTimeoutMs อย่างเดียว จึงตัดจบก่อน adapter จะรอภาพเสร็จ

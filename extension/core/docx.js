@@ -10,6 +10,7 @@
  */
 
 import { stripZwsp } from './thai.js';
+import { backMatterSections } from './references.js';
 
 const MM_TO_TWIP = 56.6929;
 const tw = (mm) => Math.round(mm * MM_TO_TWIP);
@@ -75,6 +76,10 @@ export async function buildDocx({ book, outline, sections }) {
     }
   }
 
+  for (const section of backMatterSections(book)) {
+    body.push(para(esc(section.title), { style: 'Heading1', font: head, size: size * 1.7, bold: true, pageBreakBefore: true }));
+    for (const line of section.lines) body.push(para(esc(line), { font, size }));
+  }
   const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
 <w:body>

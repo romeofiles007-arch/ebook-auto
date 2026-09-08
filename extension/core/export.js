@@ -5,6 +5,7 @@
  */
 
 import * as db from './db.js';
+import { backMatterSections, referenceProblem } from './references.js';
 import { stripZwsp } from './thai.js';
 import { coverTextBaked, backCoverTextBaked } from './prompts.js';
 import { authorRefSummary, authorRefFor } from './imageRef.js';
@@ -87,6 +88,7 @@ const outFile = (book, suffix, ext) => {
 const interiorAsset = (a) => !!a?.blob && (a.name?.startsWith('fig-') || a.name === 'page-pattern.png');
 
 export async function exportInterior(book, sections, { withBleed = true } = {}) {
+  if (referenceProblem(book)) throw new Error(referenceProblem(book));
   const assets = (await db.loadAssets(book.id)).filter(interiorAsset);
   const src = buildInteriorSource(book, sections, {
     withBleed,
@@ -101,6 +103,7 @@ export async function exportInterior(book, sections, { withBleed = true } = {}) 
 
 /** ฉบับให้คนอ่านตรวจ — ไม่มีตัดตก มีลายน้ำ */
 export async function exportScreen(book, sections) {
+  if (referenceProblem(book)) throw new Error(referenceProblem(book));
   const b = structuredClone(book);
   b.watermark = 'DRAFT';
   const assets = (await db.loadAssets(book.id)).filter(interiorAsset);
@@ -121,6 +124,7 @@ export async function exportScreen(book, sections) {
  * งานพิมพ์ยังใช้ interior.pdf + cover.pdf แยกเหมือนเดิม เพราะโรงพิมพ์ต้องการปกกางเต็ม
  */
 export async function exportBookPdf(book, sections) {
+  if (referenceProblem(book)) throw new Error(referenceProblem(book));
   const all = await db.loadAssets(book.id);
   const assets = all.filter(
     (a) =>
@@ -299,6 +303,7 @@ function coverTypst(book, geo, { frontDataUrl, backDataUrl, authorDataUrl }) {
  * แต่ตัวเลขจำนวนหน้าที่เชื่อถือได้ยังต้องมาจาก Typst เพราะเวิร์ดจัดบรรทัดต่างกัน
  */
 export async function exportDocx(book, sections) {
+  if (referenceProblem(book)) throw new Error(referenceProblem(book));
   const blob = await buildDocx({ book, outline: book.outline, sections });
   await download(blob, outFile(book, 'ต้นฉบับแก้ในเวิร์ด', 'docx'));
   return blob.size;
@@ -337,6 +342,7 @@ export async function importDocx(book, file, { apply = false } = {}) {
 
 /** EPUB ขั้นต่ำที่เปิดได้จริง — ไม่มี ZWSP ไม่มีการจัดหน้า */
 export async function exportEpub(book, sections) {
+  if (referenceProblem(book)) throw new Error(referenceProblem(book));
   const title = book.outline?.title || 'book';
   const files = new Map();
 
@@ -378,6 +384,10 @@ export async function exportEpub(book, sections) {
         return { file: `ch${i + 1}.xhtml`, title: chapterTitle, html: xhtml(chapterTitle, `<h1>${esc(chapterTitle)}</h1>\n${body}`) };
       });
 
+  for (const [i, section] of backMatterSections(book).entries()) {
+    chapters.push({ file: `back${i + 1}.xhtml`, title: section.title,
+      html: xhtml(section.title, `<h1>${esc(section.title)}</h1>${section.lines.map((line) => `<p>${esc(line)}</p>`).join('\n')}`) });
+  }
   for (const c of chapters) files.set(`OEBPS/${c.file}`, c.html);
 
   files.set(

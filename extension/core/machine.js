@@ -26,7 +26,7 @@ import * as I from './items.js';
 import { compileBook, calibrate } from '../typeset/compiler.js';
 import { jitter, sleep } from '../transport/index.js';
 import { generateImage, DEFAULT_IMAGE_MODEL } from './imageApi.js';
-import { wantsAuthorRef, prepareRefImage, dataUrlToFile, AUTHOR_REF_RULE } from './imageRef.js';
+import { wantsAuthorRef, promptWantsAuthorRef, prepareRefImage, dataUrlToFile, AUTHOR_REF_RULE } from './imageRef.js';
 
 export const STEPS = [
   'health',
@@ -87,6 +87,7 @@ const NO_COST_ERRORS = new Set([
   'adapter_unavailable',
   'composer_not_found',
   'composer_write_failed',
+  'composer_text_mismatch',
   'send_action_not_accepted',
   'composer_not_found_before_send',
 ]);
@@ -160,11 +161,14 @@ export class Machine {
    */
   async grabRenderedImage(index, total, j, { tries = 4, gapMs = 5000 } = {}) {
     if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return null;
+    const turnId = this.imgTr.lastTurnId;
+    if (!turnId) return null; // Never rescue an unrelated latest reply.
     for (let i = 0; i < tries; i++) {
       if (this.stopRequested) return null;
       try {
-        const r = await chrome.runtime.sendMessage({ type: 'sw.grabImage' });
+        const r = await chrome.runtime.sendMessage({ type: 'sw.grabImage', turnId });
         if (r?.ok && r.dataUrl) return r;
+        if (r?.error === 'image_turn_not_available') return null;
       } catch (_) {
         /* หน้าแชตยังไม่ตอบ ลองใหม่รอบหน้า */
       }
@@ -215,6 +219,7 @@ export class Machine {
     this.recordUsage(res);
     this.emit({ type: 'turn.end', n, status: res.status, response: res.text || '', meta: res.meta || {} });
 
+    if (res.meta?.error === 'attachment_failed') throw new Halt(res.meta.detail || 'แนบรูปผู้เขียนไม่สำเร็จ — หยุดก่อนส่งคำสั่ง');
     if (res.status === 'rate_limited') throw new RateLimited();
     if (res.status === 'wrong_model')
       throw new Halt(
@@ -1058,7 +1063,7 @@ export class Machine {
       const missing = ids.filter((id) => X.extractSection(raw, id).status !== 'ok');
       if (!missing.length) break;
       this.log('warn', `ยังขาดตอน ${missing.join(', ')} — สั่งเขียนต่อ`);
-      const cont = await this.turnWithRetry(P.continueBatchPrompt(missing, raw, this.book), {
+      const cont = await this.turnWithRetry(P.continueBatchPrompt(missing, raw, this.book, prompt), {
         label: `เขียนต่อ ${missing.join(', ')}`,
       });
       raw += '\n' + (cont.text || '');
@@ -1079,7 +1084,8 @@ export class Machine {
           bible,
           chapter,
           sections: [s],
-          prevSummaries: [],
+          prevSummaries: B.prevSummaries(bible, outline, id),
+          prevTail: await this.tailBefore(flat, id),
           // เดิมใส่ null เสมอ ทำให้ prompt เข้าใจผิดว่านี่คือฉากสุดท้ายของเล่มเสมอเวลาต้องขอเดี่ยว ๆ
           nextSection: flat[flat.findIndex((x) => x.id === id) + 1] || null,
           withContext: false,
@@ -1182,6 +1188,7 @@ export class Machine {
         md: ex.body,
         chars,
         status: 'generated',
+        shortReason: String(ex.meta?.short_reason || ''),
         quota: s.quota,
         minChars: s.minChars,
         maxChars: s.maxChars,
@@ -1201,13 +1208,32 @@ export class Machine {
       this.log('ok', `ตอน ${s.id} ${chars.toLocaleString()} หน่วย (${off >= 0 ? '+' : ''}${off}%)`);
     }
 
-    // เดิมผูก summary ของทั้ง batch ไว้กับ sections[0].id เพียงตัวเดียว
-    // พอ batch มีมากกว่า 3 ตอน (เกิน lookback window ของ prevSummaries) ตอนอื่นในชุดเดียวกันจะไม่มี summary ให้อ้างอิงเลย
-    // absorb() ปลอดภัยที่จะเรียกซ้ำด้วย meta เดิม เพราะทุกฟิลด์อื่นกันซ้ำอยู่แล้ว (addUnique/filter) มีแค่ sectionSummaries ที่ต้องการให้ผูกแยกตามตอนจริง ๆ
-    if (meta) for (const s of sections) B.absorb(bible, s.id, meta);
+    // Store each section's own memory; copying one batch summary to every id
+    // makes later writers see several apparently identical sections.
+    for (const s of sections) {
+      const own = X.extractMeta(raw, s.id);
+      // A shared batch summary is not a summary of each section. Older prose
+      // replies without per-section META keep a gap rather than inventing memory.
+      const sectionMeta = own || (this.book.contentMode === 'fiction' ? meta : null);
+      if (sectionMeta) B.absorb(bible, s.id, sectionMeta);
+    }
   }
 
   // 5) ตรวจความสอดคล้องรายบท
+  /**
+   * บรรณาธิการอ่านเนื้อหาครบทุกตัวอักษร ไม่ใช่อ่านหัวตอนแล้วเดา
+   *
+   * ของเดิมส่งไปแค่ 700 ตัวอักษรแรกของแต่ละตอน ซึ่งเป็นราวหนึ่งในสี่ของตอนหนึ่ง
+   * ปัญหาที่อยู่กลางตอนหรือท้ายตอนจึงไม่มีทางถูกเห็นเลยแม้แต่ครั้งเดียว
+   * ทั้งที่ค่าตรวจถูกจ่ายไปเต็มจำนวนทุกบท
+   *
+   * ตอนนี้ส่งเนื้อหาเต็ม และเพราะบทหนึ่งอาจยาวเกินหนึ่งเทิร์น จึงแบ่งเป็นชุดตามจำนวน
+   * ตัวอักษร โดยไม่ตัดเนื้อตอนไหนทิ้ง — ตอนที่ยาวเกินงบไปคนเดียวก็ให้ไปทั้งตอนในเทิร์นของมันเอง
+   * "ครบ" ต้องพิสูจน์ได้ ไม่ใช่เชื่อเอา จึงบังคับให้ตอบคำตัดสินรายตอนกลับมาทุกตอน
+   * แล้วเทียบกับรายชื่อที่ส่งไป ตอนไหนไม่มีคำตัดสินคือตอนที่ยังไม่ถูกอ่าน ต้องถามซ้ำ
+   */
+  static CONSISTENCY_BATCH_CHARS = 24000;
+
   async consistency() {
     const chapters = this.book.outline.chapters;
     for (let i = this.job.cursor; i < chapters.length; i++) {
@@ -1216,10 +1242,7 @@ export class Machine {
       const recs = [];
       for (const s of ch.sections) recs.push((await db.loadSection(this.book.id, s.id)) || s);
 
-      const res = await this.turnWithRetry(P.consistencyPrompt(ch, recs, this.book.bible, this.book), {
-        label: `ตรวจบทที่ ${ch.n}`,
-      });
-      const r = X.parseJson(res.text);
+      const r = await this.reviewChapterFully(ch, recs);
       if (r) {
         B.setChapterSummary(this.book.bible, ch.n, r.chapter_summary || '');
         const issues =
@@ -1238,6 +1261,107 @@ export class Machine {
     this.job.cursor = 0;
     this.job.round = 0;
     this.job.step = 'fit';
+  }
+
+  /** แบ่งตอนเป็นชุดตามงบตัวอักษร โดยไม่ตัดเนื้อตอนไหนทิ้ง */
+  static batchSections(recs, budget) {
+    const batches = [];
+    let cur = [];
+    let size = 0;
+    for (const rec of recs) {
+      const n = String(rec.md || rec.text || '').length;
+      if (cur.length && size + n > budget) {
+        batches.push(cur);
+        cur = [];
+        size = 0;
+      }
+      cur.push(rec);
+      size += n;
+    }
+    if (cur.length) batches.push(cur);
+    return batches;
+  }
+
+  /** ตรวจหนึ่งบทให้ครบทุกตอน แล้วรวมผลของทุกชุดเข้าด้วยกัน */
+  async reviewChapterFully(ch, recs) {
+    const merged = {
+      duplicates: [],
+      term_conflicts: [],
+      continuity_issues: [],
+      unpaid_promises: [],
+      reorder: [],
+      readability_issues: [],
+      section_verdicts: [],
+      chapter_summary: '',
+    };
+    const collect = (r) => {
+      for (const k of Object.keys(merged)) {
+        if (k === 'chapter_summary') {
+          if (r[k]) merged[k] = r[k];
+        } else if (Array.isArray(r[k])) merged[k].push(...r[k]);
+      }
+    };
+
+    const run = async (batch, label) => {
+      const res = await this.turnWithRetry(
+        P.consistencyPrompt(ch, batch, this.book.bible, this.book, label),
+        { label: `ตรวจบทที่ ${ch.n}${label ? ` · ${label}` : ''}` },
+      );
+      const parsed = X.parseJson(res.text);
+      if (parsed) collect(parsed);
+      return !!parsed;
+    };
+
+    const batches = Machine.batchSections(recs, Machine.CONSISTENCY_BATCH_CHARS);
+    const totalChars = recs.reduce((n, r) => n + String(r.md || r.text || '').length, 0);
+    this.log(
+      'ok',
+      `บทที่ ${ch.n}: ส่งให้บรรณาธิการอ่านเต็ม ${recs.length} ตอน · ${totalChars.toLocaleString()} ตัวอักษร` +
+        (batches.length > 1 ? ` · แบ่งเป็น ${batches.length} ชุดเพราะยาวเกินหนึ่งเทิร์น` : ''),
+    );
+
+    let any = false;
+    for (let b = 0; b < batches.length; b++) {
+      if (this.stopRequested) break;
+      const label = batches.length > 1 ? `ส่วนที่ ${b + 1} จาก ${batches.length} ของบทนี้` : '';
+      if (await run(batches[b], label)) any = true;
+    }
+    if (!any) return null;
+
+    /**
+     * ตอนที่ไม่มีคำตัดสินกลับมา = ตอนที่ยังไม่ถูกอ่าน ห้ามนับว่าผ่าน
+     *
+     * นี่คือจุดต่างระหว่าง "ส่งเนื้อหาไปครบ" กับ "อ่านครบจริง" ซึ่งไม่ใช่เรื่องเดียวกัน
+     * และเป็นเหตุผลที่ไม่ใช้วิธีอัปโหลดทั้งเล่มเป็นไฟล์เดียว เพราะวิธีนั้นตรวจตรงนี้ไม่ได้เลย
+     */
+    const want = recs.map((r) => String(r.id));
+    const got = new Set((merged.section_verdicts || []).map((v) => String(v?.section || '')));
+    const missed = want.filter((id) => !got.has(id));
+
+    if (missed.length) {
+      this.log('warn', `บทที่ ${ch.n}: ยังไม่ได้คำตัดสินของตอน ${missed.join(', ')} — ส่งไปตรวจซ้ำเฉพาะตอนที่ขาด`);
+      const retryRecs = recs.filter((r) => missed.includes(String(r.id)));
+      for (const batch of Machine.batchSections(retryRecs, Machine.CONSISTENCY_BATCH_CHARS)) {
+        if (this.stopRequested) break;
+        await run(batch, 'รอบเก็บตกเฉพาะตอนที่ยังไม่ได้ตรวจ');
+      }
+    }
+
+    const finalGot = new Set((merged.section_verdicts || []).map((v) => String(v?.section || '')));
+    const stillMissed = want.filter((id) => !finalGot.has(id));
+    merged.coverage = {
+      sections: want.length,
+      reviewed: want.length - stillMissed.length,
+      missed: stillMissed,
+      chars: totalChars,
+    };
+    this.log(
+      stillMissed.length ? 'warn' : 'ok',
+      stillMissed.length
+        ? `บทที่ ${ch.n}: ตรวจได้ ${want.length - stillMissed.length}/${want.length} ตอน · ยังไม่ได้ตรวจ ${stillMissed.join(', ')}`
+        : `บทที่ ${ch.n}: บรรณาธิการอ่านและตัดสินครบทั้ง ${want.length}/${want.length} ตอน`,
+    );
+    return merged;
   }
 
   /**
@@ -1265,7 +1389,15 @@ export class Machine {
     }
     if (!bySection.size) return;
 
-    const cap = this.book.maxRepairsPerChapter ?? 3;
+    /**
+     * เพดานเดิม 3 ตอนต่อบท ทำให้การตรวจครบไม่มีความหมาย
+     *
+     * ถ้าบรรณาธิการอ่านครบทุกตัวอักษรแล้วชี้มา 6 ตอน แต่แก้ได้แค่ 3
+     * ผลคือรายการปัญหายาวขึ้นโดยที่เล่มไม่ได้ดีขึ้น — จ่ายค่าตรวจเต็มแต่ได้ผลครึ่งเดียว
+     * ค่าเริ่มต้นจึงเป็น "แก้ทุกตอนที่ถูกชี้" ส่วนคนที่อยากคุมโควตายังตั้ง
+     * maxRepairsPerChapter เองได้เหมือนเดิม
+     */
+    const cap = this.book.maxRepairsPerChapter ?? bySection.size;
     const targets = [...bySection.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, cap);
     const skipped = bySection.size - targets.length;
 
@@ -1278,13 +1410,28 @@ export class Machine {
         continue;
       }
 
-      const res = await this.turnWithRetry(
-        P.repairPrompt({ book: this.book, section: rec, currentText: rec.md, issues }),
-        { label: `แก้ตอน ${sid} ตามผลตรวจ` },
-      );
-      const ex = X.extractSection(res.text || '', sid);
+      /**
+       * คำตอบที่ไม่มีเครื่องหมายกำกับ ต้องขอใหม่ ไม่ใช่ยอมแพ้ตั้งแต่ครั้งแรก
+       *
+       * turnWithRetry ลองซ้ำเฉพาะตอน "เทิร์นพัง" (หมดเวลา ว่าง ตอบไม่กลับ) แต่เทิร์นที่
+       * ChatGPT ตอบกลับมาสั้น ๆ โดยไม่มี <<<SEC id BEGIN>>> ถือว่าเทิร์นสำเร็จ มันจึงไม่ลองซ้ำ
+       * ผลคือคำตอบเสียหนึ่งครั้ง = ประเด็นของตอนนั้นค้างถาวร ทั้งที่ขอใหม่อีกครั้งมักได้
+       * เห็นในหน้าจอจริงเป็น "ตอน 4.4 แก้ไม่สำเร็จ (refused)" โดยไม่มีความพยายามที่สอง
+       */
+      const askRepair = () =>
+        this.turnWithRetry(P.repairPrompt({ book: this.book, section: rec, currentText: rec.md, issues }), {
+          label: `แก้ตอน ${sid} ตามผลตรวจ`,
+        });
+
+      let res = await askRepair();
+      let ex = X.extractSection(res.text || '', sid);
+      if (ex.status !== 'ok' && !this.stopRequested) {
+        this.log('warn', `ตอน ${sid}: คำตอบไม่อยู่ในรูปแบบที่ใช้ได้ (${ex.status}) — ขอใหม่อีกครั้งก่อนยอมแพ้`);
+        res = await askRepair();
+        ex = X.extractSection(res.text || '', sid);
+      }
       if (ex.status !== 'ok') {
-        this.log('warn', `ตอน ${sid} แก้ไม่สำเร็จ (${ex.status}) เก็บของเดิมไว้ ประเด็นยังค้างให้ดูในผลตรวจ`);
+        this.log('warn', `ตอน ${sid} แก้ไม่สำเร็จหลังลองสองครั้ง (${ex.status}) เก็บของเดิมไว้ ประเด็นยังค้างให้ดูในผลตรวจ`);
         continue;
       }
 
@@ -1294,6 +1441,7 @@ export class Machine {
       rec.status = 'repaired';
       rec.repairedAt = Date.now();
       rec.repairedFor = issues.map((it) => it.label);
+      B.absorb(this.book.bible, sid, ex.meta);
       await db.saveSection(this.book.id, rec);
       this.log(
         'ok',
@@ -1572,19 +1720,19 @@ export class Machine {
    * การย่อรูปเดิมซ้ำทุกครั้งคือการทำงานเดิมทิ้งหลายสิบรอบโดยไม่ได้อะไรต่างกันเลย
    */
   async authorRef() {
-    if (this._authorRef !== undefined) return this._authorRef;
+    if (this._authorRef?.dataUrl) return this._authorRef;
     this._authorRef = null;
     try {
       const asset = await db.loadAsset(this.book.id, 'author-photo.png');
       if (!asset?.blob) {
-        this.log('warn', 'เลือกให้แนบรูปผู้เขียนไปกับภาพ แต่ยังไม่มีไฟล์ author-photo.png — จะสร้างภาพโดยไม่มีรูปอ้างอิง');
+        this.log('warn', 'เลือกให้แนบรูปผู้เขียนไปกับภาพ แต่ยังไม่มีไฟล์ author-photo.png — ต้องแนบรูปให้พร้อมก่อนสร้างภาพ');
         return this._authorRef;
       }
       const ready = await prepareRefImage(asset.blob);
       this._authorRef = { name: 'author-photo.jpg', dataUrl: ready.dataUrl, bytes: ready.bytes, width: ready.width, height: ready.height };
       this.log('ok', `เตรียมรูปผู้เขียนสำหรับแนบแล้ว (${ready.width}×${ready.height}px · ${Math.round(ready.bytes / 1024)} KB)`);
     } catch (e) {
-      this.log('warn', `เตรียมรูปผู้เขียนไม่สำเร็จ (${e?.message || e}) — จะสร้างภาพโดยไม่มีรูปอ้างอิง`);
+      this.log('warn', `เตรียมรูปผู้เขียนไม่สำเร็จ (${e?.message || e}) — ต้องแนบรูปให้พร้อมก่อนสร้างภาพ`);
     }
     return this._authorRef;
   }
@@ -1695,6 +1843,7 @@ export class Machine {
     const short = recs
       .filter((r) => {
         const quota = quotaOf.get(r.id) || r.quota || 0;
+        if (r.shortReason && (this.book.pageMode || 'soft') !== 'strict') return false;
         return quota > 0 && (r.md || '').trim() && r.chars < quota * SHORT_RATIO;
       })
       // แย่ที่สุดก่อน เพราะเทิร์นมีจำกัด ต้องจ่ายไปกับตอนที่ได้คืนมากที่สุด
@@ -1715,7 +1864,7 @@ export class Machine {
       const before = rec.chars;
       let ok = false;
       try {
-        ok = await this.rewrite(rec, quota, 'ตอนนี้สั้นกว่าเป้ามาก เขียนใหม่ให้ได้ความยาวตามเป้าโดยเติมเนื้อหาจริง ไม่ใช่ขยายความเดิมให้ยืดออก');
+        ok = await this.rewrite(rec, quota, 'ตรวจโจทย์กับต้นฉบับก่อน เติมเฉพาะคำอธิบายหรือขั้นตอนที่ยังขาด ถ้าตอบครบแล้วให้คงเนื้อหาและบอกเหตุผลใน META.short_reason');
       } catch (e) {
         if (e instanceof RateLimited || e instanceof Halt) throw e;
         this.log('warn', `ขยายตอน ${rec.id} ไม่สำเร็จ (${e?.message || e})`);
@@ -1773,6 +1922,7 @@ export class Machine {
       md: ex.body,
       chars,
       status: 'edited',
+      shortReason: String(ex.meta?.short_reason || ''),
       history: [...(rec.history || []).slice(-19), { md: rec.md, chars: rec.chars, at: Date.now(), reason: 'ก่อน AI ปรับความยาว' }],
     });
     B.absorb(this.book.bible, rec.id, ex.meta);
@@ -2024,6 +2174,109 @@ export class Machine {
    * ขั้นนี้เป็นทางเลือก ไม่ใช่ทางหลัก เพราะคนส่วนใหญ่เขียนเนื้อหาด้วยบัญชีฟรี
    * ที่สร้างภาพไม่ได้ ถ้าสร้างไม่สำเร็จก็แค่ข้ามไป prompt ยังอยู่ครบให้เอาไปสร้างที่อื่น
    */
+  /**
+   * แผนกพิสูจน์คำสั่งภาพ — อ่านคำสั่งทุกฉบับก่อนส่งออกจริง
+   *
+   * คำสั่งภาพเป็นของที่ประกอบจากผลลัพธ์ของโมเดลหลายตัวต่อ ๆ กัน แล้วส่งตรงเข้าเครื่องมือ
+   * สร้างภาพโดยไม่มีใครอ่านทั้งฉบับสักครั้ง บั๊กที่เจอจริงจึงเป็นบั๊กที่มองเห็นได้ทันที
+   * ถ้ามีใครอ่าน เช่น สั่งวาดท่ายืนถือกระดาษในบรรทัดหนึ่งแล้วห้ามท่าเดียวกันในอีกบรรทัด
+   * หรือเขียนว่า "เปลี่ยนจาก ก เป็น ข" ซึ่งอ่านเป็นงานแก้ภาพที่ไม่มีไฟล์ต้นฉบับ
+   *
+   * เป็นเทิร์นข้อความล้วน ไม่กินโควตาภาพ และจำผลไว้ ถ้าคำสั่งชุดเดิมไม่เปลี่ยนก็ไม่ยิงซ้ำ
+   */
+  async auditImagePrompts(jobs) {
+    const sig = jobs.map((j) => `${j.name}:${j.prompt.length}`).join('|');
+    const apply = (fixes = {}) => {
+      let n = 0;
+      for (const j of jobs) {
+        const fixed = fixes[j.name];
+        if (fixed && fixed !== j.prompt) {
+          j.prompt = fixed;
+          n++;
+        }
+        // Keep the user-selected reference even when the auditor rewrites its heading.
+        if (wantsAuthorRef(this.book, j) || j.needsAuthorRef) {
+          j.needsAuthorRef = true;
+          if (!promptWantsAuthorRef(j.prompt)) j.prompt += AUTHOR_REF_RULE;
+        }
+      }
+      return n;
+    };
+
+    const cached = this.book.imagePromptAudit;
+    if (cached?.sig === sig) {
+      const n = apply(cached.fixes);
+      this.log('ok', `แผนกพิสูจน์คำสั่งภาพ: ใช้ผลตรวจเดิมของคำสั่งชุดนี้${n ? ` · แก้ ${n} ฉบับ` : ' · ไม่มีอะไรต้องแก้'}`);
+      return;
+    }
+
+    this.log('ok', `แผนกพิสูจน์คำสั่งภาพ: กำลังอ่านคำสั่งทั้ง ${jobs.length} ฉบับก่อนเริ่มวาด (เทิร์นข้อความ ไม่กินโควตาภาพ)`);
+
+    let parsed = null;
+    try {
+      const res = await this.turnWithRetry(P.imagePromptAuditPrompt(this.book, jobs, this.book.outline), {
+        label: 'พิสูจน์คำสั่งภาพ',
+        newThread: this.wantNewThread(true),
+      });
+      parsed = X.parseJson(res.text);
+    } catch (e) {
+      if (e instanceof RateLimited || e instanceof Halt) throw e;
+      this.log('warn', `แผนกพิสูจน์คำสั่งภาพ: ตรวจไม่สำเร็จ (${e?.message || e}) — ใช้คำสั่งเดิมไปก่อน`);
+      return;
+    }
+
+    const checks = Array.isArray(parsed?.checks) ? parsed.checks : null;
+    if (!checks) {
+      this.log('warn', 'แผนกพิสูจน์คำสั่งภาพ: อ่านคำตอบไม่ออก — ใช้คำสั่งเดิมไปก่อน');
+      return;
+    }
+
+    const fixes = {};
+    const findings = [];
+    for (const c of checks) {
+      const job = jobs.find((j) => j.name === c?.name);
+      if (!job) continue;
+      const issues = (Array.isArray(c.issues) ? c.issues : []).filter(Boolean);
+      const fixed = String(c.fixed_prompt || '').trim();
+
+      /**
+       * คำสั่งที่แก้แล้วต้องยาวพอจะเป็นคำสั่งจริง ไม่ใช่คำแนะนำสั้น ๆ
+       *
+       * ถ้าโมเดลตอบกลับมาเป็น "ควรตัดท่อนที่ขัดกันออก" แล้วเราเอาไปใช้แทนคำสั่งเต็ม
+       * เราจะส่งข้อความสามบรรทัดเข้าเครื่องมือสร้างภาพแทนบรีฟทั้งฉบับ
+       * ด่านที่ตั้งมาเพื่อกันของพัง จะกลายเป็นตัวทำพังเสียเอง
+       */
+      const usable = fixed && fixed.length >= 200 && fixed.length >= job.prompt.length * 0.3;
+      if (fixed && !usable) {
+        findings.push({ name: job.name, what: job.what, issues, rejected: true });
+        this.log(
+          'warn',
+          `แผนกพิสูจน์คำสั่งภาพ · ${job.what}: ส่งคำสั่งที่แก้แล้วมาสั้นผิดปกติ (${fixed.length} ตัวอักษร จากเดิม ${job.prompt.length}) — ไม่รับ ใช้ของเดิมแทน`,
+        );
+        continue;
+      }
+      if (usable) fixes[job.name] = fixed;
+      if (issues.length || usable) findings.push({ name: job.name, what: job.what, issues, fixed: !!usable });
+      if (issues.length) {
+        this.log(
+          usable ? 'ok' : 'warn',
+          `แผนกพิสูจน์คำสั่งภาพ · ${job.what}: ${issues.join(' · ')}${usable ? ' — แก้คำสั่งให้แล้ว' : ' — ไม่ได้แก้ ปล่อยผ่านไปก่อน'}`,
+        );
+      }
+    }
+
+    const n = apply(fixes);
+    this.book.imagePromptAudit = { sig, at: Date.now(), fixes, findings, notes: String(parsed.notes || '') };
+    await this.save();
+    if (parsed.notes) this.log('ok', `แผนกพิสูจน์คำสั่งภาพ · ข้อสังเกตรวม: ${parsed.notes}`);
+    this.log(
+      'ok',
+      n
+        ? `แผนกพิสูจน์คำสั่งภาพ: แก้คำสั่ง ${n} จาก ${jobs.length} ฉบับก่อนส่งออก`
+        : `แผนกพิสูจน์คำสั่งภาพ: คำสั่งทั้ง ${jobs.length} ฉบับผ่าน ไม่ต้องแก้`,
+    );
+  }
+
   async images() {
     // โปรเจกต์เก่าบางเล่มมี Prompt ปกก่อนระบบ GPT Art Director และยังคงเว้นพื้นที่โล่งแบบตายตัว
     // ห้ามใช้ Prompt เก่านั้นต่อใน Phase 2: ปรึกษา GPT ใหม่และล้างเฉพาะ asset ปกเก่า 1 ครั้ง
@@ -2049,10 +2302,12 @@ export class Machine {
     // งานเก่าบางเล่มเปิดโหมดสร้างภาพอัตโนมัติ แต่เคยถูกบันทึก illustrationLevel=none
     // จึงไม่มี figures เลยและ Phase 2 เห็นเพียงปกหน้า/หลัง ให้ย้ายงานแบบนี้ไปใช้ระดับ light
     // แล้วขอ GPT วางแผนภาพจากเนื้อหาที่เขียนจริงก่อนเข้าสายพานสร้างภาพ
-    if (this.book.figureMode === 'auto') {
+    // โหมด prompt ก็ต้องมีแผนเหมือนกัน ต่างกันแค่ใครเป็นคนวาด — ปุ่ม "วางแผนภาพใหม่"
+    // ล้างแผนทิ้งแล้วพามาที่นี่ ถ้าเงื่อนไขรับแต่โหมด auto ปุ่มนั้นจะเงียบไปเฉย ๆ ในโหมด prompt
+    if (this.book.figureMode === 'auto' || this.book.figureMode === 'prompt') {
       const havePlannedImages = (this.book.figures || []).some((f) => f.kind === 'image' && f.prompt && f.name);
       if (!havePlannedImages) {
-        if ((this.book.illustrationLevel || 'none') === 'none') {
+        if (this.book.figureMode === 'auto' && (this.book.illustrationLevel || 'none') === 'none') {
           this.book.illustrationLevel = 'light';
           this.log('ok', 'โหมดสร้างภาพอัตโนมัติถูกเลือกไว้ แต่ยังไม่มีแผนภาพประกอบ — ใช้ระดับพอดีและให้ GPT วางภาพจากเนื้อหาจริงก่อน');
         }
@@ -2101,9 +2356,10 @@ export class Machine {
     this.job.imageThreadStarted = false;
     await this.save();
 
+    // ด่านตรวจคำสั่งก่อนเสียโควตาภาพแม้แต่รูปเดียว
+    await this.auditImagePrompts(jobs);
+
     // ตัวทดสอบเครื่องมือสร้างภาพ ยิงครั้งเดียวต่อหนึ่งรอบงาน ไม่ใช่ต่อหนึ่งรูป
-    let probed = false;
-    let probeOk = null;
     for (let index = 0; index < jobs.length; index++) {
       const j = jobs[index];
       this.emit({ type: 'image.progress', stage: 'check', current: index + 1, total: jobs.length, name: j.name, what: j.what });
@@ -2209,7 +2465,24 @@ export class Machine {
          * ตัดสินใจที่เดียวตรงนี้ แล้วทั้งโหมด API และโหมดหน้าเว็บใช้คำตอบเดียวกัน
          * ไม่งั้นผู้ใช้จะได้ผลไม่เหมือนกันเพียงเพราะสลับโหมด ทั้งที่ตั้งค่าไว้อย่างเดียวกัน
          */
-        const ref = j.needsAuthorRef ? await this.authorRef() : null;
+        const needsRef = wantsAuthorRef(this.book, j) || j.needsAuthorRef || promptWantsAuthorRef(j.prompt);
+        const ref = needsRef ? await this.authorRef() : null;
+        if (needsRef && !ref?.dataUrl) throw new Halt('หยุดสร้างภาพ: ไม่พบรูปผู้เขียนที่เลือกไว้ กรุณาแนบรูปใน Studio แล้วเริ่มต่อ');
+        if (ref) this.log('ok', `ภาพ ${j.name} · แนบรูปผู้เขียน ${ref.name} (${ref.width}×${ref.height}px)`);
+        /**
+         * รูปผู้เขียนที่เราแนบไปเองต้องไม่มีวันถูกนับเป็นผลงานที่ ChatGPT วาด
+         *
+         * ด่านแรกคือฝั่งอ่านหน้าเว็บ (ไม่คว้ารูปที่อยู่ในข้อความของเราเอง) แต่ด่านเดียวไม่พอ
+         * เพราะถ้าพลาด ผลลัพธ์คือเล่มที่หน้าปกเป็นรูปถ่ายผู้เขียนเต็มหน้า ซึ่งผู้ใช้จะรู้ตัว
+         * ก็ต่อเมื่อเปิดไฟล์ที่ส่งออกแล้ว จับลายนิ้วมือรูปแนบไว้ตรงนี้ด้วย
+         * ตัวกันภาพซ้ำที่มีอยู่แล้วจะปฏิเสธให้เองแล้วสั่งวาดใหม่
+         */
+        if (ref?.dataUrl) {
+          // ต้องสร้างถังก่อน ไม่ใช่ ?.add เฉย ๆ — ถังนี้เกิดหลังบันทึกภาพแรกสำเร็จ
+          // ซึ่งแปลว่าตัวกันจะเงียบพอดีในรอบของรูปปก อันเป็นรูปที่โดนปัญหานี้จริง
+          this.usedImageKeys ||= new Set();
+          this.usedImageKeys.add(imageFingerprint(ref.dataUrl));
+        }
 
         /**
          * ทางที่ 1: เรียก Images API ตรง ๆ
@@ -2311,6 +2584,12 @@ export class Machine {
           continue;
         }
 
+        if (isNoCostFailure(res) || res.meta?.error === 'previous_turn_running') {
+          lastError = res.meta?.detail || res.meta?.error || 'prompt_not_sent';
+          this.log('warn', `ภาพ ${j.what}: ยังส่งคำสั่งไม่สำเร็จ (${lastError}) — หยุดก่อนดึงภาพจากคำตอบเก่า`);
+          break;
+        }
+
         let url = res.images?.[0];
 
         /**
@@ -2353,7 +2632,8 @@ export class Machine {
           const said = String(res.text || '').replace(/\s+/g, ' ').trim();
           // เทิร์นที่ล้มก่อนได้ส่ง Prompt (เช่นเปิดห้องแชตใหม่ไม่สำเร็จ) ไม่มีทั้งภาพและข้อความ
           // ถ้าไม่ยกเหตุผลจาก meta ขึ้นมา ผู้ใช้จะเห็นแค่ "ตรวจไม่พบภาพใด ๆ" ซึ่งชี้ผิดจุด
-          const turnFailure = res.status !== 'ok' ? res.meta?.detail || res.meta?.error || res.status : '';
+          const turnFailure = res.status !== 'ok' && !res.meta?.imageCapture
+            ? res.meta?.detail || res.meta?.error || res.status : '';
           // ตอบเป็นข้อความขอไฟล์ต้นฉบับ = ตีความผิดว่าเป็นงานแก้ภาพ ต้องบอกให้ตรงอาการ
           // ไม่ใช่แค่ "ตอบเป็นข้อความ" ซึ่งอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
           const askedForSource = /อัปโหลด|อัพโหลด|ต้นฉบับ|แนบ(ไฟล์|ภาพ|รูป)|upload|attach|reference image|source image|original image/i.test(said);
@@ -2367,8 +2647,33 @@ export class Machine {
           const gptSideFailure =
             res.meta?.imageCapture?.reason === 'generation_failed' ||
             /something went wrong while generating your image|error generating image/i.test(said);
+          /**
+           * ChatGPT ขึ้นกล่องผิดพลาดของตัวเองพร้อมปุ่ม Retry
+           *
+           * อาการนี้เกิดที่ฝั่งเซิร์ฟเวอร์ของ ChatGPT ล้วน ๆ คำสั่งของเราถูกส่งไปแล้วเรียบร้อย
+           * เดิมข้อความนี้ถูกกลืนไปอยู่ในสาย turnFailure แล้วรายงานว่า
+           * "เทิร์นสร้างภาพไม่ได้เริ่ม" ซึ่งชี้ผิดจุดจนพาไปไล่แก้ถ้อยคำใน prompt ครั้งแล้วครั้งเล่า
+           * ทั้งที่สิ่งที่ต้องทำคือกด Retry หรือเปิดห้องใหม่
+           */
+          const retryBoxShown = res.meta?.imageCapture?.reason === 'error';
+          /**
+           * "รอแล้วไม่มีอะไรมา" มีสามแบบ และแยกไม่ออกคือแยกไม่ถูกว่าต้องแก้อะไร
+           *
+           * pollForImage แยกไว้ครบแล้วว่าเป็น no_response (ส่งไปแล้วเงียบสนิท)
+           * no_image (ตอบจบแล้วแต่ไม่มีภาพ) หรือ timeout (พ่นยาวจนหมดเวลา)
+           * แต่ชั้นบนยุบทั้งสามแบบเป็น status 'ok' เพราะเทิร์นไม่ได้ error
+           * turnFailure จึงว่างเปล่า แล้วทุกอย่างไปตกที่ 'ตรวจไม่พบภาพใด ๆ ในคำตอบ'
+           * ซึ่งเป็นข้อความที่โค้ดบรรทัดบนบอกเองว่าใช้แก้อะไรไม่ได้
+           */
+          const stalled = {
+            no_response: 'ส่งคำสั่งไปแล้ว ChatGPT ไม่ตอบอะไรเลยจนหมดเวลารอ — มักแปลว่าห้องแชตนั้นไม่ตอบสนองแล้ว',
+            no_image: 'ChatGPT ตอบจบแล้วแต่ไม่มีภาพในคำตอบ และไม่ได้พูดอะไรด้วย',
+            timeout: 'ChatGPT ทำงานค้างยาวจนหมดเวลารอ โดยยังไม่ได้ภาพออกมา',
+          }[res.meta?.imageCapture?.reason] || '';
           lastError = gptSideFailure
-            ? 'ChatGPT แจ้งว่าเครื่องมือสร้างภาพของตัวเองล้มเหลว (ไม่ใช่ปัญหาคำสั่งของเรา) — ถ้าเจอซ้ำหลายรูป มักแปลว่าบัญชีชนลิมิตการสร้างภาพแล้ว'
+            ? 'ChatGPT แจ้งว่าเครื่องมือสร้างภาพล้มเหลว — ยังไม่มีหลักฐานว่าเกิดจากโควตา คำสั่ง หรือบริการขัดข้อง'
+            : retryBoxShown
+            ? 'ChatGPT ขึ้นข้อผิดพลาดของตัวเอง (Something went wrong · ปุ่ม Retry) แทนที่จะสร้างภาพ — เป็นปัญหาฝั่ง ChatGPT ไม่ใช่คำสั่งของเรา กด Retry ในแท็บนั้นหนึ่งครั้ง หรือปล่อยให้ระบบเปิดห้องใหม่'
             : turnFailure
             ? `เทิร์นสร้างภาพไม่ได้เริ่ม: ${turnFailure}`
             : captureError && sawImages
@@ -2379,9 +2684,11 @@ export class Machine {
               ? `ChatGPT ตีความว่าเป็นงานแก้ภาพเดิมแล้วขอไฟล์ต้นฉบับแทนที่จะวาดใหม่ — จะย้ำคำสั่งแล้วลองใหม่ในห้องแชตใหม่ (“${said.slice(0, 160)}”)`
               : said
                 ? `ChatGPT ตอบเป็นข้อความแทนภาพ: “${said.slice(0, 220)}”`
-                : seen.length
-                  ? `ตรวจไม่พบภาพที่สร้างใหม่ · ภาพที่เห็นในคำตอบ: ${seen.join(" | ")}`
-                  : 'ตรวจไม่พบภาพใด ๆ ในคำตอบ';
+                : stalled
+                  ? stalled + (seen.length ? ` · ภาพที่เห็นในคำตอบ: ${seen.join(' | ')}` : '')
+                  : seen.length
+                    ? `ตรวจไม่พบภาพที่สร้างใหม่ · ภาพที่เห็นในคำตอบ: ${seen.join(" | ")}`
+                    : 'ตรวจไม่พบภาพใด ๆ ในคำตอบ';
           this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ${lastError}`);
           continue;
         }
@@ -2428,7 +2735,7 @@ export class Machine {
           const candidate = {
             blob: normalized.blob,
             meta: {
-              from: 'chatgpt',
+              from: res.meta?.via === 'api' ? 'api' : 'chatgpt',
               phase: 2,
               kind: j.kind || null,
               artworkOnly: j.kind === 'cover' && !(j.name === 'cover-front.png' && P.coverTextBaked(this.book)),
@@ -2488,43 +2795,16 @@ export class Machine {
 
       if (!saved) {
         /**
-         * รูปแรกพังทั้งสองครั้ง = ต้องรู้ให้ได้ว่าปัญหาอยู่ฝั่งไหนก่อนไปต่อ
+         * เคยยิงคำสั่ง "วาดรูปแมวสีส้ม" ในห้องใหม่ตรงนี้ เพื่อตัดสินว่าปัญหาอยู่ที่คำสั่งของเรา
+         * หรือที่บัญชี ChatGPT — ถอดออกแล้วเพราะราคาไม่คุ้มกับสิ่งที่ได้
          *
-         * ที่ผ่านมาระบบเดาจากคำอธิบายที่ ChatGPT พิมพ์กลับมา ซึ่งเป็นการ "เล่าเหตุผล"
-         * ของโมเดลเอง ไม่ใช่หลักฐาน แล้วก็พาไปไล่แก้ถ้อยคำใน prompt ครั้งแล้วครั้งเล่า
-         * ยิงคำสั่งบรรทัดเดียวที่ไม่มีศัพท์เทคนิคเลยหนึ่งครั้ง ตัดสินได้ทันทีว่า
-         * เป็นเรื่องคำสั่งของเรา หรือเป็นเรื่องโมเดลในแท็บนั้นสร้างภาพไม่ได้
+         * มันเผาโควตาสร้างภาพเต็ม ๆ หนึ่งรูปทุกครั้งที่รูปแรกพลาด เพื่อตอบคำถามที่
+         * ในทางปฏิบัติตอบว่า "บัญชีปกติ" แทบทุกครั้ง ส่วนสาเหตุจริงที่เจอซ้ำ ๆ
+         * เป็นเรื่องฝั่งเราทั้งหมด (ส่ง Prompt ซ้ำสองรอบ, กดปุ่มหยุดใส่งานตัวเอง,
+         * เลิกรอก่อนภาพมาถึง) ซึ่งการยิงแมวไม่เคยช่วยให้เห็นสักข้อ
+         *
+         * ถ้าจะกลับมาทำใหม่ ต้องจำผลไว้ข้ามการรัน ไม่ใช่ยิงซ้ำทุกเล่มทุกครั้ง
          */
-        if (!probed && !useApi) {
-          probed = true;
-          try {
-            this.log('warn', 'ทดสอบเครื่องมือสร้างภาพด้วยคำสั่งบรรทัดเดียว เพื่อดูว่าปัญหาอยู่ที่คำสั่งของเราหรือที่บัญชี ChatGPT');
-            const probe = await this.turn(P.IMAGE_PROBE_PROMPT, {
-              label: 'ทดสอบว่าบัญชีนี้สร้างภาพได้ไหม',
-              wantImages: true,
-              newThread: true,
-            });
-            probeOk = !!(probe.images?.[0] || probe.imageDataUrl);
-            // ห้ามสรุปว่า "บัญชีสร้างภาพไม่ได้" จากตัวตรวจจับตัวเดียว
-            // ถ้ากล่าวหาผิด ผู้ใช้จะไปนั่งสลับโมเดลทั้งที่ปัญหาอยู่ที่การอ่านหน้าเว็บของเรา
-            if (!probeOk) {
-              const rescued = await this.grabRenderedImage(index, jobs.length, j, { tries: 3, gapMs: 4000 });
-              probeOk = !!rescued?.dataUrl;
-            }
-            this.log(
-              probeOk ? 'ok' : 'warn',
-              probeOk
-                ? 'บัญชีนี้สร้างภาพได้ปกติ — ปัญหาอยู่ที่คำสั่งภาพของเล่มนี้ ไม่ใช่ที่บัญชี'
-                : `บัญชี/โมเดลในแท็บ ChatGPT นี้สร้างภาพไม่ได้ — คำสั่งง่ายที่สุดยังไม่ได้ภาพกลับมา (ตอบว่า “${String(probe.text || '').replace(/\s+/g, ' ').trim().slice(0, 160)}”)`,
-            );
-          } catch (e) {
-            if (e instanceof RateLimited || e instanceof Halt) throw e;
-            this.log('warn', `ทดสอบเครื่องมือสร้างภาพไม่สำเร็จ (${e?.message || e})`);
-          }
-        }
-        if (probed && probeOk === false) {
-          lastError = `${lastError || 'สร้างภาพไม่สำเร็จ'} · ทดสอบแล้ว: บัญชี/โมเดลในแท็บ ChatGPT นี้สร้างภาพไม่ได้เลย แม้แต่คำสั่งง่ายที่สุด — ต้องสลับโมเดลที่สร้างภาพได้ หรือใช้ “คัดลอก Prompt” ไปสร้างที่อื่นแล้วอัปโหลด`;
-        }
 
         genErrors.set(j.name, lastError || '');
 
@@ -2601,6 +2881,69 @@ export class Machine {
       }
     }
 
+    /**
+     * รอบสองของแผนกพิสูจน์คำสั่งภาพ — ตรวจ "ผลงาน" ก่อนประกอบเล่ม
+     *
+     * Final Check เดิมตอบได้แค่ว่าไฟล์เปิดได้ไหมและขนาดตรงช่องไหม ซึ่งไม่พอ
+     * ไฟล์ที่เปิดได้และขนาดตรงเป๊ะ อาจเป็นรูปถ่ายผู้เขียนที่เราแนบไปเอง
+     * หรือเป็นไฟล์เดียวกับภาพช่องอื่นที่ถูกคว้ามาซ้ำ ทั้งสองแบบผ่านด่านเดิมสบาย
+     * แล้วไปโผล่ในเล่มจริงโดยไม่มีอะไรร้องสักเสียง
+     *
+     * ตรวจด้วยไบต์จริง ไม่ใช้สายตา จึงไม่กินโควตาและไม่มีทางตัดสินผิดเพราะ "ดูคล้าย"
+     */
+    const bytesKey = async (blob) => {
+      if (!blob?.size) return '';
+      const b = new Uint8Array(await blob.arrayBuffer());
+      const head = [...b.slice(0, 48)].join(',');
+      const tail = [...b.slice(-48)].join(',');
+      return `${b.length}|${head}|${tail}`;
+    };
+
+    let refKey = '';
+    try {
+      const ref = await this.authorRef();
+      if (ref?.dataUrl) refKey = await bytesKey(await db.dataUrlToBlob(ref.dataUrl));
+    } catch (_) {
+      /* ไม่มีรูปผู้เขียนก็ไม่ต้องเทียบ */
+    }
+
+    const seenKeys = new Map();
+    for (const j of jobs) {
+      if (invalid.some((x) => x.name === j.name)) continue;
+      const asset = await db.loadAsset(this.book.id, j.name);
+      let key = '';
+      try {
+        key = await bytesKey(asset?.blob);
+      } catch (_) {
+        continue;
+      }
+      if (!key) continue;
+
+      if (refKey && key === refKey) {
+        invalid.push({
+          name: j.name,
+          what: j.what,
+          reason: 'ไฟล์นี้คือรูปผู้เขียนที่ระบบแนบไปกับคำสั่ง ไม่ใช่ภาพที่ ChatGPT วาด — ตัวคว้าภาพหยิบไฟล์แนบของเราเองมา',
+        });
+        await db.deleteAsset(this.book.id, j.name);
+        this.log('warn', `Final Check · ${j.what}: เป็นรูปผู้เขียนที่แนบไปเอง ไม่ใช่ภาพที่วาดมา — ทิ้งแล้วต้องสร้างใหม่`);
+        continue;
+      }
+
+      const twin = seenKeys.get(key);
+      if (twin) {
+        invalid.push({
+          name: j.name,
+          what: j.what,
+          reason: `ไฟล์เดียวกับ ${twin} ทุกไบต์ — คว้าภาพของช่องอื่นมาซ้ำ ไม่ใช่ภาพของช่องนี้`,
+        });
+        await db.deleteAsset(this.book.id, j.name);
+        this.log('warn', `Final Check · ${j.what}: เป็นไฟล์เดียวกับ ${twin} — ทิ้งแล้วต้องสร้างใหม่`);
+        continue;
+      }
+      seenKeys.set(key, j.name);
+    }
+
     if (invalid.length) {
       const remaining = invalid.map((x) => x.name);
       this.book.imagePhase = {
@@ -2651,7 +2994,7 @@ export class Machine {
       completedAt: Date.now(),
     };
     this.log(
-      before === physical ? 'ok' : 'warn',
+      'ok',
       `Phase 2 ครบ ${jobs.length} รูป · Final Check ผ่าน · ประกอบภาพลงตำแหน่งเดิมแล้ว · จำนวนหน้า ${physical}${before ? ` (ก่อนใส่ภาพ ${before}, ต่าง ${physical - before >= 0 ? '+' : ''}${physical - before})` : ''}`,
     );
     await this.save();
@@ -2878,6 +3221,55 @@ function describeFigurePlacement(book, f) {
   parts.push(section ? `ตอน ${sectionId} “${section.title}”` : `ตอน ${sectionId}`);
   parts.push(`${PLACEMENT_LABEL[f.placement] || 'กลางตอน'}${nth && nth !== '1' ? ` · ภาพที่ ${nth} ของตอนนี้` : ''}`);
   return parts.join(' › ');
+}
+
+/**
+ * ล้างแผนภาพในเล่มทิ้งทั้งชุด เพื่อให้ figures() วางแผนใหม่ได้อย่างสะอาด
+ *
+ * ต้องล้างเนื้อหาด้วย ไม่ใช่ล้างแค่ book.figures — เพราะ figures() ไม่ได้เก็บแผนไว้เฉย ๆ
+ * มันแทรก ![](fig:...) และกล่อง :::box ลงในต้นฉบับของแต่ละตอนตั้งแต่ตอนวางแผน
+ * ถ้าล้างแต่รายการแล้วสั่งวางแผนใหม่ ตอนหนึ่งจะมี marker สองชุดซ้อนกัน
+ * ผลในเล่มจริงคือภาพซ้ำสองรูปและกล่องสรุปซ้ำสองกล่องติดกันทุกตอน
+ *
+ * marker ทั้งสองแบบมีที่มาจากที่นี่ที่เดียว (machine.figures) ไม่มีทางอื่นที่เขียนมันลงต้นฉบับ
+ * การกวาดออกทั้งหมดจึงปลอดภัย ไม่ไปโดนอะไรที่คนเขียนตั้งใจใส่เอง
+ */
+export async function clearFigurePlan(book) {
+  const FIG_LINE = /^!\[[^\]]*\]\(fig:[A-Za-z0-9._-]+(?:\s+\d{1,3}%)?(?:\s+\d+(?:\.\d+)?mm)?\)[ 	]*$/gm;
+  const BOX_BLOCK = /^:::box[^\n]*\n(?:[^\n]*\n)*?:::[ \t]*$/gm;
+
+  const removed = { images: 0, boxes: 0, sections: 0, assets: 0 };
+
+  for (const f of book.figures || []) {
+    if (f.kind === 'image' && f.name) {
+      removed.images++;
+      try {
+        // เช็คก่อนลบ เพราะ deleteAsset ไม่บ่นเมื่อไม่มีไฟล์ ถ้านับดื้อ ๆ ตัวเลขที่รายงาน
+        // จะกลายเป็น "ลบไฟล์ภาพ 7 ไฟล์" ทั้งที่แผนนั้นยังไม่เคยถูกสร้างเป็นภาพจริงสักรูป
+        if (await db.loadAsset(book.id, f.name)) {
+          await db.deleteAsset(book.id, f.name);
+          removed.assets++;
+        }
+      } catch (_) {
+        /* ลบไม่ได้ก็ไม่ต้องล้มทั้งงาน ไฟล์ที่ค้างจะถูกทับตอนสร้างภาพรอบใหม่อยู่ดี */
+      }
+    } else if (f.kind === 'box') removed.boxes++;
+  }
+
+  const ids = (book.outline?.chapters || []).flatMap((c) => (c.sections || []).map((s) => s.id));
+  for (const id of ids) {
+    const rec = await db.loadSection(book.id, id);
+    if (!rec?.md) continue;
+    const md = rec.md.replace(BOX_BLOCK, '').replace(FIG_LINE, '').replace(/\n{3,}/g, '\n\n').trim();
+    if (md === rec.md) continue;
+    rec.md = md;
+    rec.chars = countUnits(md, book.language);
+    await db.saveSection(book.id, rec);
+    removed.sections++;
+  }
+
+  book.figures = [];
+  return removed;
 }
 
 export function plannedImageJobs(book) {

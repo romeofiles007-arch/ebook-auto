@@ -7,6 +7,7 @@ import { planItems } from './items.js';
 import { ZWSP } from './thai.js';
 import { findUndrawable } from './glyphs.js';
 import { authorRefSummary } from './imageRef.js';
+import { referenceProblem, referenceLines } from './references.js';
 
 const KDP_MIN_PAGES = 24;
 
@@ -223,12 +224,12 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
    * ผู้ใช้ที่ติ๊กไว้จึงเปิดเล่มที่เสร็จแล้วมาหาไม่เจอ โดยไม่มีอะไรบอกว่าทำไม
    */
   if ((book.backMatter || []).includes('glossary')) {
-    const defined = (book.bible?.glossary || []).filter((g) => String(g?.def || '').trim()).length;
+    const defined = (book.bible?.glossary || []).filter((g) => String(g?.term || '').trim() && String(g?.def || '').trim()).length;
     const bare = (book.bible?.glossary || []).length - defined;
     if (defined)
       ok('glossary', `หน้าอภิธานศัพท์มีศัพท์พร้อมนิยาม ${defined} คำ`);
     else
-      warn(
+      fail(
         'glossary',
         'เลือกใส่หน้าอภิธานศัพท์ แต่ยังไม่มีศัพท์ที่มีนิยาม',
         bare
@@ -238,13 +239,14 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
   }
 
   if ((book.backMatter || []).includes('references')) {
-    const n = (book.references || []).length + (book.trendSeed?.sources || []).length;
-    if (n) ok('references', `หน้าบรรณานุกรมมี ${n} รายการ`);
+    const problem = referenceProblem(book);
+    const n = referenceLines(book).length;
+    if (!problem) ok('references', `หน้าบรรณานุกรมมี ${n} รายการที่เลือกและจัดรูปแบบแล้ว`);
     else
-      warn(
+      fail(
         'references',
-        'เลือกใส่หน้าบรรณานุกรม แต่ยังไม่มีรายการ',
-        'ระบบไม่แต่งแหล่งอ้างอิงเอง เพราะจะได้ลิงก์และปีที่ไม่มีอยู่จริง — พิมพ์เองในหน้าตั้งค่า หรือเอาหน้านี้ออก',
+        problem,
+        'ค้นแหล่งจริง เปิดต้นทางแล้วเลือกรายการในส่วนบรรณานุกรมก่อนส่งออก',
       );
   }
 
