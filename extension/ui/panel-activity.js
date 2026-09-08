@@ -99,10 +99,12 @@ const stillFrames = window.matchMedia?.('(prefers-reduced-motion: reduce)');
  * ถ้าเหตุการณ์เข้ามารัวหรือเพิ่งเปิดหน้ามา ระยะห่างจากท้ายจะไกลมาก
  * การไถลไปเรื่อย ๆ จะดูเหมือนค้าง กรณีนั้นกระโดดไปท้ายทันทีแล้วค่อยนุ่มในบรรทัดถัด ๆ ไป
  */
-function stickToBottom(log) {
+function stickToBottom(log, { instant = false } = {}) {
   if (!follow) return;
   const behind = log.scrollHeight - log.scrollTop - log.clientHeight;
-  const smooth = behind < log.clientHeight * 2 && !stillFrames?.matches;
+  // การเปลี่ยนขนาดกล่องไม่ใช่ "บรรทัดใหม่มา" จึงไม่ต้องไถล และการไถลระหว่างที่ layout
+  // เพิ่งเปลี่ยนจะถูกตัดกลางคันจนค้างไม่ถึงท้าย (เห็นตอนย่อจากเต็มจอแล้วห่างท้าย 400px)
+  const smooth = !instant && behind < log.clientHeight * 2 && !stillFrames?.matches;
   log.scrollTo({ top: log.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 $('logFollow').onclick = () => {
@@ -111,9 +113,29 @@ $('logFollow').onclick = () => {
   $('logFollow').textContent = follow ? 'ตามล่าสุด' : 'หยุดเลื่อน';
   if (follow) stickToBottom($('panelLog'));
 };
+/**
+ * ขยายบันทึกให้เต็มแผง — กล่องสูง 300px อ่านย้อนหลังไม่ไหวเมื่อมีของ 200 รายการ
+ * ปิดด้วยปุ่มเดิมหรือ Esc และเมื่อขยาย/ย่อ ต้องเกาะท้ายให้เหมือนเดิม
+ * เพราะความสูงที่เปลี่ยนทำให้ตำแหน่งท้ายสุดย้าย
+ */
+function setLogFull(on) {
+  const term = document.querySelector('.terminal');
+  term.classList.toggle('expanded', on);
+  document.body.classList.toggle('logFull', on);
+  const btn = $('logExpand');
+  btn.setAttribute('aria-pressed', String(on));
+  btn.textContent = on ? '⤡ ย่อลง' : '⤢ เต็มจอ';
+  // รอให้เบราว์เซอร์คำนวณ layout ใหม่เสร็จก่อน ไม่งั้นค่าความสูงที่อ่านได้ยังเป็นของขนาดเดิม
+  requestAnimationFrame(() => stickToBottom($('panelLog'), { instant: true }));
+}
+$('logExpand').onclick = () => setLogFull(!document.querySelector('.terminal').classList.contains('expanded'));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.querySelector('.terminal').classList.contains('expanded')) setLogFull(false);
+});
+
 // ย่อ/ขยาย Side Panel แล้วความสูงกล่องเปลี่ยน ตำแหน่งท้ายสุดก็เลื่อนตาม
 // ถ้าไม่ตามให้ ปุ่มจะบอกว่า "ตามล่าสุด" ทั้งที่บรรทัดล่าสุดหลุดจอไปแล้ว
-new ResizeObserver(() => stickToBottom($('panelLog'))).observe($('panelLog'));
+new ResizeObserver(() => stickToBottom($('panelLog'), { instant: true })).observe($('panelLog'));
 chrome.runtime.onMessage.addListener((m) => { if (m.type === 'ui.activity') accept(m.event); });
 chrome.runtime.sendMessage({ type: 'ui.activitySnapshot' }).then((snapshot) => {
   const receivedLive = lastAt > 0;

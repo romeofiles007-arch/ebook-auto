@@ -103,10 +103,27 @@ let activitySerial = 0;
 let lastProgressLog = '';
 let lastProgressLogAt = 0;
 const activitySession = crypto.randomUUID();
+/**
+ * ข้อความเดิมเป๊ะ ๆ ที่ยิงซ้ำติด ๆ กัน ไม่ได้บอกอะไรใหม่ — และมันกลบของจริงจนหมด
+ *
+ * status() ประกาศลง log ทุกครั้งที่ถูกเรียก ส่วนตัวรับความคืบหน้าจากหน้า ChatGPT
+ * เรียก status() ทุกครั้งที่ adapter รายงาน ซึ่งคือทุกวินาทีระหว่างรอคำตอบ
+ * ผลคือ "กำลังรอ ChatGPT ตอบ" บรรทัดเดียวกันถูกเขียนวินาทีละครั้งจนเต็มกอง 200 รายการ
+ * แล้วประวัติที่มีประโยชน์ก่อนหน้านั้นถูกดันหลุดออกไปหมด
+ *
+ * ความมีชีวิตของงานมีตัวบอกอยู่แล้วที่บรรทัด "ข้อมูลล่าสุด N วินาทีที่แล้ว" ใน Side Panel
+ * บันทึกนี้จึงควรเก็บเฉพาะ "สิ่งที่เปลี่ยน" ไม่ใช่ชีพจร
+ */
+const REPEAT_WINDOW_MS = 20000;
+let lastPublished = { message: '', at: 0 };
 function publishActivity(message, level = 'info', crew = null) {
+  const text = String(message || '').slice(0, 1600);
+  // เหตุการณ์ที่พาสถานะทีมงานมาด้วยต้องผ่านเสมอ เพราะมันอัปเดตรูปคนทำงานบนแผง ไม่ใช่แค่ข้อความ
+  if (!crew && text === lastPublished.message && Date.now() - lastPublished.at < REPEAT_WINDOW_MS) return;
+  lastPublished = { message: text, at: Date.now() };
   chrome.runtime.sendMessage({ type: 'ui.activity', event: {
     id: `${activitySession}:${++activitySerial}`, at: Date.now(),
-    message: String(message || '').slice(0, 1600), level,
+    message: text, level,
     bookTitle: book?.title || '', ...(crew ? { crew } : {}),
   } }).catch(() => {});
 }
