@@ -11,25 +11,51 @@ crewIds.forEach((id, i) => {
   item.title = names[i]; item.setAttribute('aria-label', names[i]); item.dataset.crew = id;
   $('crewRoster').append(item);
 });
+/** สถานะทีมงานล่าสุดที่แผงนี้รู้ ใช้คู่กับเวลาที่มีความเคลื่อนไหวจริงเพื่อตัดสินว่าจะขยับไหม */
+let crewState = null;
+
+/**
+ * หุ่นขยับตาม "ยังมีความเคลื่อนไหวจริงไหม" ไม่ใช่ตามธงที่อัปเดตเฉพาะตอนเปลี่ยนขั้น
+ *
+ * ธง working ถูกส่งมาพร้อมเหตุการณ์ของทีมงาน ซึ่งเกิดตอนเปลี่ยนขั้นเท่านั้น
+ * ขั้นเขียนหนึ่งขั้นกินเวลาหลายนาที ระหว่างนั้นไม่มีเหตุการณ์ทีมงานเลยสักครั้ง
+ * ถ้าแผงถูกเปิดใหม่กลางทาง (Side Panel สร้างตัวเองใหม่ทุกครั้งที่ปิด/เปิด)
+ * มันจะกู้สถานะจาก snapshot ที่อาจค้างเป็น "ไม่ได้ทำงาน" แล้วหุ่นก็นิ่งทั้งที่งานเดินอยู่
+ *
+ * ความเคลื่อนไหวจริงวัดได้จากเหตุการณ์ที่ไหลเข้ามา — ตอนรอ ChatGPT มีรายงานทุกห้าวินาที
+ * ส่วนตอนที่ระบบรอคนกด เหตุการณ์จะหยุดเอง หุ่นก็หยุดเองโดยไม่ต้องมีใครสั่ง
+ */
+const MOTION_WINDOW_MS = 20000;
+
+function paintCrewMotion() {
+  if (!crewState) return;
+  const live = crewState.working !== false && Date.now() - lastAt < MOTION_WINDOW_MS;
+  $('panelCrew').classList.toggle('working', live);
+  $('panelCrew').querySelector('strong').textContent = `${live ? 'กำลังทำงาน · ' : ''}${crewState.name}`;
+  $('crewRoster').querySelectorAll('[data-crew]').forEach((item) => {
+    item.classList.toggle('working', item.dataset.crew === crewState.id && live);
+  });
+}
+
 function showCrew(crew) {
   if (!crew || !crewIds.includes(crew.id)) return;
+  crewState = crew;
   const el = $('panelCrew');
-  el.classList.toggle('working', !!crew.working);
   el.querySelectorAll('.crew-strip').forEach((img) => {
     const src = crewSource(crew.id);
     if (img.getAttribute('src') !== src) img.src = src;
   });
-  el.querySelector('strong').textContent = `${crew.working ? 'กำลังทำงาน · ' : ''}${crew.name}`;
   el.querySelector('.crew-description span').textContent = crew.detail;
   $('crewRoster').querySelectorAll('[data-crew]').forEach((item) => {
     item.classList.toggle('current', item.dataset.crew === crew.id);
-    item.classList.toggle('working', item.dataset.crew === crew.id && !!crew.working);
   });
+  paintCrewMotion();
 }
 function accept(event) {
   if (!event?.id) return;
   lastAt = Math.max(lastAt, event.at || 0);
   if (event.crew) showCrew(event.crew);
+  else paintCrewMotion(); // เหตุการณ์อื่นก็เป็นหลักฐานว่ายังเดินอยู่
   if (!event.message) return;
   events.set(event.id, event);
   const sorted = [...events.values()].sort((a, b) => a.at - b.at).slice(-200);
@@ -146,5 +172,6 @@ chrome.runtime.sendMessage({ type: 'ui.activitySnapshot' }).then((snapshot) => {
   lastAt = Math.max(lastAt, snapshot?.at || 0);
 }).catch(() => { $('logUpdated').textContent = 'ยังอ่านประวัติไม่ได้ · รอ Studio ส่งสถานะใหม่'; });
 setInterval(() => {
+  paintCrewMotion();
   if (lastAt) $('logUpdated').textContent = `ข้อมูลล่าสุด ${Math.max(0, Math.floor((Date.now() - lastAt) / 1000))} วินาทีที่แล้ว · เก็บล่าสุด 200 รายการ`;
 }, 1000);
