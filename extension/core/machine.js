@@ -23,8 +23,10 @@ import {
   widenBands,
 } from './budget.js';
 import * as I from './items.js';
+import { duplicateItems, reviewGroups, itemReviewPrompt, reviewIssues } from './item-quality.js';
 import { compileBook, calibrate } from '../typeset/compiler.js';
 import { jitter, sleep } from '../transport/index.js';
+import { turnDelay } from './production-mode.js';
 import { generateImage, DEFAULT_IMAGE_MODEL } from './imageApi.js';
 import { wantsAuthorRef, promptWantsAuthorRef, prepareRefImage, dataUrlToFile, AUTHOR_REF_RULE } from './imageRef.js';
 
@@ -198,7 +200,7 @@ export class Machine {
      */
     const activeKind = opts.wantImages ? this.imgTr.kind : this.tr.kind;
     const noPacingNeeded = activeKind === 'fake' || activeKind === 'openai_api';
-    const [lo, hi] = this.book.transport?.delayMs || [4000, 9000];
+    const [lo, hi] = turnDelay(this.book, opts.wantImages);
     if (this.turnNo > 0 && !noPacingNeeded) await sleep(jitter([lo, hi]));
 
     const n = ++this.turnNo;
@@ -561,6 +563,8 @@ export class Machine {
     });
     const parsed = X.parseJson(res.text);
     if (!parsed?.themes?.length) throw new Halt('วางโครงหมวดไม่สำเร็จ ลองใหม่อีกครั้ง');
+    if (parsed.themes.length > plan.total || parsed.themes.some(t=>!String(t.title || '').trim())) throw new Halt('โครงหมวดรายชิ้นไม่ครบหรือมีหมวดมากกว่าจำนวนชิ้น กรุณาลองใหม่');
+    parsed.themes = parsed.themes.map((theme,i)=>({...theme,n:i+1,count:Math.floor(plan.total/parsed.themes.length)+(i<plan.total%parsed.themes.length?1:0)}));
 
     this.book.outline = { title: parsed.title, subtitle: parsed.subtitle || '', themes: parsed.themes };
     this.book.itemPlan = plan;
@@ -588,11 +592,13 @@ export class Machine {
 
     for (const theme of outline.themes) {
       const want = theme.count || plan.perTheme;
-      let have = [...done.keys()].filter((id) => String(id).startsWith(theme.n + '.')).length;
+      if (!Number.isSafeInteger(want) || want < 1) throw new Halt('จำนวนชิ้นในหมวดไม่ถูกต้อง กรุณาตรวจโครงหมวด');
+      const required = Array.from({length: want}, (_,i) => `${theme.n}.${i+1}`);
+      let have = required.filter(id => (done.get(id)?.text || done.get(id)?.md || '').trim()).length;
 
       while (have < want) {
         const count = Math.min(per, want - have);
-        const ids = Array.from({ length: count }, (_, i) => `${theme.n}.${have + i + 1}`);
+        const ids = required.filter(id => !(done.get(id)?.text || done.get(id)?.md || '').trim()).slice(0,count);
 
         const res = await this.turnWithRetry(
           I.itemBatchPrompt({
@@ -601,15 +607,25 @@ export class Machine {
             theme,
             count,
             startIndex: have + 1,
+            requestedIds: ids,
             avoid: (this.book.bible.usedExamples || []).slice(-30),
           }),
           { label: `หมวด ${theme.n} ชิ้นที่ ${have + 1}-${have + count}` },
         );
 
         const got = I.extractItems(res.text, ids);
+        for (const it of got) await this.saveItem(theme, it);
+        for (let retry=0; retry<2; retry++) {
+          const missing=ids.filter(id=>!got.some(it=>it.id===id));
+          if(!missing.length) break;
+          const extra=await this.turnWithRetry(I.itemBatchPrompt({book:this.book, outline, theme, count:missing.length, requestedIds:missing, avoid:[...done.values(),...got].map(it=>it.text || it.md)}), {label:`เติมชิ้นที่ขาด ${missing.join(', ')}`});
+          const recovered=I.extractItems(extra.text, missing);
+          for (const it of recovered) await this.saveItem(theme,it);
+          got.push(...recovered);
+        }
         if (!got.length) {
           this.log('warn', `หมวด ${theme.n}: ไม่ได้ชิ้นกลับมาเลย ข้ามชุดนี้`);
-          break;
+          throw new Halt('เขียนรายชิ้นไม่สำเร็จ — หยุดก่อนผ่านงานที่ยังขาด');
         }
 
         for (const it of got) {
@@ -623,7 +639,7 @@ export class Machine {
         this.log('ok', `หมวด ${theme.n} "${theme.title}": ได้ ${have}/${want} ชิ้น`);
         await this.save();
 
-        if (got.length < count) break;
+        if (got.length < count) throw new Halt(`ยังขาดชิ้น ${ids.filter(id=>!got.some(it=>it.id===id)).join(', ')} — บันทึกชิ้นที่ได้แล้ว กดทำต่อเพื่อเติมเฉพาะที่ขาด`);
       }
     }
 
@@ -677,7 +693,7 @@ export class Machine {
       const need = -err * perPage;
       const themes = this.book.outline.themes;
       const theme = themes[round % themes.length];
-      const have = items.filter((s) => String(s.id).startsWith(theme.n + '.')).length;
+      const have = Math.max(0,...items.filter((s) => String(s.id).startsWith(theme.n + '.')).map(s=>Number(String(s.id).split('.').pop()) || 0));
       const ids = Array.from({ length: need }, (_, i) => `${theme.n}.${have + i + 1}`);
 
       const res = await this.turnWithRetry(
@@ -693,6 +709,7 @@ export class Machine {
       );
       const got = I.extractItems(res.text, ids);
       for (const it of got) await this.saveItem(theme, it);
+      if (got.length !== ids.length) throw new Halt(`เพิ่มรายชิ้นยังไม่ครบ ${got.length}/${ids.length} ชิ้น — เก็บงานที่ได้แล้ว กรุณากดทำต่อ`);
       this.log('ok', `เพิ่มมาได้ ${got.length} ชิ้น`);
       if (!got.length) break;
     }
@@ -984,7 +1001,7 @@ export class Machine {
       let sum = 0;
       let first = true;
       for (const s of ch.sections) {
-        if (cur.length && sum + s.quota > cap) {
+        if (cur.length && (sum + s.quota > cap || cur.length >= (this.book.maxSectionsPerTurn || Infinity))) {
           out.push({ chapter: ch, sections: cur, first });
           first = false;
           cur = [];
@@ -1302,14 +1319,38 @@ export class Machine {
       }
     };
 
+    /**
+     * เทิร์นที่ "สำเร็จ" แต่อ่านผลไม่ได้ ไม่เคยถูกลองใหม่เลย
+     *
+     * turnWithRetry ลองใหม่เฉพาะตอนเทิร์นล้ม (error/timeout/empty) แต่ผลตรวจที่แปลง JSON ไม่ได้
+     * นับเป็นเทิร์นที่สำเร็จ มันจึงหลุดออกมาโดยไม่มีการลองใหม่สักครั้ง แล้วไปหยุดทั้งเล่มที่ปลายทาง
+     * ทั้งที่ขอใหม่อีกรอบเดียวมักได้ JSON ที่อ่านได้ · และต้องบันทึกของที่ได้มาจริงไว้ด้วย
+     * ไม่งั้นเวลาพลาดจะไม่มีใครรู้ว่าโมเดลตอบอะไรกลับมา
+     */
     const run = async (batch, label) => {
-      const res = await this.turnWithRetry(
-        P.consistencyPrompt(ch, batch, this.book.bible, this.book, label),
-        { label: `ตรวจบทที่ ${ch.n}${label ? ` · ${label}` : ''}` },
-      );
-      const parsed = X.parseJson(res.text);
-      if (parsed) collect(parsed);
-      return !!parsed;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const remind =
+          attempt === 1
+            ? label
+            : `${label ? `${label} · ` : ''}รอบก่อนหน้าอ่านเป็น JSON ไม่ได้ ตอบเป็น JSON ในบล็อกโค้ดเดียวเท่านั้น ห้ามมีข้อความนอกบล็อก`;
+        const res = await this.turnWithRetry(
+          P.consistencyPrompt(ch, batch, this.book.bible, this.book, remind),
+          { label: `ตรวจบทที่ ${ch.n}${label ? ` · ${label}` : ''}${attempt > 1 ? ' · ขอผลตรวจใหม่' : ''}` },
+        );
+        const parsed = X.parseJson(res.text);
+        if (parsed) {
+          collect(parsed);
+          return true;
+        }
+        const got = String(res.text || '').replace(/\s+/g, ' ').trim();
+        this.log(
+          'warn',
+          `บทที่ ${ch.n}: ผลตรวจรอบที่ ${attempt} อ่านเป็น JSON ไม่ได้ (ยาว ${got.length} ตัวอักษร)` +
+            (got ? ` · ต้นข้อความ: ${got.slice(0, 200)}` : ' · คำตอบว่างเปล่า') +
+            (attempt < 2 ? ' — ขอใหม่อีกครั้ง' : ''),
+        );
+      }
+      return false;
     };
 
     const batches = Machine.batchSections(recs, Machine.CONSISTENCY_BATCH_CHARS);
@@ -1326,7 +1367,7 @@ export class Machine {
       const label = batches.length > 1 ? `ส่วนที่ ${b + 1} จาก ${batches.length} ของบทนี้` : '';
       if (await run(batches[b], label)) any = true;
     }
-    if (!any) return null;
+    if (!any) throw new Halt(`บรรณาธิการบทที่ ${ch.n} ยังไม่ส่งผลตรวจที่อ่านได้ — กดทำต่อเพื่อตรวจใหม่`);
 
     /**
      * ตอนที่ไม่มีคำตัดสินกลับมา = ตอนที่ยังไม่ถูกอ่าน ห้ามนับว่าผ่าน
@@ -1349,6 +1390,7 @@ export class Machine {
 
     const finalGot = new Set((merged.section_verdicts || []).map((v) => String(v?.section || '')));
     const stillMissed = want.filter((id) => !finalGot.has(id));
+    if (stillMissed.length) throw new Halt(`บรรณาธิการยังตรวจไม่ครบ: ${stillMissed.join(', ')} — หยุดก่อนนับว่าผ่าน กดทำต่อเพื่อตรวจบทนี้ใหม่`);
     merged.coverage = {
       sections: want.length,
       reviewed: want.length - stillMissed.length,
@@ -1778,12 +1820,53 @@ export class Machine {
   }
 
   async finishFit(physical) {
+    if (this.book.contentMode === 'items') {
+      const changed = await this.checkItemQuality();
+      if (changed) physical = (await this.measure(await db.loadSections(this.book.id))).pages;
+    }
     // โรงพิมพ์ต้องการจำนวนหน้าเป็นเลขคู่เสมอ เติมหน้าว่างท้ายเล่มถ้าจำเป็น
     // งานสั้นกว่า 24 หน้าเป็นไฟล์ดิจิทัล/เอกสารแจก ไม่บังคับเพิ่มหน้าให้เกินเป้าหมาย
     this.book.padPages = this.book.targetPages >= 24 && physical % 2 === 1 ? 1 : 0;
     this.book.finalPages = physical + this.book.padPages;
     if (this.book.padPages) this.log('ok', 'เติมหน้าว่างท้ายเล่มหนึ่งหน้าให้จำนวนหน้าเป็นเลขคู่');
     this.job.step = 'gate_edit';
+  }
+
+  async checkItemQuality() {
+    let changed=false;
+    for(let round=0;round<3;round++) {
+      const items=(await db.loadSections(this.book.id)).filter(s=>s.kind==='item');
+      if(!items.length) throw new Halt('ไม่มีเนื้อหารายชิ้นให้ตรวจ');
+      const signature=JSON.stringify([this.book.itemKind,this.book.topic,!!this.book.runConsistency,items.map(s=>[s.id,s.text,s.md,s.attribution])]);
+      if(this.book.itemQuality?.signature===signature && this.book.itemQuality?.passed) return changed;
+      let issues=duplicateItems(items);
+      if(this.book.runConsistency) {
+        const groups=reviewGroups(items.map(s=>({id:s.id,text:s.text || s.md,attribution:s.attribution || ''})));
+        for(let i=0;i<groups.length;i++) {
+          this.log('ok',`บรรณาธิการรายชิ้น · อ่านเต็มชุด ${i+1}/${groups.length} (${groups[i].length} ชิ้น)`);
+          const res=await this.turnWithRetry(itemReviewPrompt(this.book,groups[i]),{label:`ตรวจคุณภาพรายชิ้น ${i+1}/${groups.length}`});
+          issues.push(...reviewIssues(X.parseJson(res.text),groups[i]));
+        }
+      }
+      this.book.itemQuality={signature,passed:!issues.length,editorial:!!this.book.runConsistency,issues,at:Date.now()};
+      await this.save();
+      if(issues.some(x=>x.incomplete)) throw new Halt('บรรณาธิการรายชิ้นส่งผลตรวจไม่ครบ — เก็บเนื้อหาเดิมไว้ กดทำต่อเพื่อตรวจใหม่');
+      if(!issues.length) {this.log('ok',`รายชิ้น ${items.length} ชิ้น · ผ่านตรวจ${this.book.runConsistency?'ความหมายและกติกาประเภทงาน':'ข้อความซ้ำ (ปิดบรรณาธิการอยู่)'}`); return changed;}
+      if(round===2 || this.book.autoRepair===false) throw new Halt(`รายชิ้นยังมี ${issues.length} ประเด็น: ${issues.slice(0,3).map(x=>`${x.id} ${x.reason}`).join(' · ')}`);
+      for(const id of new Set(issues.map(x=>x.id))) {
+        const rec=items.find(s=>s.id===id);
+        if(!rec || rec.locked || rec.status==='approved') throw new Halt(`ชิ้น ${id} มีปัญหาแต่ถูกล็อกไว้ กรุณาตรวจแก้เอง`);
+        const theme=this.book.outline.themes.find(t=>String(t.n)===String(rec.theme));
+        if(!theme) throw new Halt(`ไม่พบหมวดของชิ้น ${id}`);
+        const prompt=I.itemBatchPrompt({book:this.book,outline:this.book.outline,theme,count:1,requestedIds:[id],avoid:items.filter(s=>s.id!==id).map(s=>s.text || s.md)});
+        const res=await this.turnWithRetry(`${prompt}\nแก้ชิ้นเดิมนี้โดยรักษาใจความที่ถูกต้อง: ${rec.text || rec.md}\nปัญหาที่ต้องแก้: ${issues.filter(x=>x.id===id).map(x=>x.reason).join('; ')}`,{label:`แก้คุณภาพชิ้น ${id}`});
+        const fixed=I.extractItems(res.text,[id])[0];
+        if(!fixed) throw new Halt(`แก้ชิ้น ${id} ไม่สำเร็จ เก็บต้นฉบับเดิมไว้`);
+        await db.saveSection(this.book.id,{...rec,...fixed,md:fixed.text,chars:countUnits(fixed.text,this.book.language),status:'repaired',history:[...(rec.history || []).slice(-19),{md:rec.md,text:rec.text,chars:rec.chars,at:Date.now(),reason:'ก่อนตรวจแก้รายชิ้น'}]});
+        changed=true;
+      }
+    }
+    return changed;
   }
 
   /**
