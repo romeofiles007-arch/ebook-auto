@@ -28,13 +28,16 @@ test('legacy or partially formatted bibliography cannot pass as ready', () => {
   assert.equal(referenceProblem(b),'');
   b.referenceStyle='ieee'; assert.ok(referenceProblem(b));
 });
-test('เกณฑ์ห้าแหล่งเป็นเป้า ไม่ใช่ด่าน — ได้ไม่ครบก็ยังพิมพ์ได้ แต่ศูนย์แหล่งไม่ได้', () => {
+test('ห้าแหล่งเป็นเป้า ไม่ใช่ด่าน · ไม่มีแหล่งเลยก็แค่ไม่มีหน้าบรรณานุกรม', () => {
   const source=(i)=>({...normalizeWork(work),doi:`10.1038/nrd${842+i}`,reviewed:true,citations:{apa:`Entry ${i}`}});
   const book=(n)=>({backMatter:['references'],referenceStyle:'apa',referenceSources:Array.from({length:n},(_,i)=>source(i))});
   // หัวข้อบางเรื่องไม่มีงานวิชาการห้าชิ้นให้ค้น การหยุดทั้งเล่มไว้ตรงนี้เสียมากกว่าได้
   for (const n of [1,2,3,4,5]) assert.equal(referenceProblem(book(n)),'',`${n} แหล่งต้องผ่าน`);
-  // แต่ติ๊กบรรณานุกรมไว้แล้วไม่มีแหล่งเลย = หน้าเปล่าในเล่ม อันนี้ยังต้องกัน
-  assert.ok(referenceProblem(book(0)));
+  // ไม่มีแหล่งเลย = เล่มนี้ไม่มีหน้าบรรณานุกรม ไม่ใช่ความผิดพลาด
+  assert.equal(referenceProblem(book(0)),'');
+  assert.deepEqual(backMatterSections(book(0)).map((s)=>s.title),[],'ไม่มีแหล่ง ต้องไม่มีหัวข้อบรรณานุกรมในเล่ม');
+  // ยกเว้นบรรทัดบรรณานุกรมรุ่นเก่าที่ไม่เคยผ่านการตรวจ DOI ยังต้องกันไว้
+  assert.ok(referenceProblem({backMatter:['references'],references:['invented book']}));
   assert.equal(referenceProblem({backMatter:[],referenceSources:[]}),'');
 });
 

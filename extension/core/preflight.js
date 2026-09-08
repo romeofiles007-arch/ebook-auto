@@ -16,6 +16,8 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
   const ok = (id, label) => r.push({ id, label, level: 'ok' });
   const fail = (id, label, detail) => r.push({ id, label, level: 'fail', detail });
   const warn = (id, label, detail) => r.push({ id, label, level: 'warn', detail });
+  if (book.contentMode === 'items' && book.itemQuality?.passed === false)
+    fail('item_quality', 'รายชิ้นยังไม่ผ่านการตรวจคุณภาพ', (book.itemQuality.issues || []).slice(0,5).map(x=>`${x.id}: ${x.reason}`).join(' · '));
 
   const tol = book.pageTolerance ?? 2;
   const target =
@@ -241,7 +243,9 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
   if ((book.backMatter || []).includes('references')) {
     const problem = referenceProblem(book);
     const n = referenceLines(book).length;
-    if (!problem) ok('references', `หน้าบรรณานุกรมมี ${n} รายการที่เลือกและจัดรูปแบบแล้ว`);
+    // ติ๊กไว้แต่ไม่มีแหล่ง = เล่มนี้ไม่มีหน้าบรรณานุกรม ต้องบอกให้รู้ ไม่ใช่ปล่อยเงียบและไม่ใช่ฟ้องว่าพัง
+    if (!problem && !n) ok('references', 'ไม่ได้เลือกแหล่งไว้ เล่มนี้จึงไม่มีหน้าบรรณานุกรม');
+    else if (!problem) ok('references', `หน้าบรรณานุกรมมี ${n} รายการที่เลือกและจัดรูปแบบแล้ว`);
     else
       fail(
         'references',
