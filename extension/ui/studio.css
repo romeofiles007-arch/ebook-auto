@@ -337,3 +337,13 @@ button.reviewIssue:hover{border-color:#6f8cff}
 #audiencePreset{margin-top:8px;font-size:14px;padding:11px 14px;color:#b9c6e2}
 .soundToggle{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#b9c6e2;white-space:nowrap;cursor:pointer}
 .soundToggle input{width:auto;margin:0}
+
+/* สีของโหมดสร้างเล่ม = ต้องรอนานแค่ไหน ไม่ใช่ดี/ไม่ดี — ละเอียดคือช้าที่สุดแต่คุณภาพสูงสุด
+   จึงใช้เขียว→เหลือง→ส้ม (ไล่ตามเวลารอ) ไม่ใช่เขียว→แดง (ซึ่งอ่านเป็นถูก/ผิด) */
+.speedBadge{display:inline-block;margin-left:8px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid transparent;vertical-align:middle}
+#productionMode{border-left-width:5px}
+#productionMode.speed-fast,.speedBadge.speed-fast{border-color:#3ddc97;color:#8affd0;background:#0e2a20}
+#productionMode.speed-standard,.speedBadge.speed-standard{border-color:#ffc65c;color:#ffdf9e;background:#2a2210}
+#productionMode.speed-slow,.speedBadge.speed-slow{border-color:#ff8a6a;color:#ffc0ad;background:#2c1712}
+#productionMode.speed-custom,.speedBadge.speed-custom{border-color:#5c6c8f;color:#b9c6e2;background:#141d31}
+#productionMode.speed-fast,#productionMode.speed-standard,#productionMode.speed-slow,#productionMode.speed-custom{background:#0b1222}

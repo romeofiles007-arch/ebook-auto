@@ -5,6 +5,7 @@
  */
 
 import * as db from '../core/db.js';
+import { productionSettings } from '../core/production-mode.js';
 import { crewMarkup } from './crew-sprites.js';
 import { readReferenceSettings, validateBackMatterSetup, resetReferenceSources } from './references-ui.js';
 import { MIN_REFERENCES } from '../core/references.js';
@@ -1588,6 +1589,7 @@ function readForm() {
     threadMode: val('threadMode', 'single'),
     writeMode: val('writeMode', 'section'),
     maxCharsPerTurn: capByLen,
+    ...productionSettings(val('productionMode', 'custom'), secLen),
     runConsistency: on('opt_consistency'),
     pageMode: val('pageMode', 'soft'),
     /**
@@ -1617,7 +1619,8 @@ function updateEstimate() {
     runConsistency: on('opt_consistency'),
     pageMode: val('pageMode', 'soft'),
   };
-  const perSection = val('writeMode', 'section') === 'section';
+  Object.assign(draft, productionSettings(val('productionMode', 'custom'), val('secLen', 'auto')));
+  const perSection = (draft.writeMode || val('writeMode', 'section')) === 'section';
   if (perSection) draft.maxCharsPerTurn = 1; // เขียนทีละตอน จำนวนข้อความ = จำนวนตอน
 
   const e = estimateTurns(draft);
@@ -1629,13 +1632,14 @@ function updateEstimate() {
   const viaApi = val('textSource', 'web') === 'api';
   const secPerTurn = viaApi ? 30 : 70;
   const mins = Math.round((e.likely * secPerTurn) / 60);
+  renderSpeedTone(mins);
 
   $('estimate').className = 'estimate';
   $('estimate').innerHTML =
     `คาดว่าจะใช้ราว <span class="big">${e.likely}</span> ${viaApi ? 'เทิร์น API' : 'ข้อความ ChatGPT'} ` +
-    `<b>(อย่างน้อย ${e.min} · มากสุด ${e.max})</b><br>` +
+    `<b>(ช่วงประมาณ ${e.min}–${e.max} ไม่ใช่เพดาน)</b><br>` +
     `ราว ${e.chapters} บท · เขียน ${e.batches} ${viaApi ? 'เทิร์น' : 'ข้อความ'}${perSection ? ' (ทีละตอน)' : ' (รวมหลายตอนต่อข้อความ)'} · เนื้อหา ${e.budget.toLocaleString()} อักษร<br>` +
-    `ใช้เวลาเดินเครื่องราว ${mins} นาที ระบบจะเดินต่อจนจบเนื้อหา` +
+    `ตัวอย่างเวลาเนื้อหาราว ${mins} นาที หากเฉลี่ย ${secPerTurn} วินาทีต่อข้อความ · เป็นสมมติฐาน ไม่ใช่เวลาที่วัดจริง และยังไม่รวมภาพหรือการลองซ้ำเพิ่มเติม` +
     (viaApi
       ? `<br>ทาง API ไม่มีลิมิตข้อความรายสามชั่วโมง แต่คิดเงินตาม token ที่ใช้จริง`
       : '');
@@ -5320,6 +5324,51 @@ $('inspirePolish').onclick = polishUserOutline;
 $('start')?.addEventListener('input', renderStepGuide);
 $('start')?.addEventListener('change', renderStepGuide);
 renderStepGuide();
+/**
+ * สีของโหมดสร้างเล่ม = "ต้องรอนานแค่ไหน" ไม่ใช่ "ดีหรือไม่ดี"
+ *
+ * ชื่อโหมดบอกวิธีทำงาน (รวมกี่ตอนต่อข้อความ) ซึ่งไม่ได้แปลเป็นเวลารอในหัวคนอ่านทันที
+ * และคำใบ้ข้างล่างก็ยาวเกินกว่าจะเหลือบเห็นตอนกำลังเลือก
+ * ไล่เขียว→เหลือง→ส้มตามเวลารอ ไม่ใช่เขียว→แดง เพราะโหมดละเอียดช้าที่สุดแต่คุณภาพสูงสุด
+ * ถ้าใช้แดงจะอ่านเป็น "อย่าเลือกอันนี้" ซึ่งไม่จริง
+ */
+const SPEED_TONE = {
+  fast: { cls: 'speed-fast', label: '⚡ รอสั้นที่สุด' },
+  standard: { cls: 'speed-standard', label: '⏱ รอปานกลาง' },
+  detailed: { cls: 'speed-slow', label: '🐢 รอนานที่สุด' },
+  custom: { cls: 'speed-custom', label: '⚙ ตามที่ตั้งเอง' },
+};
+
+function renderSpeedTone(mins = null) {
+  const sel = $('productionMode');
+  const badge = $('productionSpeed');
+  if (!sel || !badge) return;
+  const tone = SPEED_TONE[sel.value] || SPEED_TONE.custom;
+  const all = Object.values(SPEED_TONE).map((x) => x.cls);
+  sel.classList.remove(...all);
+  sel.classList.add(tone.cls);
+  badge.className = `speedBadge ${tone.cls}`;
+  // ตัวเลขนาทีมาจากตัวประเมินเดียวกับที่แสดงในกล่องราคา จะได้ไม่ขัดกันเอง
+  badge.textContent = mins > 0 ? `${tone.label} · ราว ${mins} นาที` : tone.label;
+}
+
+function syncProductionMode() {
+  const mode = $('productionMode').value;
+  renderSpeedTone();
+  const settings = productionSettings(mode, val('secLen', 'auto'));
+  if (settings.writeMode) $('writeMode').value = settings.writeMode;
+  $('writeMode').disabled = mode !== 'custom';
+  const hints = {
+    fast: 'รวมสูงสุด 3 ตอนในบทเดียวกัน เหมาะกับตอนสั้น อาจต้องแก้รายละเอียดรายตอนมากขึ้น · เว้นส่งข้อความ 0.8–1.5 วินาที',
+    standard: 'รวมสูงสุด 2 ตอนในบทเดียวกัน สมดุลจำนวนข้อความและรายละเอียด · เว้นส่งข้อความ 1.5–2.5 วินาที',
+    detailed: 'เขียนทีละตอน ให้พื้นที่กับรายละเอียดของแต่ละตอน ใช้ข้อความมากกว่า · เว้นส่งข้อความ 4–9 วินาที',
+    custom: 'เลือกวิธีเขียนเอง ใช้ช่วงเว้นส่งข้อความเดิม 4–9 วินาที',
+  };
+  $('productionModeHint').textContent = hints[mode] + ' · ทุกโหมดคงความยาวเป้าหมายและการตรวจที่เลือกไว้ ภาพใช้กติกาเดิม · โหมดรายชิ้นคงจำนวนชิ้นต่อชุดเดิม · บันทึกเฉพาะเล่มใหม่';
+  updateEstimate();
+}
+$('productionMode').addEventListener('change', syncProductionMode);
+syncProductionMode();
 ['pages', 'trim', 'secLen', 'opt_consistency', 'writeMode', 'pageMode'].forEach((id) => {
   if (!$(id)) return;
   $(id).addEventListener('input', updateEstimate);

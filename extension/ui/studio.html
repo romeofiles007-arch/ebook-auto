@@ -449,6 +449,16 @@
         </select>
       </div>
       <div class="field">
+        <label for="productionMode">โหมดสร้างเล่มใหม่ <span id="productionSpeed" class="speedBadge"></span></label>
+        <select id="productionMode" aria-describedby="productionModeHint">
+          <option value="fast">เร็ว — รวมสูงสุด 3 ตอนต่อข้อความ</option>
+          <option value="standard" selected>มาตรฐาน — รวมสูงสุด 2 ตอนต่อข้อความ</option>
+          <option value="detailed">ละเอียด — เขียนทีละตอน</option>
+          <option value="custom">กำหนดวิธีเขียนเอง</option>
+        </select>
+        <p id="productionModeHint" class="muted"></p>
+      </div>
+      <div class="field">
         <label for="writeMode">วิธีเขียน</label>
         <select id="writeMode">
           <option value="section" selected>ทีละตอน — คุณภาพดีที่สุด</option>
