@@ -146,12 +146,18 @@ const MD_LIST_RE = /^(\s*)(?:[-*+]|\d+[.)])\s+\S/;
  *
  * ใน Typst ช่องว่างหน้ารายการคือโครงสร้าง ไม่ใช่การจัดหน้า ข้อที่โมเดลเผลอเคาะเว้นวรรคนำ
  * หนึ่งหรือสามที จึงกลายเป็นรายการซ้อนชั้น เห็นเป็นข้อ 2 เยื้องไม่ตรงกับข้อ 1 (เล่มจริงหน้า 54)
- * ใช้เกณฑ์สี่ช่องต่อหนึ่งชั้น เพราะเป็นระดับที่คนตั้งใจย่อหน้าจริง ๆ เท่านั้นถึงจะถึง
- * เว้นวรรคนำหนึ่งถึงสามช่องที่หลุดมาจึงถูกดึงกลับมาอยู่ระดับเดียวกับพี่น้องของมัน
- * และไม่ให้ลึกเกินสามชั้น ซึ่งลึกกว่านั้นก็อ่านไม่รู้เรื่องอยู่ดี
+ * เว้นวรรคนำสี่ช่องขึ้นไปคือการย่อหน้าที่คนตั้งใจแน่นอน นับเป็นชั้นตามจำนวนช่อง
+ * ส่วนหนึ่งถึงสามช่องกำกวม ต้องดูว่ามันเป็นลูกหรือเป็นพี่น้องที่เผลอเคาะเว้นวรรคมา
+ * ตัวชี้ขาดคือชนิดของรายการ: "- ลูก" ใต้ "1. แม่" เป็นคนละชนิด = ลูกจริง
+ * ส่วน "2." ใต้ "1." เป็นชนิดเดียวกัน = พี่น้องที่เยื้องมาเฉย ๆ (เล่มจริงหน้า 54)
+ * ไม่ให้ลึกเกินสามชั้น ซึ่งลึกกว่านั้นก็อ่านไม่รู้เรื่องอยู่ดี
  */
-const listIndent = (raw) =>
-  '  '.repeat(Math.min(3, Math.floor(String(raw).replace(/\t/g, '    ').length / 4)));
+function listLevel(raw, ordered, ctx) {
+  const width = String(raw).replace(/\t/g, '    ').length;
+  if (width >= 4) return Math.min(3, Math.floor(width / 4));
+  if (!width || !ctx) return 0;
+  return ordered === ctx.ordered ? ctx.level : Math.min(3, ctx.level + 1);
+}
 
 /** บรรทัดว่างนี้คั่นกลางระหว่างข้อของรายการเดียวกันหรือไม่ */
 function betweenListItems(out, lines, idx) {
@@ -169,6 +175,8 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
   const out = [];
   let inFence = false;
   let fenceBuf = [];
+  // รายการที่ยังเปิดอยู่ ณ บรรทัดนี้ (null = ไม่ได้อยู่ในรายการ) ใช้ตัดสินชั้นของข้อถัดไป
+  let listCtx = null;
 
   for (let idx = 0; idx < lines.length; idx++) {
     const line = lines[idx].replace(/\s+$/, '');
@@ -197,6 +205,7 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
        * (เห็นในเล่มจริงหน้า 9) — บรรทัดว่างตรงนี้เป็นแค่การจัดหน้าใน markdown ไม่ใช่โครงสร้าง
        */
       if (betweenListItems(out, lines, idx)) continue;
+      listCtx = null; // บรรทัดว่างที่รอดมาถึงตรงนี้คือย่อหน้าใหม่จริง รายการก่อนหน้าจบแล้ว
       out.push('');
       continue;
     }
@@ -210,6 +219,7 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
         idx++;
       }
       idx--; // คืนหนึ่งตำแหน่งให้ for-loop
+      listCtx = null;
       out.push(tableToTypst(rows, t), '');
       continue;
     }
@@ -220,12 +230,14 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
       const buf = [];
       // อ่านต่อจนเจอ ::: ปิด
       while (++idx < lines.length && !/^:::\s*$/.test(lines[idx].trim())) buf.push(lines[idx]);
+      listCtx = null;
       out.push(boxToTypst(title, buf.filter((x) => x.trim()), t), '');
       continue;
     }
 
     const fig = line.trim().match(FIG_RE);
     if (fig) {
+      listCtx = null;
       out.push(figureToTypst(fig, have, prompts), '');
       continue;
     }
@@ -233,30 +245,42 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) {
       const level = Math.min(6, baseLevel + h[1].length - 3 > 0 ? baseLevel + h[1].length - 3 : baseLevel);
+      listCtx = null;
       out.push('='.repeat(level) + ' ' + inline(h[2]), '');
       continue;
     }
 
     if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      listCtx = null;
       out.push('#align(center)[#v(0.6em) --- #v(0.6em)]', '');
       continue;
     }
 
     const q = line.match(/^\s*>\s?(.*)$/);
     if (q) {
+      listCtx = null;
       out.push('#quote(block: true)[' + inline(q[1]) + ']');
       continue;
     }
 
     const ul = line.match(/^(\s*)[-*+]\s+(.*)$/);
-    if (ul) {
-      out.push(listIndent(ul[1]) + '- ' + inline(ul[2]));
+    const ol = !ul && line.match(/^(\s*)\d+[.)]\s+(.*)$/);
+    if (ul || ol) {
+      const [, raw, text] = ul || ol;
+      const level = listLevel(raw, !!ol, listCtx);
+      listCtx = { level, ordered: !!ol };
+      out.push('  '.repeat(level) + (ol ? '+ ' : '- ') + inline(text));
       continue;
     }
 
-    const ol = line.match(/^(\s*)\d+[.)]\s+(.*)$/);
-    if (ol) {
-      out.push(listIndent(ol[1]) + '+ ' + inline(ol[2]));
+    /**
+     * บรรทัดที่ต่อจากข้อโดยไม่เว้นบรรทัด คือเนื้อของข้อนั้น ไม่ใช่ย่อหน้าใหม่
+     *
+     * ถ้าปล่อยไว้ที่คอลัมน์ศูนย์ Typst จะถือว่ารายการจบแล้ว ข้อถัดไปจึงเริ่มนับหนึ่งใหม่
+     * ย่อหน้าจริงจะมีบรรทัดว่างคั่นเสมอ ซึ่งล้าง listCtx ทิ้งไปแล้วตั้งแต่ตรงนั้น
+     */
+    if (listCtx) {
+      out.push('  '.repeat(listCtx.level + 1) + inline(line.trim()));
       continue;
     }
 
