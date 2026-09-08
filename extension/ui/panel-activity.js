@@ -1,0 +1,128 @@
+import { crewMarkup, crewSource } from './crew-sprites.js';
+const $ = (id) => document.getElementById(id);
+const events = new Map();
+let follow = true;
+let lastAt = 0;
+const crewIds = ['research', 'planner', 'writer', 'editor', 'art', 'proof', 'layout', 'ship'];
+const names = ['นักค้นคว้า', 'นักวางโครงหนังสือ', 'นักเขียน', 'บรรณาธิการ', 'นักออกแบบภาพ', 'พิสูจน์คำสั่งภาพ', 'ฝ่ายจัดเล่ม', 'ฝ่ายส่งออก'];
+crewIds.forEach((id, i) => {
+  const item = document.createElement('span');
+  item.innerHTML = crewMarkup(id);
+  item.title = names[i]; item.setAttribute('aria-label', names[i]); item.dataset.crew = id;
+  $('crewRoster').append(item);
+});
+function showCrew(crew) {
+  if (!crew || !crewIds.includes(crew.id)) return;
+  const el = $('panelCrew');
+  el.classList.toggle('working', !!crew.working);
+  el.querySelectorAll('.crew-strip').forEach((img) => {
+    const src = crewSource(crew.id);
+    if (img.getAttribute('src') !== src) img.src = src;
+  });
+  el.querySelector('strong').textContent = `${crew.working ? 'กำลังทำงาน · ' : ''}${crew.name}`;
+  el.querySelector('.crew-description span').textContent = crew.detail;
+  $('crewRoster').querySelectorAll('[data-crew]').forEach((item) => {
+    item.classList.toggle('current', item.dataset.crew === crew.id);
+    item.classList.toggle('working', item.dataset.crew === crew.id && !!crew.working);
+  });
+}
+function accept(event) {
+  if (!event?.id) return;
+  lastAt = Math.max(lastAt, event.at || 0);
+  if (event.crew) showCrew(event.crew);
+  if (!event.message) return;
+  events.set(event.id, event);
+  const sorted = [...events.values()].sort((a, b) => a.at - b.at).slice(-200);
+  events.clear(); sorted.forEach((e) => events.set(e.id, e));
+  renderLog(sorted);
+  $('live').textContent = sorted.at(-1)?.message || 'พร้อมเริ่มงาน';
+}
+
+const span = (cls, text) => {
+  const el = document.createElement('span');
+  el.className = cls;
+  el.textContent = text;
+  return el;
+};
+
+/**
+ * แยกสีทีละส่วนแบบจอ DOS: เวลา · ชนิดเหตุการณ์ · ชื่อเล่ม · ข้อความ
+ *
+ * เขียวล้วนทั้งกองอ่านยากเมื่อบรรทัดไหลเร็ว เพราะตาไม่มีจุดเกาะว่าอันไหนขึ้นบรรทัดใหม่
+ * และแยกไม่ออกว่าอันไหนคำเตือน สีจึงทำหน้าที่แทนการเพ่งอ่าน
+ */
+function lineEl(e) {
+  const level = e.level || 'info';
+  const line = document.createElement('div');
+  line.className = `terminal-line lv-${/^[a-z]+$/.test(level) ? level : 'info'}`;
+  line.dataset.eventId = e.id;
+  line.append(
+    span('t-time', `[${new Date(e.at).toLocaleTimeString('th-TH')}] `),
+    span('t-level', `[${level}] `),
+  );
+  if (e.bookTitle) line.append(span('t-book', e.bookTitle), span('t-sep', ' > '));
+  line.append(span('t-msg', e.message));
+  return line;
+}
+
+/**
+ * ต่อท้ายเฉพาะบรรทัดใหม่ ไม่วาดใหม่ทั้งกอง
+ *
+ * เดิมใช้ replaceChildren ทุกครั้งที่มีเหตุการณ์เข้ามา ซึ่งรื้อ 200 บรรทัดทิ้งแล้วสร้างใหม่หมด
+ * ตำแหน่งเลื่อนจึงต้องถูกจำแล้วยัดกลับ กลายเป็นการกระโดดทุกบรรทัด และการเลื่อนแบบนุ่ม ๆ
+ * ก็ทำไม่ได้เลย เพราะ element ที่กำลังเลื่อนหาถูกลบทิ้งกลางทางทุกครั้ง
+ * รื้อทั้งกองเหลือไว้เฉพาะตอนที่ลำดับเปลี่ยนจริง (เช่นตอนดึงประวัติเก่ามาเติมย้อนหลัง)
+ */
+function renderLog(sorted) {
+  const log = $('panelLog');
+  const shown = [...log.children];
+  const sameSoFar = shown.every((el, i) => el.dataset.eventId === sorted[i]?.id);
+  if (sameSoFar && shown.length <= sorted.length) {
+    sorted.slice(shown.length).forEach((e) => {
+      const line = lineEl(e);
+      line.classList.add('fresh');
+      log.append(line);
+    });
+  } else {
+    const scroll = log.scrollTop;
+    log.replaceChildren(...sorted.map(lineEl));
+    log.scrollTop = scroll;
+  }
+  stickToBottom(log);
+}
+
+const stillFrames = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+
+/**
+ * เลื่อนตามบรรทัดใหม่แบบนุ่ม ๆ แต่ห้ามนุ่มจนตามไม่ทัน
+ *
+ * ถ้าเหตุการณ์เข้ามารัวหรือเพิ่งเปิดหน้ามา ระยะห่างจากท้ายจะไกลมาก
+ * การไถลไปเรื่อย ๆ จะดูเหมือนค้าง กรณีนั้นกระโดดไปท้ายทันทีแล้วค่อยนุ่มในบรรทัดถัด ๆ ไป
+ */
+function stickToBottom(log) {
+  if (!follow) return;
+  const behind = log.scrollHeight - log.scrollTop - log.clientHeight;
+  const smooth = behind < log.clientHeight * 2 && !stillFrames?.matches;
+  log.scrollTo({ top: log.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+}
+$('logFollow').onclick = () => {
+  follow = !follow;
+  $('logFollow').setAttribute('aria-pressed', String(follow));
+  $('logFollow').textContent = follow ? 'ตามล่าสุด' : 'หยุดเลื่อน';
+  if (follow) stickToBottom($('panelLog'));
+};
+// ย่อ/ขยาย Side Panel แล้วความสูงกล่องเปลี่ยน ตำแหน่งท้ายสุดก็เลื่อนตาม
+// ถ้าไม่ตามให้ ปุ่มจะบอกว่า "ตามล่าสุด" ทั้งที่บรรทัดล่าสุดหลุดจอไปแล้ว
+new ResizeObserver(() => stickToBottom($('panelLog'))).observe($('panelLog'));
+chrome.runtime.onMessage.addListener((m) => { if (m.type === 'ui.activity') accept(m.event); });
+chrome.runtime.sendMessage({ type: 'ui.activitySnapshot' }).then((snapshot) => {
+  const receivedLive = lastAt > 0;
+  for (const e of snapshot?.events || []) {
+    if (!events.has(e.id)) accept({ ...e, crew: null });
+  }
+  if (!receivedLive) showCrew(snapshot?.crew);
+  lastAt = Math.max(lastAt, snapshot?.at || 0);
+}).catch(() => { $('logUpdated').textContent = 'ยังอ่านประวัติไม่ได้ · รอ Studio ส่งสถานะใหม่'; });
+setInterval(() => {
+  if (lastAt) $('logUpdated').textContent = `ข้อมูลล่าสุด ${Math.max(0, Math.floor((Date.now() - lastAt) / 1000))} วินาทีที่แล้ว · เก็บล่าสุด 200 รายการ`;
+}, 1000);

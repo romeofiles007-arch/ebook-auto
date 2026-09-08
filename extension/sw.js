@@ -6,6 +6,7 @@
 
 const STUDIO_URL = chrome.runtime.getURL('ui/studio.html');
 const CHAT_MATCH = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
+let activityWrite = Promise.resolve();
 
 // ---------- state ที่ทนต่อการตายของ worker ----------
 const S = {
@@ -54,9 +55,21 @@ async function ensureStudioTab(focus = false) {
   let tab = await findTab([STUDIO_URL + '*']);
   if (!tab) {
     tab = await chrome.tabs.create({ url: STUDIO_URL, pinned: true, active: focus });
-  } else if (focus) {
-    await chrome.tabs.update(tab.id, { active: true });
-    await chrome.windows.update(tab.windowId, { focused: true });
+  } else {
+    // A failed navigation can retain the Studio URL without a live extension
+    // document. Focusing that tab alone leaves Chrome's error page in place.
+    // Do not navigate a healthy Studio: it may be generating a book.
+    let needsNavigation = !!tab.discarded;
+    if (!needsNavigation && tab.status === 'complete' && chrome.runtime.getContexts) {
+      const contexts = await chrome.runtime.getContexts({ contextTypes: ['TAB'], tabIds: [tab.id] });
+      needsNavigation = contexts.length === 0;
+    }
+    if (needsNavigation) {
+      tab = await chrome.tabs.update(tab.id, { url: STUDIO_URL, ...(focus ? { active: true } : {}) });
+    } else if (focus) {
+      await chrome.tabs.update(tab.id, { active: true });
+    }
+    if (focus) await chrome.windows.update(tab.windowId, { focused: true });
   }
   await S.set('studioTabId', tab.id);
   return tab;
@@ -189,10 +202,33 @@ async function ensureAdapter(tabId, timeoutMs = 20000) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg?.type) {
+      case 'ui.activity': {
+        const event = msg.event;
+        if (!event?.id || sender.id !== chrome.runtime.id) return sendResponse({ ok: false });
+        activityWrite = activityWrite.catch(() => {}).then(async () => {
+          const snapshot = await S.get('activitySnapshot', { events: [], crew: null });
+          if (event.crew) snapshot.crew = event.crew;
+          if (event.message) snapshot.events = [...snapshot.events, event].slice(-200);
+          snapshot.at = event.at;
+          await S.set('activitySnapshot', snapshot);
+        });
+        await activityWrite;
+        return sendResponse({ ok: true });
+      }
+      case 'ui.activitySnapshot': {
+        await activityWrite.catch(() => {});
+        return sendResponse(await S.get('activitySnapshot', { events: [], crew: null }));
+      }
       // Studio ขอให้เริ่มหนึ่งเทิร์น — ไม่รอผล ผลจะกลับมาเป็น gpt.result
       case 'sw.runTurn': {
         await S.set('studioTabId', sender.tab?.id ?? (await S.get('studioTabId')));
         const chat = await ensureChatTab();
+        if (msg.opts?.wantImages) {
+          const sources = await S.get('imageTurnTabs', {});
+          sources[msg.turnId] = chat.id;
+          for (const id of Object.keys(sources).slice(0, -40)) delete sources[id];
+          await S.set('imageTurnTabs', sources);
+        }
         await chrome.tabs.update(chat.id, { active: true });
         if (chat.windowId != null) await chrome.windows.update(chat.windowId, { focused: true });
         const ok = await ensureAdapter(chat.id);
@@ -258,7 +294,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
        * และถอนตัวออกทันทีที่เสร็จ เพื่อให้แถบหายไป
        */
       case 'sw.forceSend': {
-        const chat = await ensureChatTab();
+        // The content script requesting recovery owns the composer. Never
+        // redirect its text to whichever ChatGPT tab was activated last.
+        if (!sender.tab?.id || !isChatUrl(sender.tab.url)) {
+          return sendResponse({ ok: false, error: 'invalid_composer_tab' });
+        }
+        const chat = sender.tab;
         const target = { tabId: chat.id };
         const text = String(msg.text || '');
         if (!text) return sendResponse({ ok: false, error: 'ไม่มีข้อความให้ส่ง' });
@@ -279,9 +320,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
           attached = true;
 
-          // ช่องพิมพ์ถูกโฟกัสไว้แล้วจากฝั่ง content script — ป้อนข้อความลงตรงนั้นได้เลย
+          const [focused] = await chrome.scripting.executeScript({
+            target,
+            func: () => {
+              const box = document.querySelector('#prompt-textarea');
+              if (!box) return false;
+              box.focus();
+              return document.activeElement === box;
+            },
+          });
+          if (!focused?.result) throw new Error('composer_not_found');
+          // Select through browser input so the editor's document, not only
+          // its rendered DOM, is replaced. insertText alone appends a second copy.
+          await cmd('Input.dispatchKeyEvent', {
+            type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
+          });
+          await cmd('Input.dispatchKeyEvent', {
+            type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
+          });
           await cmd('Input.insertText', { text });
           await new Promise((r) => setTimeout(r, 400));
+
+          const [verified] = await chrome.scripting.executeScript({
+            target,
+            args: [text],
+            func: (expected) => {
+              const box = document.querySelector('#prompt-textarea');
+              const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+              return !!box && document.activeElement === box && norm(box.innerText) === norm(expected);
+            },
+          });
+          if (!verified?.result) throw new Error('composer_text_mismatch');
 
           if (msg.send !== false) {
             for (const type of ['keyDown', 'char', 'keyUp']) {
@@ -307,11 +376,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // ผู้ใช้กด "ภาพเสร็จแล้ว" ที่หน้า Studio — ไปคว้าภาพล่าสุดจากแท็บ ChatGPT มาเลย
       case 'sw.grabImage': {
-        const chat = await ensureChatTab();
+        const pinnedId = msg.turnId ? (await S.get('imageTurnTabs', {}))[msg.turnId] : null;
+        if (msg.turnId && pinnedId == null) {
+          return sendResponse({ ok: false, error: 'image_turn_not_available' });
+        }
+        const chat = pinnedId != null ? await chrome.tabs.get(pinnedId) : await ensureChatTab();
         const ok = await ensureAdapter(chat.id);
         if (!ok) return sendResponse({ ok: false, error: 'ติดตั้ง content script ของ ChatGPT ไม่สำเร็จ' });
         try {
-          const result = await chrome.tabs.sendMessage(chat.id, { type: 'gpt.grabImage' });
+          const result = await chrome.tabs.sendMessage(chat.id, { type: 'gpt.grabImage', turnId: msg.turnId });
           return sendResponse(result || { ok: false, error: 'หน้า ChatGPT ไม่ตอบ' });
         } catch (e) {
           return sendResponse({ ok: false, error: `content script ไม่ตอบ: ${e?.message || e}` });

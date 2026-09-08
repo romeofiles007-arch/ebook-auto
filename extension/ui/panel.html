@@ -4,41 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Ebook Auto</title>
+  <link rel="icon" type="image/png" href="../icons/icon-32.png">
   <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="crew.css">
 </head>
 <body><main>
-  <div class="brand">📚 Ebook Auto</div>
-  <p>คิดแค่ชื่อหนังสือ ที่เหลือให้ ChatGPT ทำทั้งหมด</p>
-  <label>ชื่อหนังสือ</label>
-  <input id="title" placeholder="เช่น การย้อนเวลา">
-  <label>เขียนให้ใครอ่าน</label>
-  <input id="audience" list="panelAudienceOptions" placeholder="เลือกจากรายการหรือพิมพ์เอง">
-  <datalist id="panelAudienceOptions">
-    <option value="ผู้อ่านทั่วไปที่ไม่มีพื้นฐานในเรื่องนี้"></option>
-    <option value="ผู้เริ่มต้นที่ต้องการคำอธิบายทีละขั้นและตัวอย่างที่ทำตามได้"></option>
-    <option value="นักเรียนและนักศึกษาที่ต้องการปูพื้นฐานอย่างเป็นระบบ"></option>
-    <option value="คนวัยทำงานอายุ 22–40 ปีที่มีเวลาจำกัดและต้องการนำไปใช้จริง"></option>
-    <option value="ฟรีแลนซ์และคนทำงานอิสระที่ต้องการแนวทางลงมือทำด้วยตัวเอง"></option>
-    <option value="เจ้าของธุรกิจขนาดเล็กและผู้เริ่มทำธุรกิจที่มีงบประมาณจำกัด"></option>
-    <option value="ครีเอเตอร์และผู้ขายสินค้าออนไลน์ที่ต้องการเพิ่มรายได้อย่างไม่ขายฝัน"></option>
-    <option value="ผู้มีพื้นฐานอยู่แล้วที่ต้องการเนื้อหาเชิงลึกและกรณีศึกษา"></option>
-    <option value="ผู้สูงอายุที่ต้องการภาษาง่าย ตัวอักษรอ่านสบาย และขั้นตอนไม่ซับซ้อน"></option>
-    <option value="ผู้ปกครองที่ต้องการคู่มือกระชับสำหรับนำไปใช้กับครอบครัว"></option>
-  </datalist>
-  <label>ชื่อผู้เขียน</label>
-  <input id="author" placeholder="ระบบจะจำไว้ใช้ครั้งต่อไป">
-  <label>รูปแบบเนื้อหา</label>
-  <select id="contentMode">
-    <option value="prose">ร้อยแก้ว — บทและตอน</option>
-    <option value="fiction">นิยาย — บท ฉาก และตัวละคร</option>
-    <option value="items">รายชิ้น — คำคม กลอน ข้อคิด</option>
-  </select>
-  <div class="folder"><div>📁 <b>Shared Workspace + เก็บ Ebook</b><div id="folder">เลือกโฟลเดอร์เดียวกันในทุก Chrome Profile</div></div><button id="pick">เลือก</button></div>
-  <button id="create" class="primary">🚀 สร้าง Ebook</button>
-  <button id="random">🎲 สุ่มจากกระแสตอนนี้</button>
-  <button id="ideas">✨ ให้ ChatGPT คิดชื่อ แล้วเลือกใน Studio</button>
+  <div class="brand"><img class="brand-logo" src="../icons/icon-48.png" alt=""> <span>Ebook Auto</span></div>
+  <p>ติดตามงานที่นี่ · สร้างและจัดการหนังสือใน Studio</p>
   <button id="studio">เปิด Studio</button>
   <button id="chat">เปิด ChatGPT</button>
-  <div id="live" class="live">พร้อมเริ่มงาน</div>
+  <section aria-label="ทีมงานและสถานะล่าสุด">
+    <div id="panelCrew" class="crew-stage"><span class="crew-sprite crew-art" aria-hidden="true"><img class="crew-strip" src="crew/research-work.png" alt=""></span><div class="crew-description"><strong>ทีมงานพร้อมเริ่ม</strong><span>สถานะจะอัปเดตเมื่อ Studio เริ่มทำงาน</span></div><span class="crew-sprite crew-backdrop" aria-hidden="true"><img class="crew-strip" src="crew/research-work.png" alt=""></span></div>
+    <div id="crewRoster" class="crew-roster"></div>
+    <div id="live" class="live" role="status">พร้อมเริ่มงาน</div>
+  </section>
+  <section class="terminal" aria-label="บันทึกการทำงาน">
+    <div class="terminal-head"><b>EBOOK AUTO · LOG</b><button id="logFollow" aria-pressed="true">ตามล่าสุด</button></div>
+    <div id="panelLog" role="log" aria-live="off" tabindex="0"></div>
+    <div class="terminal-foot" id="logUpdated">รอข้อมูลจาก Studio<span aria-hidden="true"> ▋</span></div>
+  </section>
 </main><script type="module" src="panel.js"></script></body>
 </html>

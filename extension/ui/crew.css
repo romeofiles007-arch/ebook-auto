@@ -1,0 +1,14 @@
+.crew-sprite{display:block;position:relative;width:90px;aspect-ratio:3/4;overflow:hidden;flex-shrink:0;border-radius:10px;background:#101b29}
+.crew-sprite .crew-strip{display:block;width:400%;height:100%;max-width:none;object-fit:fill;transform:translateX(0);animation:none}
+.dept{position:relative;overflow:hidden;isolation:isolate;min-height:138px}
+.dept .body{position:relative;z-index:1;flex:1}
+.dept .crew-art{align-self:center}
+.dept.active .crew-strip,.crew-stage.working .crew-strip,.crew-roster .working .crew-strip{animation:crew-frames 1.6s steps(4,end) infinite}
+@keyframes crew-frames{to{transform:translateX(-100%)}}
+.crew-stage{position:relative;display:flex;gap:12px;align-items:center;padding:12px 0;min-width:0;isolation:isolate;overflow:hidden;border-radius:8px}
+.crew-description{min-width:0;position:relative;z-index:1}.crew-description strong{display:block;font-size:15px}.crew-description span{display:block;line-height:1.6;font-size:13px;overflow-wrap:anywhere}
+.crew-roster{display:flex;gap:5px;flex-wrap:wrap}.crew-roster .crew-sprite{width:30px;border-radius:4px}.crew-roster>[data-crew]{opacity:.55;border-radius:4px}.crew-roster>.current{opacity:1;outline:2px solid #247d61;outline-offset:1px}
+.crew-sprite.crew-backdrop{position:absolute;right:0;top:0;width:160px;height:100%;aspect-ratio:auto;opacity:.1;z-index:-1;pointer-events:none;mask-image:linear-gradient(to right,transparent,#000);background:transparent}
+.crew-stage .crew-backdrop{opacity:.08}
+@media(prefers-reduced-motion:reduce){.dept.active .crew-strip,.crew-stage.working .crew-strip,.crew-roster .working .crew-strip{animation:none}}
+@media(max-width:480px){.dept .crew-art{width:66px}.dept{gap:7px;padding:10px}.dept .mark{width:20px;height:20px}}
