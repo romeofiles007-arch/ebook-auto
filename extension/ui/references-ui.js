@@ -1,5 +1,6 @@
 import { searchReferences, formatReference, referenceLines, referenceProblem, MIN_REFERENCES, REFERENCE_STYLES, REFERENCE_EXAMPLES } from '../core/references.js';
 import { BOOK_EXAMPLES } from './reference-book-examples.js';
+import { collectReferences } from '../core/auto-references.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let candidates = [];
@@ -23,7 +24,7 @@ function renderSelected() {
 }
 function show() {
   $('referenceResults').innerHTML = candidates.map((s, i) => `<div class="reference-result">
-    <label><input type="checkbox" data-reference-index="${i}" ${selected.some((x) => x.doi === s.doi) ? 'checked' : ''}> อ่านต้นทางแล้วและเกี่ยวข้องกับเล่มนี้</label>
+    <label><input type="checkbox" data-reference-index="${i}" ${selected.some((x) => x.doi === s.doi) ? 'checked' : ''}> ${s.reviewedBy === 'automatic-abstract-review' ? 'ระบบคัดจากชื่อเรื่องและบทคัดย่อ · ยังไม่ได้อ่านฉบับเต็ม' : 'อ่านต้นทางแล้วและเกี่ยวข้องกับเล่มนี้'}</label>
     <b>${esc(s.title)}</b><div>${esc(s.authors.join(', '))} · ${s.year}</div>
     <div>${esc(s.container || s.publisher)} · ${esc(s.publisher)}</div>
     <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">เปิดต้นทาง · ${esc(s.doi)}</a>
@@ -40,8 +41,8 @@ $('referenceResults').addEventListener('change', (event) => {
   const left = MIN_REFERENCES - selected.length;
   message(
     left > 0
-      ? `เลือก ${selected.length} รายการแล้ว · ยังขาดอีก ${left} จึงจะครบเกณฑ์ ${MIN_REFERENCES} แหล่ง (ภาษาใดก็ได้)`
-      : `เลือก ${selected.length} รายการแล้ว · ครบเกณฑ์ ${MIN_REFERENCES} แหล่งแล้ว ระบบจัดรูปแบบให้เมื่อเริ่มสร้าง`,
+      ? `เลือก ${selected.length} รายการแล้ว · ตั้งเป้าไว้ ${MIN_REFERENCES} แหล่ง ยังขาดอีก ${left} แต่เริ่มสร้างด้วยเท่าที่มีได้`
+      : `เลือก ${selected.length} รายการแล้ว · ครบเป้า ${MIN_REFERENCES} แหล่งแล้ว ระบบจัดรูปแบบให้เมื่อเริ่มสร้าง`,
   );
 });
 function lock(value) {
@@ -88,7 +89,7 @@ $('bm_references').addEventListener('change', () => {
   renderReferenceExample();
   if ($('bm_references').checked && !selected.length) {
     $('referenceOptions').open = true; // ข้อความข้างล่างอยู่ในกล่องนี้ ถ้าไม่กางก็เท่ากับไม่ได้บอก
-    message(`ติ๊กบรรณานุกรมไว้แล้ว — ขั้นต่อไปคือค้นแล้วติ๊กเลือกแหล่งที่อ่านต้นทางแล้วอย่างน้อย ${MIN_REFERENCES} แหล่ง (ภาษาใดก็ได้) ระบบไม่แต่งรายการอ้างอิงขึ้นเอง ถ้าไม่ครบ หน้านี้จะไม่ถูกใส่ในเล่ม`);
+    message(`ติ๊กบรรณานุกรมไว้แล้ว — ขั้นต่อไปคือค้นแล้วติ๊กเลือกแหล่งที่อ่านต้นทางแล้ว ตั้งเป้าไว้ ${MIN_REFERENCES} แหล่ง (ภาษาใดก็ได้) ได้ไม่ครบก็ใช้เท่าที่มีได้ แต่ต้องมีอย่างน้อยหนึ่งแหล่ง เพราะระบบไม่แต่งรายการอ้างอิงขึ้นเอง`);
   }
 });
 renderReferenceExample();
@@ -102,10 +103,11 @@ export async function validateBackMatterSetup() {
     return 'เลือกเกี่ยวกับผู้เขียนไว้ กรุณากรอกข้อมูลจริงอย่างน้อย 40 ตัวอักษรก่อนเริ่ม';
   if (!$('bm_references').checked) return '';
   if (busy) return 'กำลังค้นหรือจัดรูปแบบบรรณานุกรม กรุณารอให้เสร็จ';
-  if (selected.length < MIN_REFERENCES) {
+  // ไม่มีแหล่งเลยคือหน้าเปล่าในเล่ม อันนี้ยังต้องกัน ส่วนได้ไม่ครบเป้าให้เดินต่อด้วยเท่าที่มี
+  if (!selected.length) {
     $('referenceOptions').open = true;
-    if (!selected.length) await findReferences();
-    return `บรรณานุกรมต้องมีอย่างน้อย ${MIN_REFERENCES} แหล่งที่อ่านต้นทางแล้ว (ภาษาใดก็ได้) ตอนนี้เลือกไว้ ${selected.length} แหล่ง — ค้นเพิ่มแล้วติ๊กเลือก หรือเอาบรรณานุกรมออกจากเล่มนี้`;
+    await findReferences();
+    return `บรรณานุกรมยังไม่มีแหล่งสักรายการ — ค้นแล้วติ๊กเลือก (ตั้งเป้าไว้ ${MIN_REFERENCES} แหล่ง ภาษาใดก็ได้) หรือเอาบรรณานุกรมออกจากเล่มนี้`;
   }
   lock(true);
   try {
@@ -120,4 +122,28 @@ export async function validateBackMatterSetup() {
     return referenceProblem({ backMatter: ['references'], ...readReferenceSettings() });
   } catch (e) { return `จัดรูปแบบอ้างอิงไม่สำเร็จ: ${e.message} · เก็บรายการและรูปแบบไว้แล้ว ลองเริ่มอีกครั้งได้`; }
   finally { lock(false); }
+}
+
+/**
+ * ค้นให้ถึงเป้า แต่ได้ไม่ถึงก็ไม่ล้ม — เอาเท่าที่หาได้จริง
+ *
+ * เดิมโยน error เมื่อค้นครบรอบแล้วยังไม่ถึงห้าแหล่ง ซึ่งทำให้ทั้งเล่มหยุดกลางทาง
+ * ทั้งที่ของที่คัดได้แล้วใช้ได้จริงและไม่มีอะไรผิด หัวข้อบางเรื่องไม่มีงานวิชาการห้าชิ้นให้ค้นก็แค่นั้น
+ * คืนจำนวนที่ได้กลับไปให้ผู้เรียกตัดสินใจเอง
+ */
+export async function selectReferencesAutomatically(choose) {
+  if (selected.length >= MIN_REFERENCES) return { found: selected.length, searches: 0 };
+  const query = $('referenceQuery').value.trim() || $('title').value.trim();
+  lock(true);
+  try {
+    const result=await collectReferences({query,selected,minimum:MIN_REFERENCES,search:searchReferences,choose,
+      onProgress:(sources,note)=>{selected=sources;candidates=[...sources];show();renderSelected();message(note);},
+    });
+    message(
+      selected.length >= MIN_REFERENCES
+        ? `คัดได้ ${selected.length} แหล่ง ครบเป้าแล้ว`
+        : `ค้น ${result.searches} รอบ ได้ ${selected.length} แหล่งจากเป้า ${MIN_REFERENCES} — ใช้เท่าที่มีจริง ไม่เติมให้ครบเอง`,
+    );
+    return { found: selected.length, searches: result.searches };
+  } finally {lock(false);}
 }

@@ -28,14 +28,16 @@ test('legacy or partially formatted bibliography cannot pass as ready', () => {
   assert.equal(referenceProblem(b),'');
   b.referenceStyle='ieee'; assert.ok(referenceProblem(b));
 });
-test('บรรณานุกรมที่มีไม่ถึงห้าแหล่งยังไม่นับว่าพร้อม', () => {
+test('เกณฑ์ห้าแหล่งเป็นเป้า ไม่ใช่ด่าน — ได้ไม่ครบก็ยังพิมพ์ได้ แต่ศูนย์แหล่งไม่ได้', () => {
   const source=(i)=>({...normalizeWork(work),doi:`10.1038/nrd${842+i}`,reviewed:true,citations:{apa:`Entry ${i}`}});
   const book=(n)=>({backMatter:['references'],referenceStyle:'apa',referenceSources:Array.from({length:n},(_,i)=>source(i))});
-  for (const n of [1,2,3,4]) assert.match(referenceProblem(book(n)),/อย่างน้อย 5 แหล่ง/,`${n} แหล่งต้องไม่ผ่าน`);
-  assert.equal(referenceProblem(book(5)),'','ครบห้าแหล่งต้องผ่าน');
-  // ไม่ติ๊กบรรณานุกรมก็ไม่ต้องมีแหล่งเลย กติกานี้ใช้เฉพาะกับเล่มที่จะพิมพ์หน้าอ้างอิงจริง
+  // หัวข้อบางเรื่องไม่มีงานวิชาการห้าชิ้นให้ค้น การหยุดทั้งเล่มไว้ตรงนี้เสียมากกว่าได้
+  for (const n of [1,2,3,4,5]) assert.equal(referenceProblem(book(n)),'',`${n} แหล่งต้องผ่าน`);
+  // แต่ติ๊กบรรณานุกรมไว้แล้วไม่มีแหล่งเลย = หน้าเปล่าในเล่ม อันนี้ยังต้องกัน
+  assert.ok(referenceProblem(book(0)));
   assert.equal(referenceProblem({backMatter:[],referenceSources:[]}),'');
 });
+
 test('all export formats can consume the same selected back matter', () => {
   const b={backMatter:['glossary','references','about_author'],bible:{glossary:[{term:'Test',def:'Definition'},{term:'Empty'}]},aboutAuthor:'ข้อมูลจริง',referenceStyle:'apa',referenceSources:[{citations:{apa:'Same reference'}}]};
   assert.deepEqual(backMatterSections(b).map(s=>s.lines),[['Test — Definition'],['Same reference'],['ข้อมูลจริง']]);

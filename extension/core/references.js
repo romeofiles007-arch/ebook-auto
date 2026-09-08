@@ -69,18 +69,18 @@ export function referenceLines(book) {
     `${style === 'ieee' ? `[${i + 1}] ` : style === 'vancouver' ? `${i + 1}. ` : ''}${s.citations[style]}`);
 }
 /**
- * บรรณานุกรมที่มีแหล่งเดียวหรือสองแหล่งอ่านแล้วแย่กว่าไม่มีเลย
+ * ห้าแหล่งคือ "เป้า" ไม่ใช่ "ด่าน"
  *
- * มันบอกผู้อ่านว่า "เล่มนี้มีงานวิชาการรองรับ" ทั้งที่รองรับได้แค่ประโยคเดียวในเล่ม
- * ห้าแหล่งคือเกณฑ์ที่พอจะเรียกว่าอ่านมาก่อนเขียนจริง ๆ ภาษาใดก็ได้ ไม่จำกัดว่าต้องอังกฤษ
+ * เกณฑ์นี้มีไว้ให้ระบบพยายามหาให้ครบ และบอกผู้ใช้ว่ายังขาดเท่าไร
+ * แต่ถ้าค้นจนสุดแล้วได้ไม่ครบ การหยุดทั้งเล่มไว้ตรงนี้เสียมากกว่าได้ —
+ * เอาเท่าที่มีจริงไปพิมพ์ ตรงกว่าและไม่ได้กุอะไรขึ้นมาเพิ่ม
+ * สิ่งที่ยังห้ามคือ "ติ๊กบรรณานุกรมไว้แต่ไม่มีแหล่งเลย" ซึ่งจะได้หน้าเปล่าในเล่ม
  */
 export const MIN_REFERENCES = 5;
 
 export function referenceProblem(book) {
   if (!(book.backMatter || []).includes('references')) return '';
   if (!book.referenceSources?.length) return 'เลือกบรรณานุกรม แต่ยังไม่ได้ค้นและเลือกแหล่งอ้างอิงที่ตรวจต้นทางแล้ว';
-  if (book.referenceSources.length < MIN_REFERENCES)
-    return `บรรณานุกรมต้องมีอย่างน้อย ${MIN_REFERENCES} แหล่ง ตอนนี้เลือกไว้ ${book.referenceSources.length} แหล่ง (ภาษาใดก็ได้) — ค้นเพิ่มแล้วติ๊กเลือก หรือเอาบรรณานุกรมออกจากเล่มนี้ก็ได้`;
   if (!REFERENCE_STYLES[book.referenceStyle || 'apa']) return 'รูปแบบอ้างอิงไม่รองรับ';
   if (book.referenceSources.some((s) => !s.doi || s.registry !== 'Crossref' || !s.reviewed || !s.citations?.[book.referenceStyle || 'apa']))
     return 'แหล่งอ้างอิงบางรายการยังไม่ได้ตรวจเลือกหรือจัดรูปแบบ กรุณากลับไปยืนยันรายการ';
