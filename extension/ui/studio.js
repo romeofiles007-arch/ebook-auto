@@ -5,7 +5,9 @@
  */
 
 import * as db from '../core/db.js';
-import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage, isModernCoverDesign } from '../core/machine.js';
+import { crewMarkup } from './crew-sprites.js';
+import { readReferenceSettings, validateBackMatterSetup, resetReferenceSources } from './references-ui.js';
+import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage, isModernCoverDesign, clearFigurePlan } from '../core/machine.js';
 import { makeTransport, hasPendingTurn } from '../transport/index.js';
 import {
   MODEL_PRICES,
@@ -96,18 +98,33 @@ const STEP_NAMES = {
  * ข้อความสถานะบรรทัดเดียว (เช่น "กำลังรอ ChatGPT ตอบ") ไม่บอกว่ากำลังคิดชื่อ ค้นกระแส หรือเขียนเล่มอยู่
  */
 let currentMode = '';
+let crewWorking = false;
+let activitySerial = 0;
+let lastProgressLog = '';
+let lastProgressLogAt = 0;
+const activitySession = crypto.randomUUID();
+function publishActivity(message, level = 'info', crew = null) {
+  chrome.runtime.sendMessage({ type: 'ui.activity', event: {
+    id: `${activitySession}:${++activitySerial}`, at: Date.now(),
+    message: String(message || '').slice(0, 1600), level,
+    bookTitle: book?.title || '', ...(crew ? { crew } : {}),
+  } }).catch(() => {});
+}
 
 function setMode(label = '', { busy = false } = {}) {
   currentMode = label;
+  crewWorking = busy;
   const el = $('mode');
   if (!el) return;
   el.textContent = label ? `โหมด: ${label}` : '';
   el.classList.toggle('hidden', !label);
   el.classList.toggle('busy', !!label && busy);
+  renderSteps();
 }
 
 const status = (s) => {
   $('status').textContent = s;
+  publishActivity(currentMode ? `[${currentMode}] ${s}` : s);
   // แถบข้างเห็นได้บรรทัดเดียว จึงต้องพ่วงชื่อโหมดไปกับข้อความ
   chrome.runtime
     .sendMessage({ type: 'ui.status', message: currentMode ? `[${currentMode}] ${s}` : s })
@@ -126,13 +143,60 @@ const status = (s) => {
  * กล่องจริงที่คนอ่านแล้วตัดสินใจ ใช้เวลาอย่างน้อยหลักสิบมิลลิวินาทีเสมอ
  * ถ้าตอบ false กลับมาภายในไม่กี่มิลลิวินาที แปลว่ากล่องไม่เคยขึ้น ไม่ใช่ผู้ใช้ปฏิเสธ
  */
-function ask(message) {
+/**
+ * @param {string} message
+ * @param {{auto?: boolean}} [opts] auto = ประตูบานนี้อยู่บนเส้นทางของโหมดอัตโนมัติ
+ *   โหมดอัตโนมัติแปลว่า "ห้ามหยุดรอคนกด" ประตูที่ทำเครื่องหมายไว้จึงถูกตอบตกลงให้เอง
+ *   และบันทึกไว้ใน log ว่าตอบอะไรไปแทน — ไม่ใช่ตอบเงียบ ๆ แล้วให้ไปงงทีหลัง
+ *   ประตูอื่น (ลบโครงการ · ส่งออกทั้งที่ยังมีตอนว่าง · ข้าม Phase 2) ไม่ติดธงนี้โดยตั้งใจ
+ *   เพราะเป็นคำสั่งที่ผู้ใช้กดเอง ไม่ใช่ขั้นตอนที่งานอัตโนมัติต้องเดินผ่าน
+ */
+function ask(message, { auto = false } = {}) {
+  if (auto && autoPilot()) {
+    addEvent('system', 'อัตโนมัติ: ตอบตกลงให้เอง', String(message).split('\n').filter(Boolean)[0] || '');
+    return true;
+  }
   const t0 = performance.now();
   const ok = confirm(message);
   if (!ok && performance.now() - t0 < 8) {
     status('เบราว์เซอร์กำลังบล็อกกล่องยืนยันของหน้านี้อยู่ ปุ่มจึงกดแล้วไม่มีอะไรเกิดขึ้น — รีโหลดหน้านี้หนึ่งครั้งแล้วอย่าติ๊ก "ป้องกันไม่ให้หน้านี้สร้างกล่องโต้ตอบเพิ่มเติม"');
   }
   return ok;
+}
+
+/**
+ * เสียงแจ้งเตือนสั้น ๆ — งานนี้ใช้เวลาเป็นสิบนาที คนไม่ได้นั่งเฝ้าจอ
+ *
+ * สังเคราะห์เสียงด้วย WebAudio ไม่ใช้ไฟล์เสียง เพื่อไม่ต้องเพิ่ม asset และไม่ต้องขอสิทธิ์อะไรเพิ่ม
+ * มีสองเสียงที่ต่างกันชัดเจน เพราะสองเหตุการณ์นี้ต้องการการตอบสนองคนละแบบ:
+ * 'done' = เสร็จแล้ว ไปดูได้ (สองโน้ตไล่ขึ้น) · 'attention' = ระบบรอคุณอยู่ (สามครั้งสั้น ๆ ถี่กว่า)
+ * เบราว์เซอร์ห้ามเล่นเสียงก่อนมีการโต้ตอบ ซึ่งไม่เป็นปัญหาเพราะทุกเสียงเกิดหลังผู้ใช้กดปุ่มเริ่มแล้ว
+ */
+let audioCtx = null;
+function chime(kind = 'done') {
+  if (!$('soundOn')?.checked) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const notes = kind === 'attention' ? [880, 880, 880] : [660, 990];
+    const gap = kind === 'attention' ? 0.16 : 0.18;
+    notes.forEach((hz, i) => {
+      const t = audioCtx.currentTime + i * gap;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = hz;
+      // ขึ้นเร็ว ลงนุ่ม ไม่ให้มีเสียง "ป๊อก" ตอนตัดสัญญาณ
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.16);
+    });
+  } catch {
+    // เสียงเล่นไม่ได้ไม่ใช่เรื่องที่ต้องหยุดงาน ข้อความบนจอกับ log ยังบอกครบเหมือนเดิม
+  }
 }
 
 const esc = (v) =>
@@ -153,6 +217,7 @@ async function syncSharedProject(id = book?.id) {
 }
 
 function addEvent(direction, label, text, meta = '') {
+  publishActivity([label, text, meta].filter(Boolean).join(' · '), label === 'warn' || label === 'error' ? label : direction);
   const feed = $('feed');
   if (eventCount === 0) feed.innerHTML = '';
   eventCount++;
@@ -172,10 +237,17 @@ function addEvent(direction, label, text, meta = '') {
 function setPhase(name, detail = '') {
   $('phase').textContent = STEP_NAMES[name] || name || 'กำลังทำงาน';
   $('detail').textContent = detail || '';
+  publishActivity(`${STEP_NAMES[name] || name} · ${detail || 'เริ่มขั้นตอน'}`);
   const idx = Math.max(0, STEP_ORDER.indexOf(name));
   $('bar').style.width = `${Math.min(99, Math.round((idx / (STEP_ORDER.length - 1)) * 100))}%`;
   const dept = DEPT_OF_STEP.get(name);
-  if (dept != null) activeDept = dept;
+  if (dept != null) {
+    if (name === 'done') completedDepts.add(dept);
+    else completedDepts.delete(dept);
+    // เข้ารอบใหม่ของแผนกนี้ = ล้างผลล้มของรอบก่อน ไม่งั้นแดงค้างทั้งที่กำลังทำใหม่อยู่
+    if (dept !== activeDept && deptNotes.get(dept)?.level === 'bad') deptNotes.delete(dept);
+    activeDept = dept;
+  }
   renderSteps();
 }
 
@@ -191,7 +263,7 @@ const DEPARTMENTS = [
   {
     id: 'research',
     name: 'นักค้นคว้า',
-    role: 'ค้นกระแส หาแหล่งอ้างอิง ตั้งชื่อหนังสือ และตรวจการเชื่อมต่อ ChatGPT ก่อนเริ่ม',
+    role: 'ถามหัวข้อที่น่าสนใจตอนนี้ ตั้งชื่อหนังสือ และตรวจการเชื่อมต่อ ChatGPT ก่อนเริ่ม',
     steps: ['health'],
     tune: 'trendIdeasPrompt · titleIdeasPrompt · adapter/selectors.json',
   },
@@ -224,6 +296,15 @@ const DEPARTMENTS = [
     tune: 'figurePlanPrompt · styleTokenPrompt · frontCoverPrompt · imageTurn',
   },
   {
+    id: 'proof',
+    name: 'แผนกพิสูจน์คำสั่งภาพ',
+    role:
+      'อ่านคำสั่งภาพทุกฉบับก่อนส่งออกจริง — จับคำสั่งที่ขัดกันเอง คำสั่งที่อ่านเป็นงานแก้ภาพ ' +
+      'คำสั่งซ้ำ และภาพที่ต้องพึ่งตัวอักษร แก้ให้แล้วบอกว่าแก้อะไร จากนั้นตรวจไฟล์ที่ได้ก่อนประกอบเล่ม',
+    steps: ['images'],
+    tune: 'imagePromptAuditPrompt · machine.auditImagePrompts',
+  },
+  {
     id: 'layout',
     name: 'ฝ่ายจัดเล่ม',
     role: 'วัดว่าหนึ่งหน้าใส่ได้เท่าไร แล้วยืด/ย่อเนื้อหาให้จำนวนหน้าเข้าเป้า',
@@ -239,39 +320,64 @@ const DEPARTMENTS = [
   },
 ];
 
-const DEPT_OF_STEP = new Map(DEPARTMENTS.flatMap((d, i) => d.steps.map((st) => [st, i])));
+const DEPT_OF_STEP = new Map(DEPARTMENTS.flatMap((d, i) => d.steps.filter((st) => d.id !== 'proof').map((st) => [st, i])));
 
 // ผลงานล่าสุด/ปัญหาล่าสุดของแต่ละแผนก เก็บไว้ระหว่างที่หน้ายังเปิดอยู่
 const deptNotes = new Map();
+const completedDepts = new Set();
 let activeDept = -1;
 
-/** บันทึกผลงานล่าสุดของแผนกที่กำลังทำงานอยู่ ใช้กับ log ที่ไม่ได้บอกขั้นตอนมาด้วย */
-function noteActiveDept(text, bad = false) {
-  if (activeDept < 0) return;
-  deptNotes.set(activeDept, { text: String(text || '').replace(/\s+/g, ' ').slice(0, 200), bad });
+/**
+ * ระดับความหนักของผลล่าสุด — ok · warn · bad
+ *
+ * เดิมกระดานมีแค่สองสถานะ คือ "ปกติ" กับ "ตาย" แล้วผูก "ตาย" ไว้กับ log ระดับ warn
+ * ผลคืออ่านผิดทั้งสองทาง: คำเตือนที่ระบบตามแก้ให้เองอยู่แล้ว (เช่น ตอนหนึ่งสั้นกว่าโควตา
+ * ซึ่งขั้นปรับจำนวนหน้าจะยืดให้) ขึ้นกากบาทแดงราวกับแผนกนั้นพัง ทั้งที่งานเดินต่อจนจบ
+ * ส่วน log ระดับ error ซึ่งคืองานที่ล้มจริง กลับไม่ทำเครื่องหมายอะไรเลย
+ *
+ * แยกเป็นสามระดับจึงตรงกับสิ่งที่เกิดขึ้นจริง: เตือน = เหลืองพร้อมบอกว่าเตือนเรื่องอะไร
+ * ล้ม = แดง และแดงต้องค้างไว้จนกว่าแผนกนั้นจะถูกเรียกทำงานรอบใหม่ ไม่ใช่ถูก log
+ * บรรทัดถัดไปลบทิ้งไปเฉย ๆ
+ */
+const LEVEL_OF_LOG = { error: 'bad', warn: 'warn' };
+
+function setNote(i, text, level) {
+  if (i == null || i < 0) return;
+  const prev = deptNotes.get(i);
+  // งานที่ล้มแล้วยังล้มอยู่ จนกว่าแผนกนั้นจะเริ่มรอบใหม่ (setPhase เป็นคนล้างให้)
+  if (prev?.level === 'bad' && level !== 'bad') return;
+  deptNotes.set(i, { text: String(text || '').replace(/\s+/g, ' ').slice(0, 200), level });
   renderSteps();
 }
 
-function noteDept(step, text, bad = false) {
-  const i = DEPT_OF_STEP.get(step);
-  if (i == null) return;
-  deptNotes.set(i, { text: String(text || '').replace(/\s+/g, ' ').slice(0, 200), bad });
-  renderSteps();
+/** บันทึกผลงานล่าสุดของแผนกที่กำลังทำงานอยู่ ใช้กับ log ที่ไม่ได้บอกขั้นตอนมาด้วย */
+function noteActiveDept(text, level = 'ok') {
+  setNote(activeDept, text, level);
+}
+
+function noteDept(step, text, level = 'ok') {
+  setNote(DEPT_OF_STEP.get(step), text, level);
 }
 
 const renderSteps = () => {
   $('steps').innerHTML = DEPARTMENTS.map((d, i) => {
     const note = deptNotes.get(i);
-    const state = note?.bad ? 'bad' : i === activeDept ? 'active' : activeDept >= 0 && i < activeDept ? 'done' : '';
-    const mark = note?.bad ? '✕' : i === activeDept ? '⟳' : activeDept >= 0 && i < activeDept ? '✓' : i + 1;
+    const progress = i === activeDept && crewWorking ? 'active' : completedDepts.has(i) ? 'done' : '';
+    const severity = note?.level === 'bad' ? 'bad' : note?.level === 'warn' ? 'warn' : '';
+    const mark = severity === 'bad' ? '✕' : severity === 'warn' ? '!' : progress === 'active' ? '⟳' : progress === 'done' ? '✓' : i + 1;
     return (
-      `<div class="dept ${state}">` +
+      `<div class="dept ${progress} ${severity}">` +
+      crewMarkup(d.id, 'crew-backdrop') +
       `<div class="mark">${mark}</div>` +
       `<div class="body"><b>${esc(d.name)}</b><span class="role">${esc(d.role)}</span>` +
       (note ? `<span class="note">${esc(note.text)}</span>` : '') +
-      `<span class="tune">ปรับที่: ${esc(d.tune)}</span></div></div>`
+      `</div>${crewMarkup(d.id, 'crew-art')}</div>`
     );
   }).join('');
+  const d = DEPARTMENTS[activeDept] || DEPARTMENTS[0];
+  publishActivity('', 'crew', { id: d.id, name: d.name, working: crewWorking,
+    detail: activeDept < 0 ? (currentMode || 'ทีมงานพร้อมเริ่ม · สร้างหนังสือใน Studio') :
+      $('detail').textContent || deptNotes.get(activeDept)?.text || d.role });
 };
 
 /**
@@ -381,6 +487,16 @@ function logMachine(e) {
       compile: '✓ Images OK · กำลังประกอบ Ebook',
     }[e.stage] || `กำลังทำภาพ ${pos} · ${label}`;
     setPhase('images', stage);
+    if (['verify_all', 'compile'].includes(e.stage)) {
+      activeDept = DEPARTMENTS.findIndex((d) => d.id === 'proof');
+      setNote(activeDept, stage, 'ok');
+      if (e.stage === 'compile') {
+        completedDepts.add(activeDept);
+        completedDepts.add(DEPARTMENTS.findIndex((d) => d.id === 'art'));
+        renderSteps();
+      }
+    }
+    publishActivity(`${stage}${e.name ? ` · ไฟล์ ${e.name}` : ''}`, e.stage === 'failed' ? 'warn' : 'info');
     status(e.stage === 'failed' ? 'Image Phase 2 หยุดรอแก้' : 'กำลังทำ Image Phase 2');
     // อัปเดตแถวของรูปที่กำลังทำอยู่ในหน้า Phase 2 ให้เห็นสด ๆ ว่าอยู่ขั้นไหน
     if (phase2Running) {
@@ -391,13 +507,24 @@ function logMachine(e) {
   }
   if (e.type === 'log') {
     addEvent('system', e.level || 'log', e.message);
-    noteActiveDept(e.message, e.level === 'warn');
+    if (/แผนกพิสูจน์คำสั่งภาพ/.test(e.message || '')) activeDept = DEPARTMENTS.findIndex((d) => d.id === 'proof');
+    noteActiveDept(e.message, LEVEL_OF_LOG[e.level] || 'ok');
     if (book?.lastCompile?.pages)
       showPages(book.lastCompile.pages, expectedPhysicalPages(book), book.pageTolerance ?? 2);
     return;
   }
   if (e.type === 'step') return setPhase(e.step) || addEvent('system', STEP_NAMES[e.step] || e.step, '');
-  if (e.type === 'step_done') return addEvent('system', 'เสร็จขั้นตอน', STEP_NAMES[e.step] || e.step);
+  if (e.type === 'step_done') {
+    const i = DEPT_OF_STEP.get(e.step);
+    const incompleteImages = e.step === 'images' && book?.imagePhase?.status !== 'complete';
+    if (i != null && !incompleteImages) completedDepts.add(i);
+    const previous = deptNotes.get(i);
+    if (!incompleteImages && previous?.level === 'warn' && /ส่งงานไม่ออก|ลองส่งใหม่|prompt_not_sent/.test(previous.text))
+      setNote(i, `จบขั้นตอนแล้ว · เคยส่งไม่สำเร็จและลองใหม่ ดูรายละเอียดใน log`, 'ok');
+    else if (!previous) noteDept(e.step, 'จบขั้นตอนแล้ว', 'ok');
+    renderSteps();
+    return addEvent('system', incompleteImages ? 'ยังมีภาพรอแก้ไข' : 'เสร็จขั้นตอน', STEP_NAMES[e.step] || e.step);
+  }
   if (e.type === 'state') book = e.book;
 }
 
@@ -521,6 +648,11 @@ function handleGptMessage(m) {
 
   // ไม่มีเทิร์นไหนรอผลอยู่ = ข้อความนี้มาช้ากว่างานที่จบไปแล้ว ห้ามทับสถานะปัจจุบัน
   if (!hasPendingTurn()) return;
+  if (m.phase !== lastProgressLog || Date.now() - lastProgressLogAt > 5000) {
+    lastProgressLog = m.phase;
+    lastProgressLogAt = Date.now();
+    publishActivity(`ChatGPT · ${m.message || m.phase || 'กำลังทำงาน'}${m.detail ? ` · ${m.detail}` : ''}${m.note ? ` · ${m.note}` : ''}`, 'progress');
+  }
   const map = {
     waiting_ready: 'รอหน้า ChatGPT โหลดให้พร้อม',
     waiting_idle: 'รอให้ ChatGPT ตอบงานก่อนหน้าจบ',
@@ -542,6 +674,7 @@ function handleGptMessage(m) {
   if (m.phase === 'awaiting_user_send') {
     $('detail').textContent = String(m.detail || '');
     addEvent('system', '⌨️ ต้องกด Enter เอง', String(m.detail || ''));
+    chime('attention'); // ด่านนี้ไม่มีใครทำแทนได้ ต้องเรียกคนกลับมาที่จอ
     if (phase2Running && phase2Stage) {
       phase2Stage.text = '⌨️ กดส่งอัตโนมัติไม่ติด — ไปกด Enter ในแท็บ ChatGPT หนึ่งครั้ง';
       const cell = document.querySelector(`[data-p2-row="${CSS.escape(phase2Stage.name || '')}"] .p2Note`);
@@ -670,7 +803,19 @@ const safeHttpUrl = (v) => {
  * คนที่กดไล่จากบนลงล่างจะได้สารบัญของค่าตั้งต้น พอมาแก้จำนวนหน้าทีหลังก็ต้องเสนอใหม่ทั้งชุด
  * — เสียเวลาไปหนึ่งรอบเต็มโดยไม่จำเป็น
  */
+/**
+ * ป้ายกฎ "แก้ค่าแล้วสารบัญต้องคิดใหม่" โผล่เฉพาะตอนที่กฎมีผลจริง
+ *
+ * เดิมค้างอยู่บนขั้นตั้งค่าเล่มตลอดเวลา ทั้งที่ตอนยังไม่มีสารบัญ มันไม่ได้เตือนอะไรเลย
+ * เป็นแค่ตัวอักษรสีเหลืองที่ผู้ใช้ต้องอ่านผ่านทุกครั้งจนเลิกอ่าน แล้วพอถึงวันที่มันสำคัญจริง
+ * ก็ไม่มีใครเห็นมันอีกแล้ว — คำเตือนที่ขึ้นตลอดเวลาเท่ากับไม่มีคำเตือน
+ */
+function syncStepWarn() {
+  document.querySelector('.stepWarn')?.classList.toggle('hidden', !outlineDirection);
+}
+
 function renderStepGuide() {
+  syncStepWarn();
   const guide = $('stepGuide');
   if (!guide) return;
   const done = {
@@ -739,78 +884,122 @@ function markOutlineStale(reason) {
     (outlineOrigin === 'inspire' ? polishUserOutline() : generateOutlineDirections());
 }
 
-function renderRandomTrend() {
-  const box = $('trendIdeas');
-  const usable = trendPool.filter((x) => Array.isArray(x?.sources) && x.sources.filter((s) => safeHttpUrl(s?.url)).length >= 1);
-  if (!usable.length) {
-    box.innerHTML = '<b>ยังไม่มีกระแสที่ยืนยันได้</b><div class="muted">ChatGPT ต้องค้นเว็บและคืนอย่างน้อย 1 แหล่งจริงต่อหนึ่งกระแส ระบบจะไม่สุ่มจากข้อมูลที่ไม่มีที่มา</div>';
-    return;
+/**
+ * ตั้งชื่อจากหัวข้อที่เลือก
+ *
+ * หนึ่งเทิร์นได้ชื่อมาหลายอัน เก็บที่เหลือไว้ในกอง ปุ่ม "ตั้งชื่อใหม่" จึงหยิบจากกองก่อน
+ * ไม่ต้องยิงถาม ChatGPT ใหม่ทุกครั้ง — กดเปลี่ยนชื่อได้ทันทีจนกองหมดค่อยไปถามรอบใหม่
+ */
+let titlePool = [];
+
+async function nameFromTopic({ box = $('trendIdeas'), fresh = false } = {}) {
+  if (fresh) titlePool = [];
+  if (!titlePool.length) {
+    box.textContent = 'กำลังให้ ChatGPT ตั้งชื่อเล่มจากหัวข้อนี้...';
+    status('กำลังตั้งชื่อหนังสือ');
+    const res = await sendTurn(
+      makeTransport(transportKind(), transportOpts()),
+      titleIdeasPrompt({
+        topic: trendSeed?.trend || $('title').value.trim(),
+        audience: $('audience').value.trim(),
+        tone: $('tone').value.trim(),
+        language: val('lang', 'th'),
+        contentMode: val('contentMode', 'prose'),
+        fictionGenre: val('fictionGenre', 'fantasy'),
+        trendSeed,
+        today: new Date().toISOString().slice(0, 10),
+        avoidTitles: await previousTitles(),
+      }),
+      { label: 'ตั้งชื่อหนังสือ' },
+      { onRetry: (n, max, r) => retryNotice(box, n, max, 'ตั้งชื่อหนังสือ', r), parse: parseTitleAnswer },
+    );
+    if (res?.error) throw new Error(res.error);
+    titlePool = res.data;
   }
-  const previous = trendSeed?.trend;
-  const choices = usable.length > 1 ? usable.filter((x) => x.trend !== previous) : usable;
-  const pick = choices[Math.floor(Math.random() * choices.length)] || usable[0];
-  trendSeed = structuredClone(pick);
-  const sources = (pick.sources || [])
-    .filter((s) => safeHttpUrl(s.url))
-    .map((s) => `<li><b>${esc(s.publisher || s.title || 'แหล่งข้อมูล')}</b>${s.date ? ` · ${esc(s.date)}` : ''}<br><span>${esc(s.title || '')}</span><br><a href="${esc(safeHttpUrl(s.url))}" target="_blank" rel="noreferrer">${esc(s.url)}</a></li>`)
-    .join('');
-  box.innerHTML = `<b>🎲 สุ่มได้กระแสนี้</b>
-    <div class="trendPick">
-      <h3>${esc(pick.trend)}</h3>
-      <p><b>ทำไมตอนนี้:</b> ${esc(pick.why_now || '-')}</p>
-      <p><b>หลักฐานแกน:</b> ${esc(pick.fact_anchor || '-')}</p>
-      <p><b>มุม Ebook:</b> ${esc(pick.book_angle || '-')}</p>
-      <p><b>ชื่อชั่วคราว:</b> ${esc(pick.suggested_title || pick.trend)}${pick.subtitle ? ` — ${esc(pick.subtitle)}` : ''}</p>
-      <ul class="trendSources">${sources}</ul>
-      <div class="trendActions">
-        <button type="button" data-use-trend class="primary inline">ใช้กระแสนี้ → คิดชื่อ</button>
-        <button type="button" data-reroll-trend>สุ่มอีกเรื่องจากผลค้นนี้</button>
-        <button type="button" data-refresh-trend>ค้นกระแสใหม่</button>
-      </div>
-    </div>`;
-  box.querySelector('[data-use-trend]').onclick = async () => {
-    $('title').value = pick.suggested_title || pick.trend;
-    if ($('bm_references')) $('bm_references').checked = true;
-    resetOutlineDirection();
-    status('เลือกกระแสแล้ว — กำลังเสนอชื่อหนังสือ');
-    await generateTitleIdeas();
-  };
-  box.querySelector('[data-reroll-trend]').onclick = () => renderRandomTrend();
-  box.querySelector('[data-refresh-trend]').onclick = () => generateTrendIdeas();
+  const namePick = titlePool.shift();
+  $('title').value = namePick.title;
+  resetOutlineDirection();
+  renderTopicNamed(namePick, box);
+  status('ได้ชื่อเล่มแล้ว — กด “ตั้งชื่อใหม่” ถ้ายังไม่ถูกใจ');
 }
 
-/**
- * ตรวจคำตอบโหมดกระแสให้ครบทุกด่าน แล้วบอกให้ชัดว่าตกด่านไหนพร้อมของจริงที่ได้มา
- * คืน { data } เมื่อใช้ได้ หรือ { error } เพื่อให้ sendTurn ยิงใหม่ให้เองโดยไม่ต้องให้ผู้ใช้กด
- */
+function renderTopicNamed(namePick, box) {
+  box.innerHTML = `<b>ชื่อเล่ม</b>
+    <div class="trendPick">
+      <h3>${esc(namePick.title)}</h3>
+      ${namePick.subtitle ? `<p>${esc(namePick.subtitle)}</p>` : ''}
+      ${namePick.angle ? `<p class="muted">${esc(namePick.angle)}</p>` : ''}
+      <p class="muted">จากหัวข้อ: ${esc(trendSeed?.trend || '-')}</p>
+      <div class="trendActions">
+        <button type="button" data-rename class="primary inline">🎲 ตั้งชื่อใหม่</button>
+        <button type="button" data-back-topics>เลือกหัวข้ออื่น</button>
+      </div>
+    </div>`;
+  box.querySelector('[data-rename]').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await nameFromTopic({ box });
+    } catch (e) {
+      box.innerHTML = `<b>ตั้งชื่อไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}</div>`;
+      status('ตั้งชื่อไม่สำเร็จ');
+    }
+  };
+  box.querySelector('[data-back-topics]').onclick = () => renderTopicChoices();
+}
+
+function renderTopicChoices() {
+  const box = $('trendIdeas');
+  if (!trendPool.length) {
+    box.innerHTML = '<b>ยังไม่มีหัวข้อ</b><div class="muted">กดปุ่มสุ่มอีกครั้งเพื่อให้ ChatGPT เสนอหัวข้อใหม่</div>';
+    return;
+  }
+  box.innerHTML =
+    '<b>เลือกหัวข้อที่สนใจ</b><div class="titleIdeaList">' +
+    trendPool
+      .map(
+        (t, i) =>
+          `<button type="button" data-topic="${i}"><b>${esc(t.trend)}</b>` +
+          `${t.why_now ? `<span>${esc(t.why_now)}</span>` : ''}</button>`,
+      )
+      .join('') +
+    '</div>';
+  box.querySelectorAll('[data-topic]').forEach((choice) => {
+    choice.onclick = async () => {
+      box.querySelectorAll('[data-topic]').forEach((b) => (b.disabled = true));
+      trendSeed = structuredClone(trendPool[Number(choice.dataset.topic)]);
+      try {
+        await nameFromTopic({ box, fresh: true });
+      } catch (e) {
+        box.innerHTML = `<b>ตั้งชื่อไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}</div>`;
+        status('ตั้งชื่อไม่สำเร็จ');
+      }
+    };
+  });
+}
+
+/** อ่านรายการชื่อจากคำตอบ — ใช้ร่วมกันทั้งปุ่มคิดชื่อและการตั้งชื่อจากหัวข้อ */
+function parseTitleAnswer(r) {
+  const parsed = parseJson(r.text);
+  const list = (parsed?.titles || [])
+    .map((x) => (typeof x === 'string' ? { title: x } : x))
+    .filter((x) => x?.title)
+    .slice(0, 12);
+  return list.length ? { data: list } : { error: `ไม่พบรายการชื่อในคำตอบ ${answerEvidence(r.text, parsed)}` };
+}
+
+/** อ่านรายการหัวข้อจากคำตอบ แล้วแปลงเป็นรูปที่ส่วนอื่นของระบบใช้อยู่แล้ว (trend / why_now) */
 function parseTrendAnswer(res) {
   const raw = String(res.text || '');
   const parsed = parseJson(raw);
   if (!parsed) return { error: `อ่านคำตอบเป็น JSON ไม่ได้ ${answerEvidence(raw, null)}` };
-  if (parsed.verified === false)
-    return {
-      error:
-        parsed.reason ||
-        'แชทนี้ค้นเว็บเพื่อยืนยันกระแสไม่ได้ตอนนี้ — เช็คว่าโมเดล/แชทที่ใช้เปิดใช้การค้นเว็บอยู่',
-      fatal: true, // ตอบชัดแล้วว่าทำไม่ได้ ยิงซ้ำก็ได้คำตอบเดิม
-    };
-
-  // เก็บสถิติทีละด่านไว้บอกผู้ใช้ว่าติดตรงไหนจริง ๆ แทนข้อความเหมารวมว่า "ไม่มีแหล่งข่าว"
-  const rawTrends = Array.isArray(parsed.trends) ? parsed.trends : [];
-  const named = rawTrends.filter((x) => x?.trend);
-  const withSources = named.filter((x) => Array.isArray(x.sources) && x.sources.length);
-  const pool = withSources.filter((x) => x.sources.filter((s) => safeHttpUrl(s?.url)).length >= 1).slice(0, 8);
-  if (pool.length) return { data: pool };
-
-  return {
-    error: !rawTrends.length
-      ? `คำตอบไม่มีรายการ trends เลย ${answerEvidence(raw, parsed)}`
-      : !named.length
-        ? `มี ${rawTrends.length} รายการ แต่ไม่มีรายการไหนใส่ชื่อกระแส (field "trend")`
-        : !withSources.length
-          ? `มี ${named.length} กระแส แต่ไม่มีรายการไหนแนบ sources มาเลย`
-          : `มี ${withSources.length} กระแสที่แนบ sources แต่ URL ทุกอันอ่านเป็นลิงก์จริงไม่ได้ (ตัวอย่าง: ${String(withSources[0].sources?.[0]?.url || '-').slice(0, 120)})`,
-  };
+  const rows = Array.isArray(parsed.topics) ? parsed.topics : Array.isArray(parsed.trends) ? parsed.trends : [];
+  const pool = rows
+    .map((x) => ({ trend: x?.topic || x?.trend || '', why_now: x?.why || x?.why_now || '' }))
+    .filter((x) => x.trend)
+    .slice(0, 12);
+  return pool.length
+    ? { data: pool }
+    : { error: `ไม่พบรายการหัวข้อในคำตอบ ${answerEvidence(raw, parsed)}` };
 }
 
 async function generateTrendIdeas() {
@@ -819,17 +1008,17 @@ async function generateTrendIdeas() {
   button.disabled = true;
   trendSeed = null;
   trendPool = [];
-  setMode('สุ่มข่าว · ค้นกระแส', { busy: true });
+  titlePool = [];
+  setMode('สุ่มข่าว · ดูกระแส', { busy: true });
   resetOutlineDirection();
   box.classList.remove('hidden');
-  box.textContent = 'กำลังให้ ChatGPT ค้นเว็บเพื่อดูว่าตอนนี้อะไรเป็นกระแส...';
-  status('กำลังค้นกระแสปัจจุบัน');
+  box.textContent = 'กำลังถาม ChatGPT ว่าตอนนี้มีอะไรน่าสนใจบ้าง...';
+  status('กำลังถามหัวข้อที่น่าสนใจ');
   await saveCreatorDefaults();
   await focusChat();
   try {
-    const transport = makeTransport(transportKind(), transportOpts());
     const res = await sendTurn(
-      transport,
+      makeTransport(transportKind(), transportOpts()),
       trendIdeasPrompt({
         seed: $('title').value.trim(),
         audience: $('audience').value.trim(),
@@ -839,16 +1028,17 @@ async function generateTrendIdeas() {
         fictionGenre: val('fictionGenre', 'fantasy'),
         today: new Date().toISOString().slice(0, 10),
       }),
-      { label: 'ค้นกระแสปัจจุบัน' },
-      { onRetry: (n, max, res) => retryNotice(box, n, max, 'ค้นกระแสปัจจุบัน', res), parse: parseTrendAnswer },
+      { label: 'ถามหัวข้อที่น่าสนใจ' },
+      { onRetry: (n, max, res) => retryNotice(box, n, max, 'ถามหัวข้อที่น่าสนใจ', res), parse: parseTrendAnswer },
     );
     if (res?.error) throw new Error(res.error);
     trendPool = res.data;
-    renderRandomTrend();
-    status('สุ่มกระแสแล้ว — เลือกใช้หรือสุ่มอีกเรื่อง');
+    renderTopicChoices();
+    setMode(currentMode);
+    status('เลือกหัวข้อที่สนใจได้เลย');
   } catch (e) {
-    box.innerHTML = `<b>ค้นกระแสไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}<br>ระบบไม่สร้างหัวข้อจากคำว่า “กำลังเป็นกระแส” ถ้ายังไม่มีแหล่งยืนยัน — ปุ่ม “ค้นกระแสใหม่” ลองใหม่ได้ทันที</div>`;
-    status('ค้นกระแสไม่สำเร็จ');
+    box.innerHTML = `<b>ขอหัวข้อไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}<br>กดปุ่มเดิมอีกครั้งเพื่อลองใหม่</div>`;
+    status('ขอหัวข้อไม่สำเร็จ');
   } finally {
     button.disabled = false;
   }
@@ -927,7 +1117,7 @@ function renderOutlineChoices(directions, { title, origin = 'auto' }) {
   const head =
     origin === 'inspire'
       ? `<b>ChatGPT ตกแต่งสารบัญของคุณมาให้ ${directions.length} ทาง</b><div class="muted">ทาง A คือโครงเดิมของคุณ แก้แค่ถ้อยคำ · ถ้ายังไม่พอใจ กด “ตกแต่งใหม่อีกรอบ” ได้เรื่อย ๆ หรือกลับไปแก้สารบัญของคุณเองแล้วส่งใหม่</div>`
-      : '<b>เลือกว่าหนังสือจะไปทางไหน</b><div class="muted">เลือก 1 ทางก่อน ระบบจึงค่อยแตกเป็นตอนย่อยและเริ่มเขียนจริง</div>';
+      : '<b>เลือกว่าหนังสือจะไปทางไหน</b><div class="muted">กดเลือกทางเดียว แล้วระบบเริ่มเขียนต่อให้เลย · ไม่ถูกใจทั้งสามทาง กด “คิดใหม่ 3 ทาง” ได้</div>';
 
   box.innerHTML = head + '<div class="outlineChoiceList">' +
     directions.map((d, i) => `<div class="outlineChoice" data-outline-card="${i}">
@@ -937,11 +1127,11 @@ function renderOutlineChoices(directions, { title, origin = 'auto' }) {
       ${d.changes ? `<p class="outlineChanged"><b>แก้จากของคุณ:</b> ${esc(d.changes)}</p>` : ''}
       ${d.fit_note ? `<p class="muted">ความยาว: ${esc(d.fit_note)}</p>` : ''}
       <ol>${d.chapters.map((c) => `<li><b>${esc(c.title)}</b>${c.added ? ' <span class="tagAdded">บทที่เติมให้</span>' : ''}${c.purpose ? ` — ${esc(c.purpose)}` : ''}</li>`).join('')}</ol>
-      <div class="trendActions"><button type="button" data-outline-index="${i}" class="primary inline">เลือกสารบัญทางนี้</button></div>
+      <div class="trendActions"><button type="button" data-outline-index="${i}" class="primary inline">${origin === 'inspire' ? 'เลือกสารบัญทางนี้' : 'เลือกทางนี้ → เริ่มเขียนเนื้อหา'}</button></div>
     </div>`).join('') + '</div>' +
     (origin === 'inspire'
       ? '<div class="trendActions"><button type="button" id="inspireAgain" class="inline">🎨 ตกแต่งใหม่อีกรอบ</button></div>'
-      : '');
+      : '<div class="trendActions"><button type="button" id="outlineAgain" class="inline">🎲 คิดใหม่ 3 ทาง</button></div>');
 
   box.dataset.ready = '1';
   box.classList.remove('hidden');
@@ -959,10 +1149,21 @@ function renderOutlineChoices(directions, { title, origin = 'auto' }) {
       setBtn('create', 'rocket', 'สร้าง Ebook ตามสารบัญที่เลือก');
       renderStepGuide();
       status(`เลือกสารบัญ: ${outlineDirection.name}`);
+      /**
+       * เลือกทางแล้วเริ่มเขียนต่อเลย ไม่ต้องให้ผู้ใช้ไปหาปุ่มเริ่มอีกที
+       *
+       * เฉพาะสารบัญที่ ChatGPT คิดเองเท่านั้น — โหมดแรงบันดาลใจยังต้องให้ผู้ใช้ยืนยันเอง
+       * เพราะที่นั่นการเลือกคือ "ยอมรับการตกแต่งโครงของตัวเอง" ไม่ใช่การสั่งเดินเครื่อง
+       * และตอนโหมดอัตโนมัติก็ห้ามเริ่มตรงนี้ เพราะ fullAuto กด create() ต่อเองอยู่แล้ว
+       * ถ้าเริ่มซ้อนกันจะได้สองงานพร้อมกันจากการกดปุ่มเดียว
+       */
+      if (origin !== 'inspire' && !fullAutoRunning) create();
     };
   });
   const again = box.querySelector('#inspireAgain');
   if (again) again.onclick = () => polishUserOutline();
+  const rethink = box.querySelector('#outlineAgain');
+  if (rethink) rethink.onclick = () => generateOutlineDirections();
   renderStepGuide();
 }
 
@@ -1108,16 +1309,7 @@ async function generateTitleIdeas() {
       { label: 'คิดชื่อหนังสือ' },
       {
         onRetry: (n, max, res) => retryNotice(box, n, max, 'คิดชื่อหนังสือ', res),
-        parse: (r) => {
-          const parsed = parseJson(r.text);
-          const list = (parsed?.titles || [])
-            .map((x) => (typeof x === 'string' ? { title: x } : x))
-            .filter((x) => x?.title)
-            .slice(0, 12);
-          return list.length
-            ? { data: list }
-            : { error: `ไม่พบรายการชื่อในคำตอบ ${answerEvidence(r.text, parsed)}` };
-        },
+        parse: parseTitleAnswer,
       },
     );
     if (res?.error) throw new Error(res.error);
@@ -1222,6 +1414,7 @@ async function saveCreatorDefaults() {
     db.setting('defaultAuthor', $('author').value.trim()),
     // สารบัญที่ผู้ใช้พิมพ์เองคืองานที่ลงแรงจริง ห้ามหายเพราะปิดแท็บหรือรีโหลด
     db.setting('draftUserOutline', $('inspireOutline')?.value || ''),
+    db.setting('soundOn', !!$('soundOn')?.checked),
   ]);
 }
 
@@ -1239,6 +1432,13 @@ async function loadCreatorDefaults() {
       db.setting('textApiModel'),
       db.setting('priceOverride'),
     ]);
+  // เสียงแจ้งเตือนเป็นค่าที่คนตั้งครั้งเดียวแล้วคาดว่าจะอยู่อย่างนั้น เปิดไว้เป็นค่าตั้งต้น
+  const soundOn = await db.setting('soundOn');
+  if ($('soundOn') && soundOn !== undefined) $('soundOn').checked = !!soundOn;
+  $('soundOn')?.addEventListener('change', () => {
+    db.setting('soundOn', !!$('soundOn').checked);
+    if ($('soundOn').checked) chime('done'); // ให้ได้ยินทันทีว่าเสียงเป็นแบบไหน
+  });
   if (imageSource) $('imageSource').value = imageSource;
   if (textSource) $('textSource').value = textSource;
   syncModeFromForm();
@@ -1286,7 +1486,6 @@ function readForm() {
   const backMatter = [];
   if (on('bm_glossary')) backMatter.push('glossary');
   if (on('bm_references')) backMatter.push('references');
-  if (trendSeed?.sources?.length && !backMatter.includes('references')) backMatter.push('references');
   if (on('bm_about')) backMatter.push('about_author');
 
   // ความยาวตอนคุมจำนวนตอน และคุมว่ากี่ตอนจะรวมได้ในหนึ่งข้อความ
@@ -1365,6 +1564,7 @@ function readForm() {
     aboutAuthor: $('aboutAuthor').value.trim(),
     // บรรณานุกรมก็เหมือนกัน — บรรทัดละรายการ ส่วนแหล่งจากโหมดกระแสถูกต่อท้ายตอนเรียงพิมพ์
     references: $('references').value.split('\n').map((s) => s.trim()).filter(Boolean),
+    ...readReferenceSettings(),
     calibration: { charsPerPage: p.seedCPP },
     transport: { delayMs: [4000, 9000] },
     threadMode: val('threadMode', 'single'),
@@ -1568,23 +1768,22 @@ async function runFullAuto() {
        *
        * ตัวคิดชื่อที่ไม่มีหัวข้อตั้งต้นคือคำถามที่ไม่มีอะไรให้ตอบต่างกันเลย
        * ถามกี่ครั้งก็ได้คำตอบที่โมเดลคิดว่าปลอดภัยที่สุดชุดเดิม จึงได้ชื่อซ้ำทุกเล่ม
-       * ขั้นค้นกระแสบังคับให้ไปดูของจริงในเว็บก่อน แล้วคืนมาพร้อมแหล่งอ้างอิง
-       *
-       * แต่บัญชีหรือโมเดลที่ค้นเว็บไม่ได้จะตอบว่า verified=false ซึ่งถูกต้องแล้ว
-       * กรณีนั้นห้ามหยุดทั้งเล่ม ให้ถอยไปใช้ตัวคิดชื่อตามเดิม ที่ตอนนี้รู้วันที่และรู้ว่าเคยทำเล่มอะไรไปแล้ว
+       * ขั้นถามหัวข้อจึงมาก่อน แล้วค่อยเอาหัวข้อแรกไปตั้งชื่อ
+       * ถ้าขั้นนี้ล้ม ห้ามหยุดทั้งเล่ม ให้ถอยไปใช้ตัวคิดชื่อตามเดิม
+       * ที่ตอนนี้รู้วันที่และรู้ว่าเคยทำเล่มอะไรไปแล้ว
        */
-      status('อัตโนมัติ: กำลังให้ ChatGPT ค้นว่าตอนนี้อะไรน่าสนใจ');
+      status('อัตโนมัติ: กำลังถาม ChatGPT ว่าตอนนี้มีอะไรน่าสนใจ');
       try {
         await generateTrendIdeas();
+        if (trendPool.length) trendSeed = structuredClone(trendPool[0]);
       } catch (e) {
-        addEvent('system', 'อัตโนมัติ: ค้นกระแสไม่สำเร็จ', e?.message || String(e));
+        addEvent('system', 'อัตโนมัติ: ขอหัวข้อไม่สำเร็จ', e?.message || String(e));
       }
-      if (trendSeed?.suggested_title || trendSeed?.trend) {
-        $('title').value = trendSeed.suggested_title || trendSeed.trend;
-        if ($('bm_references')) $('bm_references').checked = true;
-        addEvent('system', 'อัตโนมัติ: ได้กระแสปัจจุบัน', `${trendSeed.trend}${trendSeed.why_now ? `\n${trendSeed.why_now}` : ''}`);
+      if (trendSeed?.trend) {
+        $('title').value = trendSeed.trend;
+        addEvent('system', 'อัตโนมัติ: ได้หัวข้อ', `${trendSeed.trend}${trendSeed.why_now ? `\n${trendSeed.why_now}` : ''}`);
       } else {
-        addEvent('system', 'อัตโนมัติ: ไม่ได้กระแสที่ยืนยันได้', 'ใช้ตัวคิดชื่อแทน โดยเลี่ยงชื่อที่เคยทำไปแล้ว');
+        addEvent('system', 'อัตโนมัติ: ไม่ได้หัวข้อ', 'ใช้ตัวคิดชื่อแทน โดยเลี่ยงชื่อที่เคยทำไปแล้ว');
       }
 
       status('อัตโนมัติ: กำลังให้ ChatGPT คิดชื่อหนังสือ');
@@ -1673,6 +1872,7 @@ async function create() {
         '',
         'กดยกเลิกเพื่อกลับไปใส่รูปก่อน · กดตกลงเพื่อไปต่อโดยไม่มีรูป',
       ].join('\n'),
+      { auto: true },
     );
     if (!go) {
       $('authorPhotoSetupPick').scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1680,6 +1880,48 @@ async function create() {
     }
   }
 
+  /**
+   * ประตูบรรณานุกรมต้องไม่ทำให้โหมดอัตโนมัติดีดกลับหน้าตั้งค่า
+   *
+   * ช่อง "อ่านต้นทางแล้วและเกี่ยวข้องกับเล่มนี้" คือคำรับรองของคน ระบบติ๊กแทนไม่ได้
+   * เพราะนั่นเท่ากับกุว่ามีคนตรวจแหล่งแล้ว ซึ่งเป็นสิ่งเดียวกับที่ทั้งโปรเจกต์นี้กันไว้ตลอด
+   * ทางออกที่ซื่อสัตย์ในโหมดอัตโนมัติจึงคือปิดบรรณานุกรมทิ้ง แล้วบอกให้รู้ว่าปิดเพราะอะไร
+   * — เล่มไม่มีหน้าอ้างอิง ดีกว่าเล่มที่อ้างว่ามีคนตรวจแหล่งทั้งที่ไม่มีใครตรวจ
+   * (อาการเดิม: กดอัตโนมัติแล้วเด้งกลับมาหน้า "ตั้งค่าเล่ม" เงียบ ๆ ทั้งที่วางสารบัญเสร็จแล้ว)
+   */
+  if (autoPilot() && on('bm_about') && $('aboutAuthor').value.trim().length < 40) {
+    // ประวัติผู้เขียนคือข้อมูลจริงของคนจริง ระบบแต่งขึ้นเองไม่ได้ด้วยเหตุผลเดียวกับบรรณานุกรม
+    $('bm_about').checked = false;
+    $('bm_about').dispatchEvent(new Event('change', { bubbles: true }));
+    addEvent(
+      'system',
+      'อัตโนมัติ: ปิดหน้าเกี่ยวกับผู้เขียนให้',
+      'ยังไม่ได้กรอกประวัติจริงอย่างน้อย 40 ตัวอักษร ระบบแต่งประวัติคนจริงขึ้นเองไม่ได้ จึงปิดหน้านี้แล้วเดินต่อ',
+    );
+  }
+
+  if (autoPilot() && on('bm_references') && !readReferenceSettings().referenceSources.length) {
+    $('bm_references').checked = false;
+    $('bm_references').dispatchEvent(new Event('change', { bubbles: true }));
+    addEvent(
+      'system',
+      'อัตโนมัติ: ปิดบรรณานุกรมให้',
+      'ยังไม่มีแหล่งที่คุณอ่านต้นทางและติ๊กยืนยันไว้ ระบบติ๊กแทนไม่ได้ จึงปิดหน้าอ้างอิงแล้วเดินต่อ — ถ้าต้องการหน้านี้ ให้ค้นและติ๊กแหล่งก่อนแล้วกดใหม่',
+    );
+  }
+
+  const backMatterError = await validateBackMatterSetup();
+  if (backMatterError) {
+    wizardGo('book');
+    status(backMatterError);
+    $('referenceOptions').open = on('bm_references');
+    /**
+     * โหมดอัตโนมัติที่ถูกประตูปัดกลับ ต้องบอกให้ชัดว่าไปรออยู่ตรงไหน
+     * ไม่ใช่ทิ้งผู้ใช้ไว้กับหน้าตั้งค่าที่ดูเหมือนไม่มีอะไรผิด
+     */
+    if (autoPilot()) addEvent('system', 'อัตโนมัติหยุดที่ประตูตรวจค่าเล่ม', backMatterError);
+    return false;
+  }
   await saveCreatorDefaults();
 
   $('error').classList.add('hidden');
@@ -1780,6 +2022,7 @@ async function halted() {
    * ถ้ายังถือธงอัตโนมัติไว้ ประตูภาพข้างล่างจะสั่งเริ่ม Phase 2 ใหม่ทันทีที่เปิด
    * แล้วชนเหตุเดิมซ้ำวนไปเรื่อย ๆ โดยไม่มีใครกดสักครั้ง
    */
+  chime('attention');
   stopAutoPilot();
   $('create').disabled = false;
 
@@ -1868,60 +2111,6 @@ function showResume(b) {
     `${b.targetPages} หน้า · เขียนด้วย ${engine} · ใช้ไป ${b.job?.turnNo || 0} ${(b.textSource || 'web') === 'api' ? 'เทิร์น' : 'ข้อความ'} · ค้างที่ขั้น ${STEP_NAMES[b.job?.step] || b.job?.step || '-'}` +
     (seen ? ` · แตะล่าสุด${sinceText(seen)}` : '') +
     (why ? ` — ${why}` : '');
-  /**
-   * ถ้าผู้ใช้ตั้งค่าบนหน้าจอไว้อย่างหนึ่ง แต่เล่มนี้ล็อกไว้อีกอย่าง ต้องบอกและให้ทางเลือก
-   * ไม่ใช่เงียบแล้วทำตามเล่ม จนผู้ใช้สงสัยว่าทำไมเลือก API แล้วยังไปหน้าเว็บอยู่
-   */
-  const bookApi = (b.textSource || 'web') === 'api';
-  const mismatch = bookApi !== uiUsesApi();
-  const sw = $('resumeSwitchEngine');
-  sw.classList.toggle('hidden', !mismatch);
-  if (mismatch) {
-    setBtn('resumeSwitchEngine', 'refresh', `เปลี่ยนเป็น ${uiUsesApi() ? 'OpenAI API' : 'หน้าเว็บ ChatGPT'}`);
-  }
-
-  const canAcceptPages =
-    b.job?.step === 'fit' &&
-    Number(b.lastCompile?.pages) > 0 &&
-    String(b.job?.error || '').includes('ต่างจากเป้า');
-  $('acceptPages').classList.toggle('hidden', !canAcceptPages);
-}
-
-async function acceptCurrentPages() {
-  const pages = Number(book?.lastCompile?.pages);
-  if (!pages) return;
-  book.targetPages = pages;
-  book.job.error = null;
-  book.job.status = 'paused';
-  await db.saveBook(book);
-  addEvent('system', 'ยอมรับจำนวนหน้าปัจจุบัน', `${pages} หน้า${pages % 2 ? ' · ระบบจะเติมหน้าว่างเป็น ' + (pages + 1) + ' หน้า' : ''}`);
-  return resumeGo();
-}
-
-
-/**
- * เปลี่ยนแหล่งเขียนของเล่มที่ทำค้างไว้
- *
- * ปกติค่านี้ถูกล็อกไว้กับเล่มเพื่อไม่ให้สำนวนเปลี่ยนกลางเล่ม แต่บางครั้งผู้ใช้ตั้งใจเปลี่ยนจริง
- * เช่นเจอว่าหน้าเว็บชนลิมิตแล้วอยากจ่ายเงินเดินต่อให้จบ จึงต้องมีทางออกที่บอกผลกระทบตรง ๆ
- */
-async function switchBookEngine() {
-  if (!book?.id) return;
-  const toApi = uiUsesApi();
-  const label = toApi ? `OpenAI API (${textApiModel()})` : 'หน้าเว็บ ChatGPT';
-  if (!ask(
-    `เปลี่ยนแหล่งเขียนของเล่มนี้เป็น ${label} หรือไม่?
-
-` +
-    'ตอนที่เขียนไปแล้วจะไม่ถูกแตะ แต่ตอนที่เหลือจะถูกเขียนด้วยโมเดลใหม่ ' +
-    'สำนวนอาจไม่ต่อเนื่องกับของเดิม ถ้ารับได้ให้กดตกลง'
-  )) return;
-  book.textSource = toApi ? 'api' : 'web';
-  book.textApiModel = textApiModel();
-  await db.saveBook(book);
-  await syncSharedProject(book.id);
-  showResume(book);
-  status(`เล่มนี้จะเขียนต่อด้วย ${label}`);
 }
 
 async function resumeGo() {
@@ -1990,6 +2179,11 @@ async function startNewBook() {
   try { machine?.stop(); } catch {}
   stopAutoPilot();
   setMode('');
+  deptNotes.clear();
+  completedDepts.clear();
+  resetReferenceSources();
+  activeDept = -1;
+  renderSteps();
   book = null;
   machine = null;
   sections = [];
@@ -2011,6 +2205,7 @@ async function startNewBook() {
   if ($('outlineDirections')) $('outlineDirections').innerHTML = '';
   trendSeed = null;
   trendPool = [];
+  titlePool = [];
   ['titleIdeas', 'trendIdeas'].forEach((id) => {
     if ($(id)) {
       $(id).innerHTML = '';
@@ -2307,6 +2502,7 @@ async function openSavedProject(id) {
 }
 
 const fail = (e) => {
+  chime('attention'); // งานหยุดกลางทาง ยิ่งรู้เร็วยิ่งเสียเวลารอเปล่าน้อย
   stopAutoPilot(); // รอบอัตโนมัติจบลงตรงนี้แล้ว ห้ามทิ้งธงไว้ให้ประตูรอบหน้าผ่านไปเอง
   setMode(currentMode); // คงชื่อโหมดไว้ให้รู้ว่าพลาดตอนทำอะไร แต่เลิกแสดงว่ากำลังทำงาน
   $('error').textContent = 'เกิดข้อผิดพลาด: ' + (e?.message || e);
@@ -2318,6 +2514,8 @@ const fail = (e) => {
 
 // ---------- ประตูที่ 2: แก้ก่อนส่งออก ----------
 async function openEditor() {
+  // ประตูตรวจงานรอคนจริง ๆ เฉพาะตอนไม่ได้เดินอัตโนมัติ — โหมดอัตโนมัติผ่านเองอยู่แล้ว
+  if (!autoPilot()) chime('attention');
   $('start').classList.add('hidden');
   $('resume').classList.add('hidden');
   sections = (await db.loadSections(book.id)).sort((a, b) => cmpId(a.id, b.id));
@@ -2758,6 +2956,7 @@ async function proceed() {
         'ถ้าตั้งใจจะเปลี่ยนแค่ปกหน้าหรือปกหลัง กดยกเลิกแล้วใช้ปุ่ม “สร้างใหม่”',
         'ที่ช่องปกในหน้านี้แทน — สร้างเฉพาะรูปนั้นรูปเดียว ไม่ต้องออกแบบใหม่ทั้งชุด',
       ].join('\n'),
+      { auto: true },
     );
     if (!go) {
       status('ยังไม่ไปต่อ — ใช้ปุ่ม “สร้างใหม่” ที่ช่องปกเพื่อเปลี่ยนเฉพาะรูปนั้น');
@@ -2810,6 +3009,8 @@ function sinceText(ts) {
 let phase2Running = false;
 let phase2Stage = null; // { name, text } ของรูปที่กำลังทำอยู่
 let phase2Rendering = false;
+let phase2PreviewUrls = [];
+window.addEventListener('pagehide', () => phase2PreviewUrls.forEach((url) => URL.revokeObjectURL(url)));
 
 const PHASE2_STATE = {
   done: { mark: '✓', cls: 'ok' },
@@ -2889,6 +3090,7 @@ function phase2Rows(assets) {
     return {
       name: j.name,
       what: j.what,
+      asset,
       state,
       note,
       // ตำแหน่งในเล่มกับสเปกไฟล์ ต้องเห็นได้ตลอด ไม่ใช่เห็นเฉพาะตอนพัง
@@ -3141,6 +3343,13 @@ async function renderPhase2() {
   phase2Rendering = true;
   try {
     const assets = await db.loadAssets(book.id);
+    const previousPreviewUrls = phase2PreviewUrls;
+    phase2PreviewUrls = [];
+    const previews = new Map(assets.filter((a) => a.blob?.size).map((a) => {
+      const url = URL.createObjectURL(a.blob);
+      phase2PreviewUrls.push(url);
+      return [a.name, { url, asset: a }];
+    }));
     assetNames = assets.map((a) => a.name);
     const rows = phase2Rows(assets);
     const total = rows.length;
@@ -3196,10 +3405,18 @@ async function renderPhase2() {
           (r.where ? `<span class="p2Where">📍 ${esc(r.where)}</span>` : '') +
           (r.caption ? `<span class="p2Cap">ภาพนี้เล่าเรื่อง: ${esc(r.caption)}</span>` : '') +
           `<span class="p2Spec">📄 ตั้งชื่อไฟล์ว่า <b>${esc(r.name)}</b>${r.spec ? ` · ${esc(r.spec)}` : ''}</span>` +
-          `<span class="p2Note">${esc(r.note)}</span></div>${acts}</div>`
+          `<span class="p2Note">${esc(r.note)}</span>` +
+          (previews.has(r.name) ? (() => {
+            const { url, asset } = previews.get(r.name);
+            const from = { chatgpt: 'ChatGPT', api: 'Images API', manual: 'นำเข้าด้วยตนเอง' }[asset.meta?.from] || 'ข้อมูลเก่า ไม่ได้บันทึกแหล่งที่มา';
+            return `<a class="p2Preview" href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="ภาพที่บันทึกจริง: ${esc(r.name)}" loading="lazy"><span>ภาพที่ดึงมา · คลิกดูขนาดเต็ม</span></a>` +
+              `<span class="p2Source">แหล่งที่มา: ${esc(from)} · ${Math.round(asset.blob.size / 1024)} KB${asset.at ? ` · บันทึก ${esc(new Date(asset.at).toLocaleString('th-TH'))}` : ''}</span>`;
+          })() : '') + `</div>${acts}</div>`
         );
       })
       .join('');
+
+    previousPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
 
     $('phase2List')
       .querySelectorAll('[data-p2-regen]')
@@ -3504,6 +3721,7 @@ async function openImagePhaseGate() {
       'อัตโนมัติหยุดที่ประตูภาพ',
       'เล่มนี้ตั้งให้คุณสร้างภาพเอง — คัดลอก Prompt ของแต่ละรูปไปสร้างที่อื่น แล้วอัปโหลดกลับเข้าช่องเดิม จากนั้นกดไปต่อ',
     );
+    chime('attention');
     status('รอคุณใส่ภาพ — คัดลอก Prompt ไปสร้างแล้วอัปโหลดกลับ');
   } else if (autoPilot() && book.imagePhase?.status !== 'complete') {
     addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ทดสอบระบบ', 'เริ่ม Phase 2 อัตโนมัติ');
@@ -3578,6 +3796,50 @@ async function skipPhase2() {
   await syncSharedProject(book.id);
   $('imagePhase').classList.add('hidden');
   await finish();
+}
+
+/**
+ * ให้ GPT วางแผนภาพในเล่มใหม่ — สำหรับเล่มที่วางแผนไว้ก่อนกติกาภาพชุดปัจจุบัน
+ *
+ * ต่างจากปก: prompt ปกถูกเขียนใหม่ทุกครั้งที่สร้างภาพ (plannedImageJobs) เล่มเก่าจึงได้ของใหม่เอง
+ * แต่ภาพในเล่มใช้ prompt ที่แช่ไว้ตั้งแต่ตอนวางแผน กดสร้างใหม่กี่รอบก็ได้คำสั่งเดิม
+ * ทางเดียวที่ได้ subject และ prompt ชุดใหม่คือวางแผนใหม่ทั้งชุด
+ */
+async function replanFigures() {
+  if (!book?.id) return;
+  book = await db.loadBook(book.id);
+  if (!book) return;
+  if ((book.illustrationLevel || 'none') === 'none')
+    return phase2Notice(
+      '<b>เล่มนี้ไม่ได้ตั้งให้มีภาพในเล่ม</b>ปุ่มนี้ใช้กับภาพประกอบในเล่มเท่านั้น ปกไม่เกี่ยว',
+      true,
+    );
+
+  const planned = (book.figures || []).filter((f) => f.kind === 'image').length;
+  const boxes = (book.figures || []).filter((f) => f.kind === 'box').length;
+  if (
+    !ask(
+      `ให้ GPT วางแผนภาพในเล่มใหม่หรือไม่?
+
+` +
+        `แผนเดิมจะถูกลบทั้งชุด: ภาพ ${planned} รูป และกล่องสรุป ${boxes} กล่อง ` +
+        `รวมถึงไฟล์ภาพในเล่มที่สร้างไว้แล้ว
+` +
+        `ปกหน้า ปกหลัง และตัวหนังสือในเล่มไม่ถูกแตะ`,
+    )
+  )
+    return;
+
+  const removed = await clearFigurePlan(book);
+  await db.saveBook(book);
+  await syncSharedProject(book.id);
+  addEvent(
+    'system',
+    'ล้างแผนภาพในเล่มเดิม',
+    `ภาพ ${removed.images} รูป · กล่อง ${removed.boxes} กล่อง · แก้เนื้อหา ${removed.sections} ตอน · ลบไฟล์ภาพ ${removed.assets} ไฟล์`,
+  );
+  status('ล้างแผนภาพเดิมแล้ว กำลังให้ GPT วางแผนภาพใหม่');
+  await startPhase2();
 }
 
 /** ให้ GPT Art Director วิเคราะห์ปกใหม่ทั้งชุด แล้วค่อยกลับมาสร้างภาพจากคำแนะนำใหม่ */
@@ -3820,6 +4082,7 @@ async function finish() {
   setPhase('done', 'พร้อมส่งออก');
   $('bar').style.width = '100%';
   $('done').classList.remove('hidden');
+  chime('done');
   $('doneText').textContent = `“${book.outline?.title || book.topic}” · ${pages} หน้า · ติดขัด ${pf.blocking} ข้อ, เตือน ${pf.warnings} ข้อ`;
   $('doneCoverRedo').classList.toggle('hidden', ['none', 'upload'].includes(book.coverMode || 'prompt'));
   status('เสร็จแล้ว');
@@ -4243,6 +4506,7 @@ let wizardStep = 'mode';
 const wizardParts = () => [...$('start').children].filter((el) => el.dataset.step);
 
 function wizardApply() {
+  syncStepWarn();
   for (const el of wizardParts()) {
     const s = el.dataset.step;
     const off = s === 'never' || (s !== 'always' && s !== wizardStep);
@@ -4464,6 +4728,7 @@ $('imagesNotReadyGo').onclick = async () => {
 $('coverConsultAgain').onclick = rethinkCoverWithGpt;
 $('phase2Stop').onclick = recoverPhase2Gate;
 $('phase2Bulk').onclick = () => $('bulkImgFile').click();
+$('phase2Replan').onclick = replanFigures;
 $('bulkImgFile').onchange = async (e) => {
   const files = [...(e.target.files || [])];
   e.target.value = '';
@@ -4550,6 +4815,8 @@ let setupAuthorPhotoUrl = null;
  * ทั้ง gate_edit และ gate_images ไม่มีจังหวะไหนหยุดรอให้อัปโหลดสักจุดเดียว
  */
 let setupAuthorPhoto = null;
+/** รูปที่กู้กลับมาจากครั้งก่อน ไม่ใช่รูปที่เพิ่งเลือกในรอบนี้ — ใช้บอกผู้ใช้ให้ตรงความจริง */
+let setupAuthorPhotoRemembered = false;
 let editorPreviewUrls = [];
 let imageRenderToken = 0;
 
@@ -4687,14 +4954,53 @@ function showSetupAuthorPhoto() {
   img.classList.toggle('hidden', !setupAuthorPhotoUrl);
   if (setupAuthorPhotoUrl) img.src = setupAuthorPhotoUrl;
   $('authorPhotoSetupState').textContent = setupAuthorPhoto
-    ? `เลือกไว้แล้ว · ${setupAuthorPhoto.name || 'รูปที่วางมา'} — จะถูกบันทึกเป็น author-photo.png ตอนเริ่มสร้างเล่ม`
+    ? `เลือกไว้แล้ว · ${setupAuthorPhoto.name || 'รูปที่วางมา'} — จะถูกบันทึกเป็น author-photo.png ตอนเริ่มสร้างเล่ม${
+        setupAuthorPhotoRemembered ? ' · รูปนี้จำไว้จากครั้งที่แล้ว เลือกใหม่ทับได้ตลอด' : ''
+      }`
     : 'ยังไม่ได้เลือกรูป';
+}
+
+/**
+ * รูปผู้เขียนคือรูปคนเดิมทุกเล่ม จำไว้ให้ ไม่ต้องหยิบใหม่ทุกครั้ง
+ *
+ * เก็บเป็นค่าตั้งค่ากลาง ไม่ผูกกับ book.id เพราะตอนเลือกยังไม่มีเล่ม
+ * และเจตนาคือให้ข้ามเล่มได้ ส่วนไฟล์จริงของแต่ละเล่มยังถูกบันทึกแยกเหมือนเดิมตอนกดสร้าง
+ * ย่อก่อนเก็บเสมอ ไม่งั้นรูปจากมือถือใบเดียวกินพื้นที่หลายสิบเมกะไบต์ในที่เก็บของเบราว์เซอร์
+ */
+async function rememberAuthorPhoto(file) {
+  try {
+    const { blob } = await normalizeImage(file, { grayscale: false, maxPx: 1200 });
+    await db.setting('lastAuthorPhoto', {
+      dataUrl: await db.blobToDataUrl(blob),
+      name: file.name || 'author-photo.png',
+      at: Date.now(),
+    });
+  } catch (e) {
+    // จำไม่ได้ไม่ใช่เรื่องคอขาดบาดตาย รูปที่เพิ่งเลือกยังใช้กับเล่มนี้ได้ตามปกติ
+    addEvent('system', 'จำรูปผู้เขียนไม่สำเร็จ', e?.message || String(e));
+  }
+}
+
+async function restoreAuthorPhoto() {
+  if (setupAuthorPhoto) return; // ผู้ใช้เพิ่งเลือกเองในรอบนี้ ห้ามทับ
+  try {
+    const saved = await db.setting('lastAuthorPhoto');
+    if (!saved?.dataUrl) return;
+    const blob = await db.dataUrlToBlob(saved.dataUrl);
+    setupAuthorPhoto = new File([blob], saved.name || 'author-photo.png', { type: blob.type || 'image/png' });
+    setupAuthorPhotoRemembered = true;
+    showSetupAuthorPhoto();
+  } catch {
+    // ของเก่าอ่านไม่ได้ = เริ่มใหม่เหมือนไม่เคยมี ไม่ต้องรบกวนผู้ใช้
+  }
 }
 
 function setSetupAuthorPhoto(file) {
   if (!file?.type?.startsWith('image/')) return;
   setupAuthorPhoto = file;
+  setupAuthorPhotoRemembered = false;
   showSetupAuthorPhoto();
+  rememberAuthorPhoto(file);
 }
 
 /**
@@ -4991,17 +5297,6 @@ $('docxFile').onchange = async (e) => {
 };
 
 $('refreshProjects').onclick = loadProjectHistory;
-$('resumeHistory').onclick = async () => {
-  await loadProjectHistory();
-  $('projectList').scrollIntoView({ behavior: 'smooth', block: 'center' });
-};
-$('acceptPages').onclick = acceptCurrentPages;
-$('resumeSwitchEngine').onclick = switchBookEngine;
-$('resumeDrop').onclick = async () => {
-  if (book?.id) await db.deleteBook(book.id);
-  book = null;
-  $('resume').classList.add('hidden');
-};
 $('inspirePolish').onclick = polishUserOutline;
 $('start')?.addEventListener('input', renderStepGuide);
 $('start')?.addEventListener('change', renderStepGuide);
@@ -5023,6 +5318,32 @@ updateEstimate();
 updateItemPlan();
 syncMode();
 $('audience').addEventListener('change', saveCreatorDefaults);
+
+/**
+ * ช่อง "เขียนให้ใครอ่าน" ต้องเลือกจากรายการได้เสมอ ไม่ใช่เฉพาะตอนช่องว่าง
+ *
+ * เดิมพึ่ง datalist อย่างเดียว ซึ่งเบราว์เซอร์กรองรายการตามตัวอักษรที่อยู่ในช่อง
+ * พอช่องมีข้อความอยู่แล้ว (ซึ่งเป็นสถานะปกติ เพราะระบบเติมค่าที่เคยใช้ให้) รายการเหลือศูนย์
+ * กดแล้วไม่มีอะไรขึ้น ผู้ใช้จึงเห็นเป็น "ช่องนี้เลือกไม่ได้"
+ * select คู่ข้าง ๆ เลือกได้เสมอ และคัดตัวเลือกมาจาก datalist เดิม รายชื่อจึงอยู่ที่เดียว
+ */
+(() => {
+  const preset = $('audiencePreset');
+  const source = $('audienceOptions');
+  if (!preset || !source) return;
+  preset.innerHTML =
+    '<option value="">— เลือกกลุ่มผู้อ่านจากรายการ —</option>' +
+    [...source.options].map((o) => `<option value="${esc(o.value)}">${esc(o.value)}</option>`).join('');
+  preset.onchange = () => {
+    if (!preset.value) return;
+    $('audience').value = preset.value;
+    // ต้องยิง input เองด้วย เพราะการตั้งค่าด้วยสคริปต์ไม่ปลุกตัวฟังที่ผูกไว้กับการพิมพ์
+    // (ตัวรีเซ็ตสารบัญและตัวจำค่าเริ่มต้นแขวนอยู่ตรงนั้นทั้งคู่)
+    $('audience').dispatchEvent(new Event('input', { bubbles: true }));
+    $('audience').dispatchEvent(new Event('change', { bubbles: true }));
+    preset.value = '';
+  };
+})();
 $('author').addEventListener('change', saveCreatorDefaults);
 $('title').addEventListener('input', () => {
   if (outlineDirection?.titleBase && outlineDirection.titleBase !== $('title').value.trim()) resetOutlineDirection();
@@ -5034,6 +5355,7 @@ $('outlineIdeate').onclick = generateOutlineDirections;
 async function initializeStudio() {
   setMacroStage('start');
   await loadCreatorDefaults();
+  await restoreAuthorPhoto();
   const sharedDir = await W.restoreDirectoryHandle();
   if (sharedDir) {
     X.setExportDirectoryHandle(sharedDir);

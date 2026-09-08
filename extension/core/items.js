@@ -99,7 +99,7 @@ export function themePrompt(book, plan) {
 หัวข้อ/แก่นของเล่ม: ${book.topic}
 กลุ่มผู้อ่าน: ${book.audience}
 โทน: ${book.tone}
-${book.trendSeed?.trend ? `กระแสตั้งต้น: ${book.trendSeed.trend}\nเหตุผลที่กำลังมา: ${book.trendSeed.why_now || '-'}\nมุมหนังสือ: ${book.trendSeed.book_angle || '-'}\nแหล่งตั้งต้น: ${(book.trendSeed.sources || []).map((s) => `${s.publisher || s.title}: ${s.url || ''}`).join(' · ')}\n` : ''}${book.outlineDirection?.chapters?.length ? `โครงหมวดที่ผู้ใช้เลือก:\n${book.outlineDirection.chapters.map((c) => `${c.n}. ${c.title}${c.purpose ? ` — ${c.purpose}` : ''}`).join('\n')}\nต้องยึดโครงหมวดนี้เป็นหลัก\n` : ''}ต้องใช้ทั้งหมด ${plan.total} ชิ้น
+${book.trendSeed?.trend ? `หัวข้อตั้งต้น: ${book.trendSeed.trend}${book.trendSeed.why_now ? `\nทำไมน่าสนใจ: ${book.trendSeed.why_now}` : ''}\n` : ''}${book.outlineDirection?.chapters?.length ? `โครงหมวดที่ผู้ใช้เลือก:\n${book.outlineDirection.chapters.map((c) => `${c.n}. ${c.title}${c.purpose ? ` — ${c.purpose}` : ''}`).join('\n')}\nต้องยึดโครงหมวดนี้เป็นหลัก\n` : ''}ต้องใช้ทั้งหมด ${plan.total} ชิ้น
 
 แบ่งเป็น ${plan.themes} หมวด หมวดละประมาณ ${plan.perTheme} ชิ้น
 แต่ละหมวดต้องมีมุมที่ต่างกันจริง ไม่ใช่ชื่อต่างกันแต่เนื้อเดียวกัน
@@ -132,6 +132,9 @@ export function itemBatchPrompt({ book, outline, theme, count, avoid, startIndex
 - ความยาว ${k.len} ประมาณ ${k.lines}
 - แต่ละชิ้นต้องจบในตัว อ่านเดี่ยว ๆ ได้ ไม่อ้างถึงชิ้นอื่น
 - ห้ามซ้ำความหมายกันเอง และห้ามซ้ำกับรายการด้านล่าง
+- แต่ละชิ้นต้องมีข้อสังเกตหรือภาพที่เฉพาะกับหมวดนี้ หลีกเลี่ยงคำให้กำลังใจที่ย้ายไปหมวดไหนก็ได้
+- ถ้าเปลี่ยนเพียงคำเปรียบเทียบแต่ข้อคิดเหมือนเดิม ถือว่าซ้ำ เปลี่ยนประเด็น ไม่ใช่เกลาคำเดิม
+- ไม่บังคับให้ทุกชิ้นมีคำหักมุม รูปประโยคปฏิเสธ หรือคำสั่ง จังหวะภาษาต้องเหมาะกับชนิดงาน
 ${book.itemAttribution ? '- ถ้าอ้างคำพูดของบุคคลจริง ต้องเป็นคำพูดที่มีอยู่จริงเท่านั้น ถ้าไม่แน่ใจให้เขียนขึ้นเองแล้วเว้นช่องที่มาว่าง ห้ามกุชื่อคนใส่' : '- ไม่ต้องใส่ชื่อผู้พูด'}
 
 ${avoid?.length ? `ใจความที่ใช้ไปแล้ว ห้ามซ้ำ\n${avoid.map((a) => `- ${a}`).join('\n')}\n` : ''}

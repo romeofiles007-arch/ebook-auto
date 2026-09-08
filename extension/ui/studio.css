@@ -187,6 +187,9 @@ textarea{width:100%;padding:12px 14px;border:1px solid #34435f;border-radius:10p
 .dept.active .mark{background:#2b3f7a;color:#c3d2ff}
 .dept.done{border-color:#2f6d55}
 .dept.done .mark{background:#1c3b30;color:#63d5a5}
+.dept.warn{border-color:#7a6330}
+.dept.warn .mark{background:#3a2f14;color:#ffcf7a}
+.dept.warn .note{color:#ffdca6}
 .dept.bad{border-color:#713b45}
 .dept.bad .mark{background:#3a1a22;color:#ff9d9d}
 .dept.bad .note{color:#ffb4b4}
@@ -229,6 +232,8 @@ textarea{width:100%;padding:12px 14px;border:1px solid #34435f;border-radius:10p
   color: inherit;
 }
 .i-lg { width: 1.35em; height: 1.35em; vertical-align: -0.3em; }
+.brand { display:flex; align-items:center; gap:10px; }
+.brand-logo { display:block; width:42px; height:42px; object-fit:contain; filter:drop-shadow(0 4px 9px #0007); }
 
 /* ปุ่มและหัวข้อที่มีไอคอน ต้องเว้นช่องระหว่างไอคอนกับคำเสมอ */
 button:has(.i),
@@ -324,3 +329,11 @@ button.reviewIssue:hover{border-color:#6f8cff}
 .sourceAdvanced{margin:0}
 .sourceAdvanced>summary{font-size:12.5px;color:#8f9db8}
 .sourceAdvanced[open]>summary{margin-bottom:8px}
+#feed{background:#030906;color:#72ffa0;font-family:Consolas,"Courier New",monospace}#feed .event{background:#030906;border-color:#245a37;color:#72ffa0}#feed .event pre,#feed .event .head,#feed .event .label,#feed .event .muted{color:#72ffa0;background:transparent}.p2Preview{display:block;margin:8px 0;max-width:210px;color:inherit}.p2Preview img{display:block;width:100%;height:130px;object-fit:contain;background:repeating-conic-gradient(#dce3e8 0% 25%,#fff 0% 50%) 50%/16px 16px;border:1px solid #63758b;border-radius:5px}.p2Preview span{display:block;font-size:12px;margin-top:4px}.p2Source{font-size:12px;overflow-wrap:anywhere;color:#9ab5ce}
+.reference-result{padding:14px 0;border-bottom:1px solid #52627a;overflow-wrap:anywhere}.reference-result>b{display:block;margin:8px 0}.reference-result a{color:#75bdff}.reference-result label{display:flex;gap:8px;align-items:center}.reference-result input[type=checkbox]{width:auto}#referenceResults{max-height:460px;overflow:auto}#referenceOptions>label{display:block;margin:12px 0 6px}#referenceOptions .row input{flex:1;min-width:0}#referenceOptions button:disabled{opacity:.6;cursor:wait}
+.reference-format{flex-basis:100%;width:100%;padding:14px 0}.reference-format[hidden]{display:none}.reference-format>label{display:block;margin-bottom:8px}.reference-format select{max-width:440px;width:100%}.reference-example{padding:14px;background:#0b1422;border:1px solid #52627a;border-radius:8px;color:#eaf0ff;line-height:1.7;overflow-wrap:anywhere}.reference-example p{margin:8px 0;max-width:75ch}.reference-format>p{line-height:1.6;max-width:75ch}
+
+/* select ที่วางต่อจากช่องพิมพ์ในฟิลด์เดียวกัน (เช่นตัวเลือกกลุ่มผู้อ่าน) ต้องไม่ติดกันจนดูเป็นช่องเดียว */
+#audiencePreset{margin-top:8px;font-size:14px;padding:11px 14px;color:#b9c6e2}
+.soundToggle{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#b9c6e2;white-space:nowrap;cursor:pointer}
+.soundToggle input{width:auto;margin:0}

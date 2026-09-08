@@ -211,18 +211,11 @@ export class FakeTransport {
     if (/"titles"\s*:/.test(prompt))
       return json({ titles: [1, 2, 3].map((n) => ({ title: `ชื่อทดสอบที่ ${n}`, subtitle: 'คำขยายทดสอบ', angle: `มุมที่ ${n}` })) });
 
-    if (/"trends"\s*:/.test(prompt))
+    if (/"topics"\s*:/.test(prompt))
       return json({
-        verified: true,
-        searched_at: '2026-01-01',
-        trends: [1, 2, 3].map((n) => ({
-          trend: `กระแสทดสอบที่ ${n}`,
-          why_now: 'ข้อมูลทดสอบ',
-          fact_anchor: 'ข้อเท็จจริงทดสอบ',
-          book_angle: 'มุมหนังสือทดสอบ',
-          suggested_title: `ชื่อจากกระแสที่ ${n}`,
-          subtitle: 'คำขยายทดสอบ',
-          sources: [{ title: 'แหล่งทดสอบ', publisher: 'Test', url: 'https://example.com/test', date: '2026-01-01' }],
+        topics: Array.from({ length: 10 }, (_, i) => ({
+          topic: `หัวข้อทดสอบที่ ${i + 1}`,
+          why: 'ข้อมูลทดสอบ',
         })),
       });
 

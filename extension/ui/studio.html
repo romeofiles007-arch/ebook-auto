@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ebook Auto — Studio</title>
+<link rel="icon" type="image/png" href="../icons/icon-32.png">
 <link rel="stylesheet" href="studio.css">
+<link rel="stylesheet" href="crew.css">
 </head>
 <body><main class="app">
 
@@ -12,7 +14,6 @@
   <defs>
     <g id="s" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"></g>
   </defs>
-  <symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19v14H5.5A1.5 1.5 0 0 0 4 18.5z"/><path d="M4 18.5A1.5 1.5 0 0 0 5.5 20H19v-3"/><path d="M8 7h7"/></g></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></g></symbol>
   <symbol id="i-rocket" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5c2.6 2.3 4 5.4 4 9v3.2l-1.6 2.3H9.6L8 14.7v-3.2c0-3.6 1.4-6.7 4-9Z"/><path d="M8 12.5 5.3 15.2v3.1l2.4-1.4M16 12.5l2.7 2.7v3.1l-2.4-1.4"/><circle cx="12" cy="9.3" r="1.6"/><path d="M10.8 20.5h2.4"/></g></symbol>
   <symbol id="i-pen" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="m14.5 7.5 2 2"/></g></symbol>
@@ -52,12 +53,13 @@
 
 <header>
   <div>
-    <div class="brand"><svg class="i i-lg" aria-hidden="true"><use href="#i-book"/></svg> Ebook Auto</div>
+    <div class="brand"><img class="brand-logo" src="../icons/icon-48.png" alt=""> <span>Ebook Auto</span></div>
     <div class="sub">Extension ↔ ChatGPT ↔ Typst</div>
   </div>
   <div class="headerRight">
     <div id="mode" class="mode hidden"></div>
     <div id="status" class="status">พร้อม</div>
+    <label class="soundToggle" title="เสียงสั้น ๆ เมื่องานเสร็จ หรือเมื่อระบบต้องการให้คุณมาจัดการ"><input type="checkbox" id="soundOn" checked> 🔔 เสียงแจ้งเตือน</label>
     <button id="newBook" type="button" class="inline"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>เล่มใหม่</button>
   </div>
 </header>
@@ -97,11 +99,13 @@
 
   <ol id="stepGuide" class="stepGuide" data-step="never">
     <li data-step="setup"><b>1 · ตั้งค่าเล่มให้ครบก่อน</b><span>ผู้อ่าน · โทน · จำนวนหน้า · ภาษา · โหมดเนื้อหา — ทุกค่าถูกล็อกเข้าไปในสารบัญ</span></li>
-    <li data-step="title"><b>2 · ได้หัวข้อหรือชื่อหนังสือ</b><span>พิมพ์เอง หรือใช้ <svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>สุ่มจากกระแส / <svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT คิดชื่อ</span></li>
+    <li data-step="title"><b>2 · ได้หัวข้อหรือชื่อหนังสือ</b><span>พิมพ์เอง หรือใช้ <svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>ดูกระแส / <svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT คิดชื่อ</span></li>
     <li data-step="outline"><b>3 · ได้สารบัญแล้วเลือก 1 ทาง</b><span>กด <svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>เสนอสารบัญ 3 ทาง ให้ ChatGPT คิดให้ — หรือเปิด <svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg>โหมดแรงบันดาลใจ ถ้ามีสารบัญของตัวเองอยู่แล้ว · ขั้นนี้ต้องมาหลังข้อ 1 เสมอ</span></li>
     <li data-step="create"><b>4 · กด <svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มสร้าง Ebook</b><span>ตั้งแต่จุดนี้ระบบเดินยาวจนจบเนื้อหา</span></li>
   </ol>
-  <div class="stepWarn" data-step="book">แก้ค่าในข้อ 1 หลังจากเลือกสารบัญไปแล้ว = ต้องกดเสนอสารบัญใหม่ ระบบจะเตือนให้เองและไม่ปล่อยให้เริ่มเขียนด้วยสารบัญที่ขัดกับค่าใหม่</div>
+  <!-- ห้ามอ้างเลขข้อในข้อความ: เลขของ wizard กับเลขในลิสต์เก่า (#stepGuide ที่ไม่แสดงแล้ว) ไม่ตรงกัน
+       คนอ่านจะถูกชี้ไปผิดหน้า เขียนให้อธิบายตัวเองโดยไม่ต้องพึ่งเลขจึงถูกต้องกว่า -->
+  <div class="stepWarn hidden" data-step="book">คุณเลือกสารบัญไว้แล้ว — ค่าในหน้านี้ถูกฝังอยู่ในสารบัญชุดนั้น ถ้าแก้ตรงนี้ ระบบจะยกเลิกสารบัญที่เลือกไว้แล้วให้กดเสนอใหม่ ไม่ปล่อยให้เริ่มเขียนด้วยสารบัญที่ขัดกับค่าใหม่</div>
   <div class="fullAutoBar" data-step="go">
     <div>
       <b><svg class="i i-lg" aria-hidden="true"><use href="#i-robot"/></svg> โหมดอัตโนมัติเต็มรูปแบบ</b>
@@ -179,7 +183,7 @@
 
   <div class="row" data-step="topic">
     <label for="title">หัวข้อหรือชื่อหนังสือ</label>
-    <button id="trendRandom" type="button"><svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>สุ่มจากกระแสตอนนี้</button>
+    <button id="trendRandom" type="button"><svg class="i" aria-hidden="true"><use href="#i-dice"/></svg>ดูกระแส: ขอ 10 หัวข้อ</button>
     <button id="titleIdeate" type="button"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>ให้ ChatGPT คิดชื่อ</button>
     <button id="outlineIdeate" type="button"><svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>เสนอสารบัญ 3 ทาง</button>
   </div>
@@ -216,7 +220,12 @@
   <div class="grid" data-step="book">
     <div class="field">
       <label for="audience">เขียนให้ใครอ่าน</label>
-      <input id="audience" list="audienceOptions" placeholder="เลือกจากรายการหรือพิมพ์กลุ่มผู้อ่านเอง">
+      <input id="audience" list="audienceOptions" placeholder="พิมพ์เอง หรือเลือกจากรายการข้างล่าง">
+      <!-- ตัวเลือกซ้ำกับ datalist โดยตั้งใจ: datalist ของเบราว์เซอร์จะกรองตามตัวอักษรที่พิมพ์ไปแล้ว
+           พอช่องมีข้อความอยู่ รายการจึงเหลือศูนย์รายการและกดเลือกอะไรไม่ได้เลย
+           select ตัวนี้เลือกได้เสมอไม่ว่าช่องจะมีอะไรอยู่ · ตัวเลือกถูกคัดลอกจาก datalist ตอนเปิดหน้า
+           จึงไม่ต้องดูแลรายชื่อสองที่ -->
+      <select id="audiencePreset" aria-label="เลือกกลุ่มผู้อ่านจากรายการ"></select>
       <datalist id="audienceOptions">
         <option value="ผู้อ่านทั่วไปที่ไม่มีพื้นฐานในเรื่องนี้"></option>
         <option value="ผู้เริ่มต้นที่ต้องการคำอธิบายทีละขั้นและตัวอย่างที่ทำตามได้"></option>
@@ -337,16 +346,33 @@
     </div>
   </details>
 
-  <details class="more" data-step="book">
-    <summary>บรรณานุกรม — ระบบจะไม่แต่งแหล่งอ้างอิงเอง</summary>
-    <p class="muted" style="margin:10px 0 0">
-      ด้วยเหตุผลเดียวกับหน้าเกี่ยวกับผู้เขียน — โมเดลที่ถูกสั่งว่า “ใส่แหล่งอ้างอิงมาด้วย”
-      จะแต่งชื่อสำนักพิมพ์ ปี และลิงก์ที่ไม่มีอยู่จริงมาให้ครบชุด พิมพ์เองที่นี่บรรทัดละหนึ่งรายการ
-      ถ้าเล่มนี้เริ่มจากโหมดกระแส แหล่งที่ค้นมาจริงจะถูกต่อท้ายให้เอง
-    </p>
-    <textarea id="references" style="min-height:110px;margin-top:10px"
-      placeholder="เช่น&#10;สมชาย ใจดี. การเงินฉบับฟรีแลนซ์. สำนักพิมพ์ตัวอย่าง, 2567&#10;ธนาคารแห่งประเทศไทย. รายงานเศรษฐกิจ 2568. https://example.org/report"></textarea>
-    <div class="row" style="margin-top:8px"><span id="referencesState" class="muted"></span></div>
+  <details class="more" data-step="book" id="referenceOptions">
+    <summary>บรรณานุกรม — เลือกรูปแบบและดูตัวอย่าง</summary>
+      <div id="referenceFormatBox" class="reference-format">
+        <label for="referenceStyle">เลือกรูปแบบอ้างอิง</label>
+        <select id="referenceStyle">
+          <option value="apa">APA 7</option><option value="modern-language-association">MLA</option>
+          <option value="chicago-author-date">Chicago / Turabian (นาม–ปี)</option><option value="harvard-cite-them-right">Harvard (Cite Them Right)</option>
+          <option value="vancouver">Vancouver</option><option value="ieee">IEEE</option>
+        </select>
+        <p id="referenceStyleHint"></p>
+        <div class="reference-example" aria-live="polite">
+          <b>ตัวอย่างการอ้างอิงจากหนังสือ (Books)</b>
+          <p class="muted">ข้อมูลสมมติสำหรับดูรูปแบบ มีให้ดูทันทีโดยไม่ต้องค้นหรือกรอกอะไร ตัวอย่างจะไม่ถูกใส่ในหนังสือของคุณ</p>
+          <div id="referenceBibliographyExample"></div>
+          <p>ตัวอย่างในเนื้อหา: <span id="referenceInlineExample"></span></p>
+        </div>
+        <p class="muted">ตัวอย่างไทยแสดงปี พ.ศ. และอังกฤษแสดงปี ค.ศ. รายละเอียดอาจต่างตามข้อกำหนดของสถาบัน · Chicago ในระบบนี้ใช้แบบนาม–ปี</p>
+      </div>
+    <h3>แหล่งอ้างอิงที่จะใช้จริงในเล่ม</h3>
+    <p class="muted">ค้นงานวิชาการจาก Crossref ซึ่งรับข้อมูลจากสำนักพิมพ์ เปิด DOI เพื่ออ่านต้นทางก่อนเลือกใช้ การมี DOI ยืนยันรายการในทะเบียน ไม่ได้รับรองคุณภาพหรือว่ารองรับทุกข้อความในเล่ม</p>
+    <label for="referenceQuery">หัวข้อค้นหรือ DOI (คำค้นภาษาอังกฤษมักได้ผลมากกว่า)</label>
+    <div class="row"><input id="referenceQuery" placeholder="เช่น humor communication หรือ 10.xxxx/xxxxx"><button id="referenceSearch" type="button">ค้นแหล่งอ้างอิง</button></div>
+    <p class="muted">รูปแบบนี้ใช้กับรายการท้ายเล่ม ไม่ได้แทรกเลขอ้างอิงหรือเชิงอรรถในเนื้อหาให้เอง</p>
+    <div id="referenceResults"></div>
+    <p class="muted">ติ๊กเลือกแหล่งที่อ่านแล้วได้เลย ระบบจะจัดรูปแบบให้ตอนเริ่มสร้างเล่ม ไม่ต้องกดยืนยันซ้ำ สำหรับแบบตัวเลขให้เลือกตามลำดับที่ต้องการอ้างในเนื้อหา</p>
+    <textarea id="references" readonly style="min-height:110px;margin-top:10px" placeholder="รายการที่เลือกและจัดรูปแบบแล้วจะปรากฏที่นี่"></textarea>
+    <div id="referencesState" class="muted" role="status">ยังไม่ได้ค้นแหล่งอ้างอิง</div>
   </details>
 
   <details class="more" id="fictionOpts" hidden data-step="book">
@@ -397,8 +423,10 @@
     <div class="muted">ระบบจะสร้าง Story Bible เก็บตัวละคร ความสัมพันธ์ กฎของโลก ไทม์ไลน์ และปมที่ยังไม่คลี่คลาย เพื่อกันเรื่องหลุดระหว่างบท</div>
   </details>
 
-  <details class="more" id="proseOpts" data-step="look">
-    <summary>ตัวเลือกเพิ่มเติม — รูปเล่ม ภาพ และวิธีคุยกับ ChatGPT</summary>
+  <!-- เปิดค้างไว้ เพราะทั้งขั้น "รูปเล่มและภาพ" มีของอยู่ในกล่องนี้กล่องเดียว
+       ถ้าปิดไว้ ขั้นนี้จะว่างเปล่าจนดูเหมือนไม่มีอะไรให้ตั้ง -->
+  <details class="more" id="proseOpts" data-step="look" open>
+    <summary>รูปเล่ม ภาพ และวิธีคุยกับ ChatGPT</summary>
     <div class="grid">
       <div class="field nonfictionOnly">
         <label for="genre">แนวหนังสือ</label>
@@ -564,7 +592,7 @@
       <label><input type="checkbox" id="fm_copyright" checked> หน้าลิขสิทธิ์</label>
       <label><input type="checkbox" id="fm_foreword" checked> คำนำ</label>
       <label><input type="checkbox" id="bm_glossary"> อภิธานศัพท์</label>
-      <label><input type="checkbox" id="bm_references"> บรรณานุกรม</label>
+      <label><input type="checkbox" id="bm_references"> บรรณานุกรม (ต้องเลือกแหล่งจริงเอง)</label>
       <label><input type="checkbox" id="bm_about"> เกี่ยวกับผู้เขียน</label>
       <label><input type="checkbox" id="opt_consistency" checked> ตรวจความต่อเนื่องรายบท (กันเนื้อหาซ้ำข้ามบท ใช้ข้อความเพิ่ม 1 ต่อบท)</label>
     </div>
@@ -585,10 +613,6 @@
       <b id="resumeTitle"></b>
       <div id="resumeInfo" class="muted"></div>
     </div>
-    <button id="acceptPages" class="primary inline hidden"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>ยอมรับจำนวนหน้าปัจจุบัน</button>
-    <button id="resumeHistory"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>ดูประวัติโครงการ</button>
-    <button id="resumeSwitchEngine" class="hidden"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>เปลี่ยนแหล่งเขียน</button>
-    <button id="resumeDrop"><svg class="i" aria-hidden="true"><use href="#i-trash"/></svg>ทิ้ง</button>
   </section>
 
   <div class="folderRow" data-step="go">
@@ -745,6 +769,7 @@
       <button id="phase2Prompts" class="inline"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>ส่งออก Prompt ภาพทั้งหมด</button>
       <button id="phase2Bulk" class="inline"><svg class="i" aria-hidden="true"><use href="#i-upload"/></svg>อัปโหลดหลายรูปพร้อมกัน</button>
       <button id="phase2Folder" class="inline" title="อ่านไฟล์รูปที่วางไว้ในโฟลเดอร์รับรูปของโครงการ แล้วใส่เข้าช่องตามชื่อไฟล์"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg>ดึงรูปจากโฟลเดอร์โครงการ</button>
+      <button id="phase2Replan" class="inline" title="ล้างแผนภาพในเล่มทิ้งแล้วให้ GPT วางใหม่จากเนื้อหาที่เขียนจริง ใช้กับเล่มเก่าที่วางแผนไว้ก่อนกติกาภาพชุดปัจจุบัน — ปกและตัวหนังสือในเล่มไม่ถูกแตะ"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg>วางแผนภาพใหม่</button>
       <input type="file" id="bulkImgFile" accept="image/*" multiple hidden>
     </div>
   </div>

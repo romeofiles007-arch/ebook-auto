@@ -8,6 +8,7 @@
 
 import { prepareForTypeset, THAI_GAP } from '../core/thai.js';
 import { coverTextBaked, backCoverTextBaked } from '../core/prompts.js';
+import { referenceLines, REFERENCE_STYLES } from '../core/references.js';
 
 const mm = (v) => `${round(v)}mm`;
 const pt = (v) => `${round(v)}pt`;
@@ -756,14 +757,11 @@ ${body}`);
 
   if (has('references')) {
     /**
-     * รับได้ทั้งบรรทัดที่ผู้ใช้พิมพ์เอง และแหล่งที่ค้นมาจริงจากโหมดกระแส
+     * รับเฉพาะบรรทัดที่ผู้ใช้พิมพ์เอง (โหมดดูกระแสไม่เก็บแหล่งให้แล้ว)
      * ระบบไม่แต่งบรรณานุกรมขึ้นเอง ด้วยเหตุผลเดียวกับหน้าเกี่ยวกับผู้เขียน —
      * โมเดลที่ถูกสั่งว่า "ใส่แหล่งอ้างอิงมาด้วย" จะแต่งสำนักพิมพ์ ปี และ URL ที่ไม่มีอยู่จริงมาให้ครบชุด
      */
-    const refs = [
-      ...(book.references || []),
-      ...(book.trendSeed?.sources || []),
-    ];
+    const refs = referenceLines(book);
     const seen = new Set();
     const unique = refs.filter((r) => {
       const key = String(typeof r === 'string' ? r : r?.url || r?.title || '').trim();
@@ -772,17 +770,17 @@ ${body}`);
       return true;
     });
     if (unique.length) {
-      const title = book.trendSeed?.trend ? 'แหล่งข้อมูลตั้งต้นและอ้างอิง' : 'บรรณานุกรม';
+      const title = `บรรณานุกรม (${REFERENCE_STYLES[book.referenceStyle || 'apa'] || 'APA 7'})`;
       const lines = unique.map((r) => {
-        if (typeof r === 'string') return `- ${T(r)}`;
+        if (typeof r === 'string') return T(r);
         const label = [r.publisher, r.title, r.date].filter(Boolean).join(' · ');
         const url = r.url ? ` \\\ ${T(r.url)}` : '';
         return `- ${T(label || r.url || 'แหล่งข้อมูล')}${url}`;
-      }).join('\n');
+      }).join('\n\n');
       parts.push(`#pagebreak(to: "odd", weak: true)
 = ${title}
 
-${book.trendSeed?.trend ? `${T(`กระแสตั้งต้น: ${book.trendSeed.trend}`)}\n\n` : ''}${lines}`);
+${book.trendSeed?.trend ? `${T(`หัวข้อตั้งต้น: ${book.trendSeed.trend}`)}\n\n` : ''}${lines}`);
     }
   }
 
@@ -790,7 +788,7 @@ ${book.trendSeed?.trend ? `${T(`กระแสตั้งต้น: ${book.tre
    * เดิมด่านนี้เช็ค book.author ทั้งที่เนื้อหาที่พิมพ์จริงคือ book.aboutAuthor
    * คนที่พิมพ์ประวัติมาเต็มหน้าแต่เว้นช่อง "ชื่อผู้เขียน" ไว้ จึงไม่ได้หน้านี้เลยโดยไม่มีใครทัก
    */
-  const bio = String(book.aboutAuthor || '').trim() || String(book.author || '').trim();
+  const bio = String(book.aboutAuthor || '').trim();
   if (has('about_author') && bio) {
     parts.push(`#pagebreak(to: "odd", weak: true)
 = เกี่ยวกับผู้เขียน
