@@ -2156,6 +2156,18 @@ function showResume(b) {
 
 async function resumeGo() {
   /**
+   * ห้ามเดินเครื่องซ้อนเครื่องที่เดินอยู่
+   *
+   * สั่ง "ทำต่อ" ระหว่างที่งานยังวิ่งอยู่ = มี Machine สองตัวทำเล่มเดียวกันพร้อมกัน
+   * ทั้งคู่สลับกันส่งงานให้ ChatGPT และเขียนทับสถานะของกันและกันลง IndexedDB
+   * ผลที่เห็นคือบันทึกขึ้นข้อความเดิมซ้ำเป็นชุด ๆ ทุกยี่สิบวินาที และงานดูเหมือนไม่คืบไปไหน
+   * ตัวกันแบบเดียวกันนี้มีอยู่แล้วที่ปุ่มเริ่มสร้าง แต่ทางนี้ไม่มี
+   */
+  if (machineBusy || hasPendingTurn()) {
+    status('มีงานกำลังทำอยู่ กรุณารอให้งานนั้นจบก่อน — ถ้าจะเริ่มใหม่ให้กดหยุดก่อน');
+    return false;
+  }
+  /**
    * กู้เล่มกลับมาจากรหัสบนการ์ด ถ้าตัวแปรรวมของหน้าถูกล้างไปแล้ว
    *
    * ของเดิมอ่าน book.job ตรง ๆ พอ book เป็น null ก็โยน TypeError ออกมากลางทาง
@@ -2171,7 +2183,7 @@ async function resumeGo() {
     status('ไม่พบงานค้างที่จะทำต่อ — เลือกจาก “ดูประวัติโครงการ” ด้านล่างได้เลย');
     await loadProjectHistory();
     $('projectList')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    return;
+    return false;
   }
 
   $('resume').classList.add('hidden');
@@ -5502,9 +5514,15 @@ chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
    * ถ้าเงียบไป ผู้ใช้จะเห็นว่าสั่งสำเร็จทั้งที่ไม่มีใครฟังอยู่เลย
    */
   if (m?.type === 'ui.command' && (m.command === 'stopJob' || m.command === 'resumeJob')) {
-    if (m.command === 'stopJob') stopRun('สั่งหยุดจากแผงข้าง');
-    else resumeGo();
-    sendResponse({ ok: true });
+    if (m.command === 'stopJob') {
+      stopRun('สั่งหยุดจากแผงข้าง');
+      sendResponse({ ok: true });
+      return true;
+    }
+    // "ทำต่อ" ตอบกลับตามผลจริง ไม่ใช่ตอบ ok ทุกครั้ง — งานที่ยังวิ่งอยู่ต้องไม่ถูกสั่งซ้อน
+    resumeGo().then((started) =>
+      sendResponse(started === false ? { ok: false, error: 'มีงานกำลังทำอยู่ หรือไม่มีงานค้างให้ทำต่อ' } : { ok: true }),
+    );
     return true;
   }
   handleUiCommand(m);
