@@ -585,7 +585,6 @@ const PHASE_NAME = {
   waiting: 'รอ ChatGPT ตอบ',
   streaming: 'ChatGPT กำลังพ่นคำตอบ',
   received: 'ได้รับคำตอบแล้ว',
-  awaiting_user_send: 'รอคุณกด Enter',
 };
 
 setInterval(() => {
@@ -679,27 +678,11 @@ function handleGptMessage(m) {
     typing: 'กำลังใส่ Prompt ลงใน ChatGPT',
     sending: 'กำลังกดส่ง Prompt',
     waiting: 'กำลังรอ ChatGPT ตอบ',
-    awaiting_user_send: '⌨️ ไปกด Enter ในแท็บ ChatGPT หนึ่งครั้ง',
   };
   status(map[m.phase] || m.phase || 'ChatGPT กำลังทำงาน');
   if (m.phase === 'waiting')
     $('detail').textContent =
       `รอคำตอบจาก ChatGPT ${m.detail ? m.detail + ' วินาที' : ''}` + (m.note ? ` · ${m.note}` : '');
-
-  /**
-   * ด่านที่ต้องให้คนช่วยหนึ่งจังหวะ ต้องเห็นชัดที่สุดในหน้าจอ
-   * ถ้าแจ้งเบา ๆ เหมือนสถานะอื่น ผู้ใช้จะนั่งรอต่ออีกสามนาทีโดยไม่รู้ว่าระบบรออะไรอยู่
-   */
-  if (m.phase === 'awaiting_user_send') {
-    $('detail').textContent = String(m.detail || '');
-    addEvent('system', '⌨️ ต้องกด Enter เอง', String(m.detail || ''));
-    chime('attention'); // ด่านนี้ไม่มีใครทำแทนได้ ต้องเรียกคนกลับมาที่จอ
-    if (phase2Running && phase2Stage) {
-      phase2Stage.text = '⌨️ กดส่งอัตโนมัติไม่ติด — ไปกด Enter ในแท็บ ChatGPT หนึ่งครั้ง';
-      const cell = document.querySelector(`[data-p2-row="${CSS.escape(phase2Stage.name || '')}"] .p2Note`);
-      if (cell) cell.textContent = phase2Stage.text;
-    }
-  }
 
   /**
    * หน้า Phase 2 เคยนิ่งสนิทตลอดเวลาที่รอ ChatGPT วาดภาพ
@@ -1675,23 +1658,12 @@ const transportKind = (forBook = null) =>
  * ประกอบคีย์กับชื่อโมเดลเอง จะมีจุดที่ลืมส่งเสมอ แล้วโหมด API จะพังเป็นบางปุ่ม
  * ซึ่งเป็นอาการที่หาสาเหตุยากที่สุดแบบหนึ่ง
  */
-/**
- * ด่านสุดท้ายของการส่ง Prompt คือ "ค้างไว้ในช่องแล้วรอคนกด Enter" สามนาที
- *
- * ในโหมดอัตโนมัติไม่มีใครนั่งเฝ้าอยู่ตรงนั้น การรอสามนาทีจึงไม่ใช่ทางออก
- * มันคือการนอนรอสิ่งที่ไม่มีวันมา แล้วค่อยล้มเทิร์นทีหลังอยู่ดี — เสียเวลาฟรีสามนาทีต่อครั้ง
- * รอสั้น ๆ พอเผื่อคนบังเอิญอยู่หน้าจอ แล้วล้มเทิร์นให้เร็วเพื่อให้ตัวลองใหม่ทำงานแทน
- * ซึ่งมีโอกาสผ่านจริง เพราะมันเริ่มจากช่องพิมพ์ที่ถูกล้างใหม่
- */
-const HANDOFF_MS = { attended: 180000, auto: 20000 };
-
 const transportOpts = (extra = {}, forBook = null) => ({
   timeoutMs: 300000,
   onProgress: handleGptMessage,
   latencyMs: 60,
   apiKey: apiKeyValue,
   model: forBook?.textApiModel || textApiModel(),
-  handoffMs: autoPilot() ? HANDOFF_MS.auto : HANDOFF_MS.attended,
   ...extra,
 });
 
@@ -1746,13 +1718,7 @@ function makeMachine() {
    * ภาพที่ให้ ChatGPT วาดในแท็บ ต้องออกทางแท็บ ไม่ว่าเนื้อหาจะเขียนด้วยทางไหน
    * (โหมดภาพแบบ API ไม่ผ่านสายนี้เลย มันเรียก Images API ตรงจาก core/imageApi.js)
    */
-  // เทิร์นภาพก็เจอด่านเดียวกัน โหมดอัตโนมัติจึงต้องไม่นั่งรอคนกด Enter ตรงนั้นเหมือนกัน
-  const imageTransport = makeTransport('chatgpt_tab', {
-    timeoutMs: 300000,
-    onProgress: handleGptMessage,
-    latencyMs: 60,
-    handoffMs: autoPilot() ? HANDOFF_MS.auto : HANDOFF_MS.attended,
-  });
+  const imageTransport = makeTransport('chatgpt_tab', { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
   machine = new Machine({ book, transport, imageTransport, onEvent: logMachine });
 }
 
@@ -3120,7 +3086,7 @@ function phase2Advice(reason) {
   if (/ตีความว่าเป็นงานแก้ภาพ|แก้ไขภาพ|ขอไฟล์ต้นฉบับ|source image|edit/i.test(r))
     return 'ทางแก้: ตรวจว่าโมเดลที่เลือกอยู่ในแท็บ ChatGPT สร้างภาพได้จริง (โมเดลสายคิดก่อนตอบบางตัวปิดเครื่องมือสร้างภาพไว้) แล้วกดสร้างใหม่ · ถ้ายังไม่ได้ ใช้ “คัดลอก Prompt” ไปสร้างที่อื่นแล้วกดอัปโหลด';
   if (/prompt_not_sent|ค้างอยู่ในช่อง|กดส่งไม่ติด/i.test(r))
-    return 'ทางแก้: Prompt ถูกวางในช่องพิมพ์แล้วแต่กดส่งไม่ติด — ไปที่แท็บ ChatGPT กด Enter ส่งเองหนึ่งครั้ง แล้วกลับมากด “ภาพเสร็จแล้ว → ดึงมาเลย” หรือกด “สร้างใหม่” ให้ระบบส่งใหม่';
+    return 'ทางแก้: Prompt ถูกวางในช่องพิมพ์แล้วแต่กดส่งไม่ติด — กด “สร้างใหม่” ให้ระบบส่งใหม่ในห้องแชตใหม่ · ถ้าเปิด DevTools ค้างไว้บนแท็บ ChatGPT ให้ปิดก่อน เพราะช่องทางสำรองของเบราว์เซอร์แนบไม่ได้';
   if (/เปิดห้องแชตใหม่|ห้องเดิม|ห้องแชตใหม่|new_thread/i.test(r))
     return 'ทางแก้: เปิดแท็บ chatgpt.com ค้างไว้ที่หน้าแชต (ไม่ใช่หน้าอื่นของเว็บ) แล้วกดสร้างใหม่';
   if (/ดึง bytes ไม่ได้|0 byte|ไฟล์ภาพว่าง/i.test(r))

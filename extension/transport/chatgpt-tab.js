@@ -60,17 +60,9 @@ export class ChatGptTabTransport {
     // เดิม timer รอบนอกนี้ใช้ answerTimeoutMs อย่างเดียว จึงตัดจบก่อน adapter จะรอภาพเสร็จ
     // ทำให้เทิร์นสร้างภาพ (โดยเฉพาะภาพที่ 2 เป็นต้นไปในแชทเดียวกัน เช่นปกหลัง) ถูกนับว่า timeout ทั้งที่ยังทำงานอยู่จริง
     const imageTimeoutMs = opts.wantImages ? (opts.imageTimeoutMs ?? 240000) : 0;
-    /**
-     * เผื่อเวลาให้ด่าน "รอผู้ใช้กด Enter" ด้วย
-     *
-     * เมื่อกดส่งอัตโนมัติไม่ติด adapter จะค้าง Prompt ไว้แล้วรอคนกดเองสูงสุดสามนาที
-     * ถ้า timer รอบนอกไม่เผื่อช่วงนี้ มันจะตัดจบก่อนที่ผู้ใช้จะทันได้กด
-     * แล้วงานที่รอดได้กลายเป็น timeout ทั้งที่คนกำลังเดินไปกดอยู่พอดี
-     */
-    const handoffMs = opts.handoffMs ?? 180000;
     // แนบไฟล์คือการอัปโหลดจริงผ่านหน้าเว็บ ต้องเผื่อเวลาให้ ไม่งั้นเทิร์นที่แนบรูปจะถูกตัดจบทั้งที่กำลังอัปโหลดอยู่
     const attachMs = opts.attachments?.length ? 45000 : 0;
-    const outerTimeoutMs = answerTimeoutMs + imageTimeoutMs + handoffMs + attachMs + 30000;
+    const outerTimeoutMs = answerTimeoutMs + imageTimeoutMs + attachMs + 30000;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         pending.delete(turnId);
@@ -90,7 +82,6 @@ export class ChatGptTabTransport {
             expectModel: opts.expectModel ?? this.expectModel,
             timeoutMs: answerTimeoutMs,
             imageTimeoutMs: opts.wantImages ? imageTimeoutMs : undefined,
-            handoffMs,
             // รูปอ้างอิงที่ต้องแนบเข้าช่องพิมพ์ก่อนส่ง — ส่งเป็น data URL เพราะ Blob ข้ามขอบเขต extension ไม่ได้
             attachments: opts.attachments?.length ? opts.attachments : undefined,
           },
