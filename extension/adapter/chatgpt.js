@@ -1653,6 +1653,9 @@
        * ล้างช่องก่อนเสมอ เพราะข้อความที่ค้างอยู่คือของที่ ProseMirror ไม่รู้จัก
        * ถ้าป้อนทับลงไปจะได้ข้อความซ้อนกันสองชุด
        */
+      // เหตุผลที่ส่งอัตโนมัติไม่ผ่าน ต้องเดินทางไปถึงข้อความที่บอกให้คนไปกด Enter ด้วย
+      // ไม่งั้นบรรทัดที่ขึ้นซ้ำทุกห้าวินาทีจะบอกแค่ "ไปกด Enter" โดยไม่มีวันบอกว่าทำไม
+      let handoffReason = '';
       if (!fresh) {
         try {
           const composer = $(S.composer);
@@ -1675,10 +1678,12 @@
             );
             if (fresh) report(turnId, 'sending', 'ส่งสำเร็จด้วยช่องทางสำรองของเบราว์เซอร์');
           } else if (forced?.error) {
+            handoffReason = forced.error;
             report(turnId, 'sending', `ช่องทางสำรองส่งไม่ได้: ${forced.error}`);
           }
         } catch (e) {
-          report(turnId, 'sending', `ช่องทางสำรองส่งไม่ได้: ${e?.message || e}`);
+          handoffReason = e?.message || String(e);
+          report(turnId, 'sending', `ช่องทางสำรองส่งไม่ได้: ${handoffReason}`);
         }
       }
 
@@ -1689,7 +1694,7 @@
           report(
             turnId,
             'awaiting_user_send',
-            'กดส่งอัตโนมัติไม่ติด — Prompt อยู่ในช่องพิมพ์ของ ChatGPT แล้ว กด Enter ในแท็บนั้นหนึ่งครั้ง ระบบจะทำต่อเอง',
+            `กดส่งอัตโนมัติไม่ติด — Prompt อยู่ในช่องพิมพ์ของ ChatGPT แล้ว กด Enter ในแท็บนั้นหนึ่งครั้ง ระบบจะทำต่อเอง${handoffReason ? ` · ช่องทางสำรองไม่ผ่านเพราะ: ${handoffReason}` : ''}`,
           );
           fresh = await waitForDom(
             () => {
