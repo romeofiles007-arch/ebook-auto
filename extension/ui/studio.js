@@ -1675,12 +1675,23 @@ const transportKind = (forBook = null) =>
  * ประกอบคีย์กับชื่อโมเดลเอง จะมีจุดที่ลืมส่งเสมอ แล้วโหมด API จะพังเป็นบางปุ่ม
  * ซึ่งเป็นอาการที่หาสาเหตุยากที่สุดแบบหนึ่ง
  */
+/**
+ * ด่านสุดท้ายของการส่ง Prompt คือ "ค้างไว้ในช่องแล้วรอคนกด Enter" สามนาที
+ *
+ * ในโหมดอัตโนมัติไม่มีใครนั่งเฝ้าอยู่ตรงนั้น การรอสามนาทีจึงไม่ใช่ทางออก
+ * มันคือการนอนรอสิ่งที่ไม่มีวันมา แล้วค่อยล้มเทิร์นทีหลังอยู่ดี — เสียเวลาฟรีสามนาทีต่อครั้ง
+ * รอสั้น ๆ พอเผื่อคนบังเอิญอยู่หน้าจอ แล้วล้มเทิร์นให้เร็วเพื่อให้ตัวลองใหม่ทำงานแทน
+ * ซึ่งมีโอกาสผ่านจริง เพราะมันเริ่มจากช่องพิมพ์ที่ถูกล้างใหม่
+ */
+const HANDOFF_MS = { attended: 180000, auto: 20000 };
+
 const transportOpts = (extra = {}, forBook = null) => ({
   timeoutMs: 300000,
   onProgress: handleGptMessage,
   latencyMs: 60,
   apiKey: apiKeyValue,
   model: forBook?.textApiModel || textApiModel(),
+  handoffMs: autoPilot() ? HANDOFF_MS.auto : HANDOFF_MS.attended,
   ...extra,
 });
 
@@ -1735,7 +1746,13 @@ function makeMachine() {
    * ภาพที่ให้ ChatGPT วาดในแท็บ ต้องออกทางแท็บ ไม่ว่าเนื้อหาจะเขียนด้วยทางไหน
    * (โหมดภาพแบบ API ไม่ผ่านสายนี้เลย มันเรียก Images API ตรงจาก core/imageApi.js)
    */
-  const imageTransport = makeTransport('chatgpt_tab', { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
+  // เทิร์นภาพก็เจอด่านเดียวกัน โหมดอัตโนมัติจึงต้องไม่นั่งรอคนกด Enter ตรงนั้นเหมือนกัน
+  const imageTransport = makeTransport('chatgpt_tab', {
+    timeoutMs: 300000,
+    onProgress: handleGptMessage,
+    latencyMs: 60,
+    handoffMs: autoPilot() ? HANDOFF_MS.auto : HANDOFF_MS.attended,
+  });
   machine = new Machine({ book, transport, imageTransport, onEvent: logMachine });
 }
 

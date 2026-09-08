@@ -1694,7 +1694,7 @@
           report(
             turnId,
             'awaiting_user_send',
-            `กดส่งอัตโนมัติไม่ติด — Prompt อยู่ในช่องพิมพ์ของ ChatGPT แล้ว กด Enter ในแท็บนั้นหนึ่งครั้ง ระบบจะทำต่อเอง${handoffReason ? ` · ช่องทางสำรองไม่ผ่านเพราะ: ${handoffReason}` : ''}`,
+            `กดส่งอัตโนมัติไม่ติด — Prompt อยู่ในช่องพิมพ์ของ ChatGPT แล้ว กด Enter ในแท็บนั้นหนึ่งครั้ง ระบบจะทำต่อเอง (รอถึง ${Math.round(waitMs / 1000)} วินาที แล้วจะลองใหม่เอง)${handoffReason ? ` · ช่องทางสำรองไม่ผ่านเพราะ: ${handoffReason}` : ''}`,
           );
           fresh = await waitForDom(
             () => {
