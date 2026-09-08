@@ -4303,13 +4303,14 @@ $('folder').onclick = chooseFolder;
 $('typstTest').onclick = testTypst;
 $('create').onclick = create;
 $('chat').onclick = () => chrome.runtime.sendMessage({ type: 'sw.focusChat' });
-$('stop').onclick = () => {
+function stopRun(from = 'ผู้ใช้สั่งหยุดงาน') {
   machine?.stop();
   status('หยุดแล้ว');
   stopAutoPilot(); // ผู้ใช้สั่งหยุดเอง = เลิกโหมดอัตโนมัติด้วย ไม่ใช่หยุดแค่เครื่องแต่ธงยังค้าง
-  addEvent('system', 'หยุด', 'ผู้ใช้สั่งหยุดงาน');
+  addEvent('system', 'หยุด', from);
   $('create').disabled = false;
-};
+}
+$('stop').onclick = () => stopRun();
 $('newBook').onclick = startNewBook;
 $('secSave').onclick = saveSection;
 $('secRegen').onclick = regenerateSection;
@@ -5428,7 +5429,19 @@ function handleUiCommand(m) {
   }
 }
 
-chrome.runtime.onMessage.addListener((m) => {
+chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
+  /**
+   * คำสั่งหยุด/ทำต่อจากแผงข้าง ต้องตอบกลับว่ามีคนรับแล้ว
+   *
+   * แผงข้างใช้คำตอบนี้แยกระหว่าง "สั่งแล้ว" กับ "ไม่มีหน้า Studio เปิดอยู่"
+   * ถ้าเงียบไป ผู้ใช้จะเห็นว่าสั่งสำเร็จทั้งที่ไม่มีใครฟังอยู่เลย
+   */
+  if (m?.type === 'ui.command' && (m.command === 'stopJob' || m.command === 'resumeJob')) {
+    if (m.command === 'stopJob') stopRun('สั่งหยุดจากแผงข้าง');
+    else resumeGo();
+    sendResponse({ ok: true });
+    return true;
+  }
   handleUiCommand(m);
   handleGptMessage(m);
 });

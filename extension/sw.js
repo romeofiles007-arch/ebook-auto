@@ -265,6 +265,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const studio = await ensureStudioTab(true);
           return sendResponse({ ok: true, tabId: studio.id });
         }
+        /**
+         * หยุด/ทำต่อ สั่งงานที่กำลังเดินอยู่ในหน้า Studio ที่เปิดค้างไว้เท่านั้น
+         *
+         * ห้ามเปิดแท็บใหม่ให้เหมือนคำสั่งข้างบน เพราะหน้าที่เพิ่งเปิดไม่มีงานเดินอยู่
+         * แล้วคำสั่งจะเงียบหายไปทั้งที่ผู้ใช้เห็นว่า "สั่งแล้ว"
+         * ถ้าไม่มีหน้าไหนรับ ต้องตอบกลับไปให้แผงข้างบอกผู้ใช้ได้ตรง ๆ
+         */
+        if (msg.command === 'stopJob' || msg.command === 'resumeJob') {
+          const reply = await chrome.runtime.sendMessage({ ...msg, _relayed: true }).catch(() => null);
+          return sendResponse(
+            reply?.ok ? reply : { ok: false, error: 'ไม่มีหน้า Studio ที่เปิดค้างอยู่' },
+          );
+        }
         chrome.runtime.sendMessage({ ...msg, _relayed: true }).catch(() => {});
         return sendResponse({ ok: true });
       }
