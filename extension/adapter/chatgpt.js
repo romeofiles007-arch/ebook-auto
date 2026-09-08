@@ -11,7 +11,7 @@
     composer: '#prompt-textarea, div[contenteditable="true"][id="prompt-textarea"]',
     sendButton: '[data-testid="send-button"], button[aria-label*="send" i], button[aria-label*="ส่ง" i], button[title*="send" i]',
     stopButton: '[data-testid="stop-button"], button[aria-label*="Stop" i]',
-    assistantTurn: '[data-message-author-role="assistant"]',
+    assistantTurn: '[data-message-author-role="assistant"], [data-turn="assistant"]:not(:has([data-message-author-role="assistant"]))',
     turnContainer: 'main',
     codeBlock: 'pre code',
     copyButton: '[data-testid="copy-turn-action-button"], button[aria-label*="Copy" i]',
@@ -22,6 +22,8 @@
       '[role="alert"], [role="dialog"], [aria-live="assertive"], [data-testid*="limit" i], [data-testid*="usage" i], [class*="toast" i]',
     images: 'img[src*="oaiusercontent"], img[alt][src^="https://"]',
     fileInput: 'input[type="file"]',
+    attachmentRemove:
+      'button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="ลบ" i], button[data-testid*="remove" i], button[data-testid*="delete" i]',
   };
 
   // วลีที่แปลว่า "ชนลิมิต" — เพิ่มได้จากหน้าตั้งค่า
@@ -42,12 +44,22 @@
 
   chrome.storage.local.get(['selectors', 'limitPatterns']).then((o) => {
     if (o.selectors) S = { ...DEFAULT_SELECTORS, ...o.selectors };
+    // Migrate the old saved selector too: image-only replies now use data-turn.
+    if (S.assistantTurn === '[data-message-author-role="assistant"]') {
+      S.assistantTurn = DEFAULT_SELECTORS.assistantTurn;
+    }
     if (o.limitPatterns?.length) LIMITS = o.limitPatterns;
   });
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+  const imageTurns = new Map();
+  const normalizePrompt = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+  const composerMatches = (prompt) => {
+    const box = $(S.composer);
+    return !!box && normalizePrompt(box.innerText || box.textContent) === normalizePrompt(prompt);
+  };
 
   /**
    * รอแบบขับด้วยเหตุการณ์ ไม่ใช่นาฬิกา
@@ -140,8 +152,16 @@
    */
   function inCodeBlock(btn) {
     if (btn.closest('pre')) return true;
-    for (let el = btn.parentElement, i = 0; el && i < 4; el = el.parentElement, i++) {
-      if (el.matches?.(S.assistantTurn)) break;
+    /**
+     * ไต่จนถึงขอบกล่องคำตอบ ไม่ใช่แค่ 4 ชั้นตายตัว เพราะ ChatGPT ห่อหัวบล็อกโค้ดลึกขึ้นทุกครั้งที่ปรับหน้า
+     * ถ้าไต่ไม่ถึง ปุ่ม Copy ของบล็อกโค้ดจะถูกนับเป็นแถบปุ่มใต้คำตอบ แล้วตัดคำตอบกลางคัน
+     *
+     * แต่ห้ามไต่เลยกล่องคำตอบออกไป: ชั้นที่ครอบกล่องคำตอบทั้งกล่อง (เช่น <article>)
+     * ย่อมมี <pre> ของคำตอบอยู่ข้างในเสมอ ถ้าไต่ต่อ ปุ่มของแถบปุ่มจริงจะถูกตีเป็นปุ่มบล็อกโค้ดไปด้วย
+     * แล้วเทิร์นจะไม่มีวันเจอแถบปุ่มเลย ต้องรอครบเวลานิ่งทุกครั้ง
+     */
+    for (let el = btn.parentElement, i = 0; el && i < 12; el = el.parentElement, i++) {
+      if (el.matches?.(S.assistantTurn) || el.querySelector(S.assistantTurn)) break;
       if (el.querySelector('pre')) return true;
     }
     return false;
@@ -184,9 +204,14 @@
    * ถ้าจังหวะนั้นหน้าเว็บนิ่งพอดี ระบบจะปิดเทิร์นแล้วอ่านคำว่า "Thinking" กลับมาเป็นคำตอบ
    * (อาการที่เห็น: ปกหน้า ล้มเหลว — ChatGPT ตอบเป็นข้อความแทนภาพ: "Thinking")
    * ต้องเทียบทั้งก้อน ไม่ใช่ขึ้นต้นด้วย เพราะคำตอบจริงมักขึ้นต้นว่า "Thought for 12s" แล้วตามด้วยเนื้อหา
+   *
+   * ป้ายระหว่างค้นเว็บก็เป็นข้อความชั่วคราวแบบเดียวกัน แถมมีตัวนับต่อท้ายที่ขยับช้ามาก
+   * ("Searching websites 4") เดิม regex ครอบแค่ "Searching the web" ป้ายที่มีคำว่า
+   * websites/sites หรือมีตัวเลขจึงหลุดออกมาเป็น "คำตอบ" ยาว 21 ตัวอักษร แล้วถูกส่งไปแปลงเป็น JSON
+   * (อาการที่เห็น: ค้นกระแสไม่สำเร็จ — อ่านคำตอบเป็น JSON ไม่ได้ ค้นข้อความ: Searching websites 4)
    */
   const PLACEHOLDER =
-    /^(thinking|reasoning|analy[sz]ing|searching(?: the web)?|working on it|thought for [^\n]{0,24}|กำลังคิด[^\n]{0,24}|กำลังค้นหา[^\n]{0,24})[.…\s]*$/i;
+    /^(?:thinking|reasoning|analy[sz]ing|working on it|thought for [^\n]{0,24}|(?:search|brows|read|find|gather|visit|check)(?:ing|ed|s)?(?:\s+\d{1,4})?(?:\s+(?:the\s+)?(?:web|websites?|sites?|sources?|results?|links?|pages?))?(?:\s+\d{1,4})?|กำลัง(?:คิด|ค้นหา|ค้น|อ่าน|ตรวจ|รวบรวม)[^\n]{0,24})[.…·\s]*$/i;
   const isThinkingOnly = (turn) => PLACEHOLDER.test((turn?.innerText || '').trim());
 
   function report(turnId, phase, detail, note) {
@@ -268,6 +293,18 @@
     if (!wanted.length) return { attached: 0, errors: [] };
 
     const errors = [];
+
+    /**
+     * ต้องเริ่มจากช่องที่ว่างจริง ไม่ใช่ช่องที่ "นับของค้างไว้แล้วบวกเพิ่ม"
+     * ถ้าล้างไม่หมด ต้องพูดออกมา เพราะรูปส่วนเกินจะไปถึงโมเดลพร้อมคำสั่งรอบนี้
+     */
+    const swept = await clearAttachments();
+    if (swept.left) {
+      errors.push(
+        `มีรูปค้างอยู่ในช่องพิมพ์ ${swept.left} ใบและลบไม่ออก — รูปเหล่านี้จะถูกส่งไปพร้อมคำสั่งรอบนี้ด้วย`,
+      );
+    }
+
     const before = countAttachmentThumbs();
 
     let list;
@@ -276,6 +313,22 @@
     } catch (e) {
       return { attached: 0, errors: [`สร้างไฟล์จากรูปที่ส่งมาไม่ได้: ${e?.message || e}`] };
     }
+
+    /**
+     * "ยังไม่เห็นภาพย่อ" ไม่ได้แปลว่า "ไฟล์ไม่เข้า" — และการเดาผิดตรงนี้ทำให้แนบซ้ำ
+     *
+     * หน้า ChatGPT มีช่องแนบไฟล์ที่เข้าเกณฑ์มากกว่าหนึ่งช่อง ของเดิมวนใส่ไฟล์ทีละช่อง
+     * แล้วรอภาพย่อ 15 วินาที ถ้าไม่ขึ้นก็ไปใส่ช่องถัดไปต่อ แต่ตอนอัปโหลดช้ากว่านั้น
+     * ช่องแรกรับไฟล์ไปแล้วจริง ๆ พอไปใส่ช่องที่สองอีก สุดท้ายภาพย่อขึ้นสองใบ
+     * (เห็นกับตา: รูปผู้เขียนใบเดียวกันแนบไปกับคำสั่งสองใบ)
+     *
+     * ChatGPT ได้รูปเดียวกันซ้อนสองใบแล้วตีความว่าเป็นงานเทียบภาพหรืองานแก้ภาพ
+     * ไม่ใช่งานวาดใหม่ — ซึ่งเป็นคนละเรื่องกับที่ prompt สั่งไว้ทั้งฉบับ
+     *
+     * เกณฑ์ที่ถูกคือดูว่า "จำนวนภาพย่อขยับขึ้นหรือยัง" ขยับเมื่อไรแปลว่าช่องนั้นรับไปแล้ว
+     * ห้ามยิงช่องทางอื่นซ้ำอีก ให้รอต่อในช่องทางเดิมจนกว่าจะครบหรือหมดเวลา
+     */
+    const thumbsAdded = () => countAttachmentThumbs() - before;
 
     // ทางที่ 1 — ช่องแนบไฟล์จริงของหน้าเว็บ
     const inputs = $$(S.fileInput).filter((el) => !el.accept || /image|\*/i.test(el.accept));
@@ -288,10 +341,15 @@
       } catch (e) {
         errors.push(`ใส่ไฟล์ในช่องแนบไม่สำเร็จ: ${e?.message || e}`);
       }
+      if (thumbsAdded() > 0) {
+        errors.push('ช่องแนบรับไฟล์ไปแล้วแต่ภาพย่อขึ้นช้ากว่าที่รอ จึงไม่ยิงช่องอื่นซ้ำ');
+        const full = await waitForThumbs(before + wanted.length);
+        return { attached: full ? wanted.length : thumbsAdded(), errors, via: 'file_input_slow' };
+      }
     }
 
     // ทางที่ 2 — หย่อนไฟล์ลงช่องพิมพ์ เหมือนผู้ใช้ลากรูปมาวาง
-    const box = $(S.composer);
+    const box = thumbsAdded() > 0 ? null : $(S.composer);
     if (box) {
       try {
         const dt = new DataTransfer();
@@ -322,10 +380,49 @@
    * รูปที่แนบสำเร็จจะถูกแสดงเป็นภาพย่อที่หน้าเว็บสร้างจาก blob: ในเครื่อง
    * ต่างจากรูปในบทสนทนาซึ่งมาจากเซิร์ฟเวอร์ จึงใช้แยกกันได้ว่าไฟล์เข้าไปแล้วจริง
    */
-  const countAttachmentThumbs = () => $$('img[src^="blob:"]').length;
+  const attachmentThumbs = () => $$('img[src^="blob:"]');
+  const countAttachmentThumbs = () => attachmentThumbs().length;
 
+  /**
+   * ล้างรูปที่ค้างอยู่ในช่องพิมพ์ก่อนแนบรูปของรอบใหม่
+   *
+   * ของเดิมนับภาพย่อที่มีอยู่แล้วเป็น before แล้วรอให้ครบ before + จำนวนที่จะแนบ
+   * ซึ่งแปลว่า "รูปที่ค้างจากรอบก่อน" ถือเป็นเรื่องปกติ ไม่มีใครล้าง ไม่มีใครทัก
+   * รูปจึงพอกขึ้นทีละใบทุกรอบ — เห็นกับตา: คำสั่งภาพรูปที่แปดมีรูปผู้เขียนแนบไป 8 ใบ
+   *
+   * ผลไม่ใช่แค่เปลืองอัปโหลด ChatGPT ที่ได้รูปเดียวกันซ้อนกันหลายใบตีความว่า
+   * เป็นงานเทียบภาพหรืองานแก้ภาพ ไม่ใช่งานวาดใหม่ตามคำสั่ง ซึ่งเป็นอาการเดียวกับ
+   * ที่เคยแก้ไปแล้วตอนแนบซ้ำสองใบ แค่คราวนี้ต้นตออยู่คนละที่
+   */
+  async function clearAttachments() {
+    let left = countAttachmentThumbs();
+    if (!left) return { cleared: 0, left: 0 };
+
+    const started = left;
+    // กันลูปไม่รู้จบเมื่อปุ่มลบหาไม่เจอหรือกดแล้วไม่หาย
+    for (let round = 0; round < started + 3 && left; round++) {
+      const thumb = attachmentThumbs()[0];
+      if (!thumb) break;
+
+      // ปุ่มลบอยู่ในกล่องของภาพย่อนั้น ไต่ขึ้นไปหาแทนการเดา class ของหน้าเว็บ
+      let btn = null;
+      for (let el = thumb; el && el !== document.body && !btn; el = el.parentElement) {
+        btn = el.querySelector?.(S.attachmentRemove) || null;
+      }
+      if (!btn) break;
+
+      btn.click();
+      await waitForDom(() => countAttachmentThumbs() < left, { timeoutMs: 4000 });
+      const now = countAttachmentThumbs();
+      if (now >= left) break; // กดแล้วไม่ลด — เลิกดันต่อ
+      left = now;
+    }
+    return { cleared: started - left, left };
+  }
+
+  // 15 วินาทีสั้นเกินไปสำหรับรูปหลาย MB บนเน็ตช้า และการหมดเวลาที่นี่คือจุดที่ทำให้แนบซ้ำ
   const waitForThumbs = (want) =>
-    waitForDom(() => countAttachmentThumbs() >= want, { timeoutMs: 15000 }).then((v) => !!v);
+    waitForDom(() => countAttachmentThumbs() >= want, { timeoutMs: 45000 }).then((v) => !!v);
 
   // ---------- ฉีดข้อความ ----------
   async function injectText(text) {
@@ -348,17 +445,15 @@
      * แล้วข้อความใหม่ไปต่อท้าย ผลคือคำสั่งมีบรรทัดซ้ำ
      * (เห็นกับตา: "รอบก่อนยังไม่ได้ภาพกลับมา..." โผล่สองรอบติดกันในคำสั่งเดียว)
      */
-    for (let i = 0; i < 3; i++) {
-      box.focus();
-      document.execCommand('selectAll', false, null);
-      document.execCommand('delete', false, null);
-      await frame();
-      if (!(box.innerText || box.textContent || '').trim()) break;
-      // ล้างไม่ลง ลองล้าง DOM ตรง ๆ แล้วแจ้งให้ตัวแก้ไขรู้
-      box.textContent = '';
-      box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
-      await frame();
-    }
+    /**
+     * การล้างระดับ DOM "ดูเหมือนสำเร็จ" เสมอ ทั้งที่อาจไม่สำเร็จเลย
+     *
+     * box.textContent = '' ทำให้ innerText ว่างทันที ตัวตรวจจึงผ่านทุกครั้ง
+     * แต่ ProseMirror เก็บเอกสารของมันเองไว้ต่างหาก ของเก่าที่ยังอยู่ในสถานะนั้น
+     * จะกลับมาตอนวางข้อความใหม่ ได้ Prompt ที่มีเนื้อครบสองรอบต่อกันในข้อความเดียว
+     * ที่นี่จึงล้างได้ แต่ห้ามเชื่อผลของมัน — คนตัดสินคือตัวเทียบข้อความท้ายฟังก์ชัน
+     */
+    await clearComposer(box);
 
     /**
      * วางผ่านคลิปบอร์ดจริงเป็นทางหลัก
@@ -393,12 +488,9 @@
       await frame();
     }
 
-    // ทางสำรองที่ 2: ยัด DOM ตรง ๆ แล้วแจ้ง input event
-    if (!box.innerText.trim()) {
-      box.textContent = text;
-      box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-      await frame();
-    }
+    // Do not mutate the editor DOM behind its document state. The caller can
+    // recover through browser input if paste/insertText was not accepted.
+    if (!box.innerText.trim()) throw new Error('composer_write_failed');
     /**
      * ต้องได้ข้อความ "ตรงตามที่ตั้งใจส่ง" ไม่ใช่แค่ "ยาวพอประมาณ"
      *
@@ -411,21 +503,31 @@
     let got = norm(box.innerText);
 
     for (let i = 0; i < 2 && want && got !== want; i++) {
-      // ข้อความไม่ตรง = ล้างแล้วพิมพ์ใหม่ ไม่ต้องรายงานออกไป เพราะ injectText ถูกเรียกก่อนรู้ turnId
+      // ข้อความไม่ตรง = ล้างแล้ววางใหม่ ไม่ต้องรายงานออกไป เพราะ injectText ถูกเรียกก่อนรู้ turnId
+      // ต้องวางทับด้วยทางเดียวกับรอบแรก ไม่ใช่ insertText ซึ่งเป็นการ "แทรกเพิ่ม"
+      // ถ้าของเก่ายังไม่หมดจริง insertText จะต่อท้ายให้ยาวขึ้นอีกเท่าตัวทุกรอบ
+      await clearComposer(box);
       box.focus();
-      document.execCommand('selectAll', false, null);
-      document.execCommand('delete', false, null);
-      await frame();
-      box.textContent = '';
-      box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
-      await frame();
-      box.focus();
-      document.execCommand('insertText', false, text);
+      try {
+        await navigator.clipboard.writeText(text);
+        document.execCommand('paste');
+      } catch (_) {
+        document.execCommand('insertText', false, text);
+      }
       await frame();
       got = norm(box.innerText);
     }
 
     if (!got) throw new Error('composer_write_failed');
+    /**
+     * ข้อความไม่ตรง = ห้ามส่ง ต้องล้มเทิร์นนี้ทิ้ง
+     *
+     * เดิมตรงนี้ปล่อยผ่าน ขอแค่มีตัวอักษรอยู่ในช่องก็กดส่งเลย ผลคือ Prompt ที่ซ้ำสองรอบ
+     * ถูกส่งเข้า ChatGPT จริง — คำสั่งแปดพันตัวอักษรที่สั่งซ้ำและขัดกันเอง
+     * ซึ่งคือเทิร์นที่กลับมาเป็น "Stopped thinking" หรือ Something went wrong
+     * ความผิดพลาดนี้อยู่ในกลุ่มไม่เสียโควตา (ยังไม่ได้ส่งอะไรออกไป) ชั้นบนจะลองใหม่ให้เอง
+     */
+    if (want && got !== want) throw new Error('composer_text_mismatch');
     return box; // ส่งต่อให้ clickSend ใช้ element เดียวกัน ไม่ใช่ไปหาใหม่แล้วได้คนละตัว
   }
 
@@ -436,10 +538,68 @@
    * (ปุ่ม Stop ยังอยู่ / ปุ่ม Send ยัง disabled) ถ้ายัด Prompt ถัดไปตอนนั้น ปุ่มส่งจะกดไม่ติด
    * แล้ว Prompt จะค้างอยู่ในช่องพิมพ์โดยไม่ถูกส่ง ซึ่งเป็นอาการ "ค้างที่ปกหลัง" ที่เจอจริง
    */
-  async function waitUntilIdle(timeoutMs = 25000) {
+  /**
+   * รอให้เทิร์นก่อนหน้าจบ โดยไม่ยอมนั่งเงียบจนหมดเพดานเวลา
+   *
+   * waitForDom ทำงานด้วย MutationObserver ล้วน ๆ — หน้าเว็บที่ค้างสถานะ "กำลังตอบ"
+   * ไม่มี mutation ให้จับเลยสักครั้ง เงื่อนไขจึงไม่เคยถูกตรวจซ้ำ และการรอกินเวลาเต็มเพดานเสมอ
+   * (อาการที่เห็นใน log: "ค้างที่ขั้น กดส่ง Prompt มา 491 วินาที" แล้วจบด้วยวางสารบัญไม่สำเร็จ
+   *  เพราะสามรอบลองใหม่ × สามนาที กับหน้าจอที่นิ่งสนิทมาตั้งแต่วินาทีแรก)
+   *
+   * ตัวนี้จึงเดินด้วยนาฬิกา ดูจากเนื้อหาที่โตขึ้นจริง ไม่ใช่ดูแค่ปุ่ม
+   * และรายงานทุกวินาทีว่ารออะไรอยู่ · คืน 'done' | 'stale' (ปุ่มค้างแต่หน้านิ่ง) | 'timeout'
+   */
+  async function waitForBusyToClear(isBusy, { timeoutMs = 180000, staleMs = 45000, turnId = null, label = '' } = {}) {
+    const sig = () => `${(lastAssistantTurn()?.innerText || '').length}|${$$('img').length}`;
+    const t0 = Date.now();
+    let last = sig();
+    let changed = false;
+    while (Date.now() - t0 < timeoutMs) {
+      if (!isBusy()) return 'done';
+      const now = sig();
+      if (now !== last) {
+        last = now;
+        changed = true; // ขยับแม้ครั้งเดียวก็แปลว่ากำลังทำงานอยู่จริง ห้ามไปกดหยุดใส่
+      }
+      /**
+       * "ค้าง" ที่ปลอดภัยพอจะกดหยุดได้ ต้องแปลว่าไม่ขยับเลยแม้แต่ครั้งเดียวตั้งแต่เริ่มรอ
+       *
+       * ถ้าใช้เกณฑ์ "นิ่งมา 25 วินาทีล่าสุด" จะไปกดหยุดใส่โมเดลสายคิดก่อนตอบที่เงียบเป็นช่วง ๆ
+       * ซึ่งคือความผิดพลาดที่คอมเมนต์ข้างล่างเตือนไว้ (เห็นเป็น "Stopped thinking" ติดกันหลายเทิร์น)
+       */
+      if (!changed && Date.now() - t0 >= staleMs) return 'stale';
+      if (turnId) report(turnId, 'waiting_idle', `${label}${Math.round((Date.now() - t0) / 1000)} วินาที`);
+      await napMs(1000);
+    }
+    return isBusy() ? 'timeout' : 'done';
+  }
+
+  async function waitUntilIdle(timeoutMs = 25000, turnId = null) {
     // ว่างแล้วไปต่อทันที ไม่ต้องนับว่าว่างต่อเนื่องกี่มิลลิวินาทีอีก
     // เพราะ clickSend ยืนยันผลจริงหลังคลิกอยู่แล้ว (ข้อความของเราต้องเพิ่มขึ้นจริง)
-    return !!(await waitForDom(() => (stopButtonVisible() ? null : true), { timeoutMs }));
+    // ปุ่มที่ค้างแต่หน้านิ่ง ('stale') ไม่ใช่เหตุให้ล้มทั้งเทิร์น — ปล่อยให้ clickSend จัดการต่อ
+    const how = await waitForBusyToClear(stopButtonVisible, {
+      timeoutMs,
+      turnId,
+      label: 'รอเทิร์นก่อนหน้าจบ ',
+    });
+    return how !== 'timeout';
+  }
+
+  /** ล้างช่องพิมพ์ให้สุดความสามารถ — ผลลัพธ์ต้องไปพิสูจน์ด้วยการเทียบข้อความอีกที */
+  async function clearComposer(box) {
+    for (let i = 0; i < 3; i++) {
+      box.focus();
+      const range = document.createRange();
+      range.selectNodeContents(box);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand('delete', false, null);
+      await frame();
+      if (!(box.innerText || box.textContent || '').trim()) return;
+    }
+    throw new Error('composer_write_failed');
   }
 
   /**
@@ -524,7 +684,7 @@
     }
   }
 
-  async function clickSend(composer = null, timeoutMs = 20000) {
+  async function clickSend(composer = null, timeoutMs = 20000, expectedPrompt = null, turnId = null) {
     const t0 = Date.now();
     const box = composer?.isConnected ? composer : await waitForComposer(15000);
     if (!box) throw new Error('composer_not_found_before_send'); // ผู้เรียกครอบ try ไว้แล้ว
@@ -532,6 +692,9 @@
     const textNow = () => (box.isConnected ? (box.innerText || box.textContent || '').trim() : '');
     const userCountBefore = $$('[data-message-author-role="user"]').length;
     const stopBefore = stopButtonVisible();
+    const verifyPrompt = () => {
+      if (expectedPrompt != null && !composerMatches(expectedPrompt)) throw new Error('composer_text_mismatch');
+    };
 
     /**
      * "ส่งแล้วหรือยัง" มีหลักฐานที่เชื่อได้จริงอยู่อย่างเดียว: ข้อความของเราโผล่ในบทสนทนา
@@ -567,13 +730,28 @@
       }) || null;
 
     if (stopControl()) {
-      // ให้โอกาสมันจบเองก่อน เผื่อกำลังตอบอยู่จริง
-      const finished = await waitForDom(() => (stopControl() ? null : true), { timeoutMs: 20000 });
-      const stuck = stopControl();
-      if (!finished && stuck) {
-        stuck.click(); // ปลดสถานะค้าง เพื่อให้ปุ่มส่งกลับมา
-        await waitForDom(() => (stopControl() ? null : true), { timeoutMs: 5000 });
+      /**
+       * ให้โอกาสมันจบเองก่อน เผื่อกำลังตอบอยู่จริง
+       *
+       * ยี่สิบวินาทีเป็นเกณฑ์ที่ตั้งจากเทิร์นข้อความ ซึ่งสั้นเกินไปมากสำหรับเทิร์นสร้างภาพ
+       * ของโมเดลสายคิดก่อนตอบ ที่ใช้เวลาสามนาทีขึ้นไปเป็นเรื่องปกติ
+       * ผลที่เกิดขึ้นจริงคือเรากดปุ่มหยุดใส่งานที่กำลังวาดอยู่ดี ๆ แล้วส่งคำสั่งเดิมซ้ำ
+       * เห็นในหน้าแชตเป็น "Stopped thinking" ติดกันหลายเทิร์นโดยไม่ได้ภาพสักรูป
+       * แต่ "รอจนกว่าจะครบสามนาที" ก็ผิดอีกด้าน เพราะสถานะค้างไม่หายเอง
+       * จึงแยกสองกรณีออกจากกันด้วยเนื้อหาที่โตขึ้นจริง ไม่ใช่ด้วยเวลาที่ผ่านไป
+       */
+      const how = await waitForBusyToClear(stopControl, {
+        timeoutMs: 180000,
+        turnId,
+        label: 'รอเทิร์นก่อนหน้าจบก่อนส่งงานถัดไป ',
+      });
+      if (how === 'stale') {
+        // นิ่งสนิทแต่ปุ่มหยุดยังอยู่ = หน้าเว็บค้างสถานะ ต้องกดหยุดให้ช่องพิมพ์คืนสภาพตามที่อธิบายไว้ข้างบน
+        report(turnId, 'waiting_idle', 'หน้าเว็บค้างสถานะ “กำลังตอบ” ทั้งที่นิ่งสนิท — กดปุ่มหยุดหนึ่งครั้งให้ช่องพิมพ์คืนสภาพ');
+        stopControl()?.click();
+        for (let i = 0; i < 20 && stopControl(); i++) await napMs(150);
       }
+      if (stopControl()) throw new Error('previous_turn_running');
     }
 
     /**
@@ -590,11 +768,13 @@
 
     // รอบแรก: กดปุ่มส่งที่กดได้จริง
     for (const btn of sendCandidates(box).filter(sendUsable)) {
+      verifyPrompt();
       btn.click();
       if (await accepted()) return true;
     }
 
     // รอบสอง: Enter บนช่องพิมพ์ (ใช้ได้แม้ตอนที่หาปุ่มไม่เจอ)
+    verifyPrompt();
     pressEnter(box);
     if (await accepted(2200)) return true;
 
@@ -604,8 +784,10 @@
         timeoutMs: Math.max(500, timeoutMs - (Date.now() - t0)),
       });
       if (!btn) break;
+      verifyPrompt();
       btn.click();
       if (await accepted(800)) return true;
+      verifyPrompt();
       pressEnter(box);
       if (await accepted(800)) return true;
     }
@@ -638,6 +820,17 @@
 
   /** ข้อความไม่ยาวขึ้นเลยนานขนาดนี้ ให้ถือว่าจบ แม้ปุ่มหยุดจะยังบอกว่ากำลังพ่นอยู่ */
   const STUCK_MS = 25000;
+
+  /**
+   * เจอแถบปุ่มแล้วยังต้องดูอีกจังหวะว่าข้อความไม่โตต่อ
+   *
+   * เดิม 120ms ซึ่งสั้นกว่าช่วงพ่นสะดุดปกติของ ChatGPT เอง คำตอบที่ยังพ่นไม่จบ
+   * จึงถูกตัดกลางคันถ้าบังเอิญเจอแถบปุ่มผิดตัว ครึ่งวินาทีต่อเทิร์นถูกกว่าการยิงใหม่ทั้งเทิร์นมาก
+   */
+  const BAR_CONFIRM_MS = 500;
+
+  /** แถบปุ่มบอกว่าจบ แต่ปุ่มหยุดยังอยู่ — ให้เวลาพิสูจน์ตัวเองเท่านี้ก่อนเชื่อแถบปุ่ม */
+  const BAR_STUCK_MS = 2500;
 
   function waitForAnswer(
     turnId,
@@ -703,9 +896,19 @@
 
         const bar = actionBarFor(turn);
 
-        // ยังพ่นอยู่ — แต่ถ้าแถบปุ่มของ "คำตอบนี้" โผล่แล้ว แปลว่าคำตอบนี้จบแน่นอน
-        // ปุ่มหยุดที่ยังเจอตอนนั้นจึงเป็นของเทิร์นอื่นหรือของที่ค้างใน DOM ไม่ใช่หลักฐานอีกต่อไป
-        if (!bar && stopButtonVisible()) {
+        /**
+         * ปุ่มหยุดคือคำตัดสินว่า "ยังพ่นอยู่" แถบปุ่มแย้งมันไม่ได้
+         *
+         * เดิมเขียนว่า `!bar && stopButtonVisible()` คือให้แถบปุ่มชนะปุ่มหยุด
+         * ซึ่งเปิดช่องให้ "แถบปุ่มปลอม" ตัดคำตอบกลางคัน: หัวบล็อกโค้ดของ ChatGPT
+         * มีปุ่ม Copy ตั้งแต่ JSON เริ่มพ่นตัวแรก ถ้า inCodeBlock ไล่ชั้นไม่ทันโครงสร้างใหม่
+         * ระบบจะเห็นเป็นแถบปุ่ม แล้วปิดเทิร์นทันทีที่พ่นสะดุดเกินเสี้ยววินาที
+         * (อาการที่เห็น: ไม่พบรายการชื่อในคำตอบ [ยาว 31 ตัวอักษร · ตัดกลางคัน] — คิดชื่อต้องยิงซ้ำสามรอบ)
+         *
+         * ตอนนี้กลับด้าน: ปุ่มหยุดมองเห็นอยู่ = ยังไม่จบ ไม่ว่าจะเจอแถบปุ่มหรือไม่
+         * ส่วนปุ่มหยุดที่ค้างใน DOM ไม่ทำให้เทิร์นค้างถาวรอีกแล้ว เพราะมีด่าน STUCK_MS ข้างล่างรับไว้
+         */
+        if (stopButtonVisible()) {
           /**
            * ด่านกันค้างสำหรับเทิร์นข้อความ
            *
@@ -716,7 +919,13 @@
            */
           if (len > 0 && len === lastLen) {
             if (!stuckSince) stuckSince = Date.now();
-            if (Date.now() - stuckSince >= STUCK_MS) return finish('ok');
+            /**
+             * เจอแถบปุ่มพร้อมกับปุ่มหยุด = ขัดกันเอง หนึ่งในสองตัวผิดแน่ ๆ
+             * ไม่ตัดสินทันทีเหมือนเดิม (ซึ่งทำให้คำตอบขาดกลาง) แต่ก็ไม่ต้องรอเต็ม 25 วินาที
+             * ข้อความที่ไม่ขยับเลยสองวินาทีครึ่งทั้งที่ "จบแล้ว" ตามแถบปุ่ม ถือว่าจบจริง
+             */
+            const need = bar ? BAR_STUCK_MS : STUCK_MS;
+            if (Date.now() - stuckSince >= need) return finish('ok');
           } else {
             stuckSince = 0;
           }
@@ -769,14 +978,14 @@
 
         if (len === 0 && !hasImg) return; // ยังไม่มีอะไรเลย รอต่อ
 
-        // สัญญาณตรงว่าจบแล้ว: แถบปุ่มใต้คำตอบโผล่ขึ้นมา
-        // ยืนยันอีกจังหวะสั้น ๆ ว่าข้อความไม่โตต่อแล้วจริง กันกรณีที่หน้าเว็บโชว์แถบปุ่ม
-        // ของช่วงค้นเว็บหรือของข้อความก่อนหน้า แล้วเราไปอ่านคำตอบที่ยังไม่จบมา
+        // สัญญาณตรงว่าจบแล้ว: ปุ่มหยุดหายไปแล้ว และแถบปุ่มใต้คำตอบโผล่ขึ้นมา
+        // ยืนยันอีกจังหวะว่าข้อความไม่โตต่อแล้วจริง กันจังหวะที่ปุ่มหยุดกะพริบหายไปหนึ่งเฟรม
+        // ตอนหน้าเว็บ re-render พร้อมกับที่เจอปุ่ม Copy ของบล็อกโค้ดพอดี
         if (bar) {
           if (barLen === len) return finish('ok');
           barLen = len;
           clearTimeout(nudge);
-          nudge = setTimeout(check, 120); // เสี้ยววินาที ไม่ใช่วินาที
+          nudge = setTimeout(check, BAR_CONFIRM_MS);
           return;
         }
         barLen = -1;
@@ -875,6 +1084,9 @@
    * ส่วนชื่อโดเมนเหลือไว้เป็นแค่ตัวจัดลำดับความน่าเชื่อถือ ไม่ใช่ประตูปิดตาย
    */
   function scanImages(before = { sources: new Set(), elements: new Set() }, anchor = null) {
+    const nextUser = anchor && $$('[data-message-author-role="user"]').find(
+      (node) => node !== anchor && (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING),
+    );
     const beforeSources = before?.sources instanceof Set ? before.sources : before instanceof Set ? before : new Set();
     const beforeElements = before?.elements instanceof Set ? before.elements : new Set();
     const scope = $(S.turnContainer) || document.body;
@@ -882,7 +1094,22 @@
     const seen = [];
 
     for (const i of $$('img', scope)) {
+      if (nextUser && (nextUser.contains(i) ||
+          (nextUser.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_FOLLOWING))) continue;
       if (anchor && !(anchor.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      /**
+       * ตัดเฉพาะรูปที่อยู่ใน "ข้อความของผู้ใช้" ซึ่งคือไฟล์ที่เราแนบไปเอง
+       *
+       * ถ้าไม่ตัด รูปผู้เขียนที่แนบไปกับคำสั่งจะถูกนับเป็นภาพที่ ChatGPT วาด
+       * แล้วไปโผล่เป็นหน้าปกในเล่มจริง ซึ่งเคยเกิดมาแล้ว
+       *
+       * เคยเขียนข้อนี้เป็น "ห้ามอยู่ข้างใน anchor" (DOCUMENT_POSITION_CONTAINED_BY)
+       * ซึ่งกว้างเกินไปและอันตราย เพราะขึ้นกับว่า anchor ที่จับได้เป็น element ชั้นไหน
+       * ถ้าหน้าเว็บครอบข้อความของเรากับคำตอบไว้ในกล่องเดียวกัน ภาพที่ ChatGPT วาดมา
+       * ก็จะนับเป็น "อยู่ข้างใน" ไปด้วย แล้วถูกทิ้งทั้งที่เป็นภาพที่เรารออยู่
+       * เกณฑ์ที่ตรงกับเจตนาจริงคือดูว่ารูปนั้นอยู่ในข้อความฝั่งผู้ใช้หรือเปล่า ไม่เกี่ยวกับ anchor
+       */
+      if (i.closest('[data-message-author-role="user"]')) continue;
       const w = i.naturalWidth || 0;
       const h = i.naturalHeight || 0;
       const src0 = i.currentSrc || i.src || i.getAttribute('src') || '';
@@ -1037,7 +1264,14 @@
     turnId,
     anchor,
     before,
-    { intervalMs = 2500, timeoutMs = 300000, idleGiveUpMs = 60000, startMs = 120000 } = {},
+    /**
+     * เวลาของงานสร้างภาพวัดกันเป็นนาที ไม่ใช่วินาที
+     *
+     * หลักฐานจากหน้าจอจริง: เทิร์นที่สำเร็จขึ้นว่า "Worked for 3m 13s" — 193 วินาที
+     * ขณะที่เกณฑ์เดิมเลิกรอที่ 180 วินาที คือยอมแพ้ก่อนภาพจะมาถึงสิบกว่าวินาที
+     * ทุกครั้ง เทิร์นที่กำลังจะสำเร็จจึงถูกทิ้งแล้วสั่งใหม่วนไป
+     */
+    { intervalMs = 2500, timeoutMs = 480000, idleGiveUpMs = 90000, startMs = 120000 } = {},
   ) {
     const t0 = Date.now();
     let lastSig = '';
@@ -1045,9 +1279,23 @@
     let started = false;
     let lastCaptureErrors = [];
 
+    /**
+     * ปุ่ม Retry ของ ChatGPT นับเป็นความผิดพลาด "ของเทิร์นนี้" เท่านั้น
+     *
+     * เดิมมองทั้งหน้าเว็บ ซึ่งพังหนักในห้องที่เคยพลาดมาก่อน เพราะปุ่ม Retry ของเทิร์นเก่า
+     * ไม่ได้หายไปไหน มันค้างอยู่ในบทสนทนาตลอด ทุกเทิร์นสร้างภาพหลังจากนั้นจึงคืนค่า
+     * 'error' ตั้งแต่รอบตรวจแรกภายในเสี้ยววินาที โดยไม่เคยรอภาพเลยสักครั้ง
+     * — เห็นเป็นอาการ "ยิงไปกี่รูปก็ไม่ได้ภาพ แล้วเปิดแชตใหม่ไปเรื่อย ๆ"
+     * ปุ่มที่อยู่ก่อนข้อความที่เราเพิ่งส่งคือแผลเก่า ไม่ใช่ผลของคำสั่งรอบนี้
+     */
+    const errorAfterAnchor = () =>
+      $$(S.errorRetry).some(
+        (b) => !anchor || anchor.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+
     while (Date.now() - t0 < timeoutMs) {
       if (hitLimit()) return { status: 'rate_limited', seen: [] };
-      if ($(S.errorRetry)) return { status: 'error', seen: [] };
+      if (errorAfterAnchor()) return { status: 'error', seen: scanImages(before, anchor).seen };
 
       const scan = scanImages(before, anchor);
       if (scan.images.length) {
@@ -1076,7 +1324,10 @@
         lastChange = Date.now();
       }
       const idleFor = Date.now() - lastChange;
-      if (!stopButtonVisible() && idleFor >= idleGiveUpMs) {
+      // A quiet image render is not a completed text reply. Only end early
+      // when this reply has its final action bar and no image candidates.
+      if (turn && actionBarFor(turn) && !isThinkingOnly(turn) && !stopButtonVisible() &&
+          !scan.images.length && idleFor >= idleGiveUpMs) {
         return { status: 'no_image', seen: scan.seen, errors: lastCaptureErrors };
       }
       /**
@@ -1085,7 +1336,7 @@
        * ถ้าหน้าเว็บไม่ขยับเลยนานเป็นสามเท่าของเกณฑ์ปกติ ก็เลิกรอ ไม่ว่าปุ่มหยุดจะบอกว่าอะไร
        * เพราะถึงตอนนั้นปุ่มหยุดที่ยังเห็นอยู่คือปุ่มที่ค้างใน DOM ไม่ใช่หลักฐานว่ายังทำงานอยู่
        */
-      if (idleFor >= idleGiveUpMs * 3) {
+      if (idleFor >= idleGiveUpMs * 5) {
         return { status: 'no_image', seen: scan.seen, errors: lastCaptureErrors };
       }
 
@@ -1246,7 +1497,9 @@
 
       // ต้องรอให้เทิร์นก่อนหน้าจบสนิทก่อน ไม่งั้นปุ่มส่งจะยัง disabled แล้ว Prompt จะค้างในช่องพิมพ์
       report(turnId, 'waiting_idle', 'รอให้ ChatGPT ตอบเทิร์นก่อนหน้าจบก่อนส่งงานถัดไป');
-      await waitUntilIdle();
+      if (!(await waitUntilIdle(opts.imageTimeoutMs ?? 240000, turnId))) {
+        return { turnId, status: 'error', text: '', meta: { error: 'previous_turn_running' } };
+      }
 
       const userBefore = $$('[data-message-author-role="user"]').length;
       const assistantBefore = $$(S.assistantTurn).length;
@@ -1261,6 +1514,12 @@
       if (opts.attachments?.length) {
         report(turnId, 'attaching', `กำลังแนบรูปอ้างอิง ${opts.attachments.length} ไฟล์`);
         attachment = await attachFiles(opts.attachments);
+        if (attachment.attached !== opts.attachments.length || attachment.errors.length) {
+          return { turnId, status: 'error', text: '', meta: {
+            error: 'attachment_failed', attachment,
+            detail: `แนบรูปอ้างอิงไม่สำเร็จ — ยังไม่ได้ส่งคำสั่ง: ${attachment.errors[0] || 'จำนวนรูปแนบไม่ครบ'}`,
+          } };
+        }
         report(
           turnId,
           'attaching',
@@ -1269,6 +1528,17 @@
             : `แนบรูปอ้างอิงไม่สำเร็จ — ${attachment.errors[0] || 'ไม่ทราบสาเหตุ'}`,
         );
         await waitComposerStable(600, 8000);
+      } else {
+        /**
+         * เทิร์นที่ไม่ได้ขอรูปแนบ ต้องส่งไปโดยไม่มีรูปติดไปด้วยจริง ๆ
+         *
+         * ของค้างจากเทิร์นก่อนไม่หายไปเอง และคำสั่งภาพที่ฉากไม่มีคนอยู่เลย
+         * ถ้ามีรูปคนแนบไปด้วย โมเดลจะพยายามหาที่ยัดคนลงไปในภาพหรือสลับไปโหมดแก้ภาพ
+         */
+        const swept = await clearAttachments();
+        if (swept.cleared) {
+          report(turnId, 'attaching', `ล้างรูปที่ค้างในช่องพิมพ์ ${swept.cleared} ใบก่อนส่งงานนี้`);
+        }
       }
 
       report(turnId, 'typing', `กำลังส่ง Prompt ไป ChatGPT:\n${String(prompt).slice(0, 4000)}`);
@@ -1321,8 +1591,12 @@
        * นี่คือเหตุผลที่ระบบยังค้างเหมือนเดิมทั้งที่แก้ทางส่งไปหลายรอบ
        */
       try {
-        await clickSend(composerBox);
+        if (!composerMatches(prompt)) throw new Error('composer_text_mismatch');
+        await clickSend(composerBox, 20000, prompt, turnId);
       } catch (e) {
+        if (e?.message === 'previous_turn_running') {
+          return { turnId, status: 'error', text: '', meta: { error: e.message } };
+        }
         report(turnId, 'sending', `กดส่งด้วยวิธีปกติไม่สำเร็จ (${e?.message || e}) — ลองทางสำรอง`);
       }
 
@@ -1348,7 +1622,8 @@
       if (!fresh) {
         report(turnId, 'sending', 'ข้อความยังไม่โผล่ในบทสนทนา — กดส่งซ้ำอีกครั้ง');
         try {
-          await clickSend(composerBox);
+          if (!composerMatches(prompt)) throw new Error('composer_text_mismatch');
+          await clickSend(composerBox, 20000, prompt, turnId);
         } catch (_) {
           /* ค่อยไปสรุปด้วยหลักฐานข้างล่าง */
         }
@@ -1408,7 +1683,7 @@
       }
 
       if (!fresh) {
-        const stuck = (($(S.composer)?.innerText || '').trim().length > 0);
+        const stuck = composerMatches(prompt);
         if (stuck) {
           const waitMs = opts.handoffMs ?? 180000;
           report(
@@ -1444,6 +1719,10 @@
       }
 
       const anchor = fresh;
+      if (opts.wantImages) {
+        imageTurns.set(turnId, { anchor, url: location.href });
+        if (imageTurns.size > 40) imageTurns.delete(imageTurns.keys().next().value);
+      }
       const minAssistantCount = 0;
 
       /**
@@ -1454,8 +1733,8 @@
         report(turnId, 'waiting', 0);
         const r = await pollForImage(turnId, anchor, imgsBefore, {
           intervalMs: opts.imagePollMs ?? 2500,
-          timeoutMs: opts.imageTimeoutMs ?? 300000,
-          idleGiveUpMs: opts.imageIdleMs ?? 60000,
+          timeoutMs: opts.imageTimeoutMs ?? 480000,
+          idleGiveUpMs: opts.imageIdleMs ?? 90000,
           startMs: opts.startMs ?? 120000,
         });
         if (r.status === 'rate_limited') return { turnId, status: 'rate_limited', text: '' };
@@ -1470,7 +1749,7 @@
         );
         return {
           turnId,
-          status: captured.dataUrl || images.length ? 'ok' : r.status === 'error' ? 'error' : 'ok',
+          status: captured.dataUrl ? 'ok' : r.status === 'timeout' ? 'timeout' : 'error',
           text: imgText,
           images,
           imageDataUrl: captured.dataUrl || '',
@@ -1505,6 +1784,22 @@
       if (status !== 'ok') return { turnId, status, text: '', meta: { model: modelBefore } };
 
       const { text, blocks } = readAnswer(anchor);
+
+      /**
+       * ด่านสุดท้าย: ป้ายชั่วคราวไม่ใช่คำตอบ
+       *
+       * ถึงจะกันไว้ตั้งแต่ตอนรอแล้ว แต่ถ้าหน้าเว็บเปลี่ยนคำบนป้ายจนเล็ดลอดออกมาได้
+       * ต้องคืนเป็น empty ให้ชั้นบนลองใหม่ ดีกว่าปล่อยข้อความอย่าง "Searching websites 4"
+       * ไปให้ Studio แปลงเป็น JSON แล้วฟ้องว่า "อ่านคำตอบเป็น JSON ไม่ได้"
+       */
+      if (!opts.wantImages && text.trim() && PLACEHOLDER.test(text.trim())) {
+        return {
+          turnId,
+          status: 'empty',
+          text: '',
+          meta: { model: currentModel(), note: `ได้แค่ป้ายชั่วคราว: ${text.trim().slice(0, 60)}` },
+        };
+      }
       const images = opts.wantImages
         ? await waitForImages(imgsBefore, { timeoutMs: opts.imageTimeoutMs ?? 240000, anchor })
         : [];
@@ -1578,8 +1873,13 @@
      */
     if (msg?.type === 'gpt.grabImage') {
       (async () => {
+        const source = msg.turnId ? imageTurns.get(msg.turnId) : null;
+        if (msg.turnId && (!source || source.url !== location.href || !source.anchor.isConnected)) {
+          sendResponse({ ok: false, error: 'image_turn_not_available' });
+          return;
+        }
         const empty = { sources: new Set(), elements: new Set() };
-        const scan = scanImages(empty, lastUserTurn());
+        const scan = scanImages(empty, source?.anchor || lastUserTurn());
         if (!scan.images.length) {
           sendResponse({ ok: false, error: 'ไม่พบภาพในคำตอบล่าสุดของหน้านี้', seen: scan.seen.slice(-6) });
           return;
