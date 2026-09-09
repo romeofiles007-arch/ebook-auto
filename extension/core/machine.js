@@ -208,7 +208,9 @@ export class Machine {
 
     // เทิร์นที่ขอภาพต้องออกทางสายภาพเสมอ ไม่ใช่สายที่ใช้เขียนข้อความ
     const line = opts.wantImages ? this.imgTr : this.tr;
-    const res = await line.send(prompt, opts);
+    const startedAt = Date.now();
+    const res = await line.send(prompt, {...opts, recoverCompletedSetup:this.book.threadMode !== 'reuse'});
+    res.meta = {...res.meta, elapsedMs:Date.now()-startedAt};
     await db.saveTurn(this.book.id, n, {
       label: opts.label || '',
       prompt,
@@ -222,6 +224,9 @@ export class Machine {
     this.emit({ type: 'turn.end', n, status: res.status, response: res.text || '', meta: res.meta || {} });
 
     if (res.meta?.error === 'attachment_failed') throw new Halt(res.meta.detail || 'แนบรูปผู้เขียนไม่สำเร็จ — หยุดก่อนส่งคำสั่ง');
+    if (res.meta?.error === 'outcome_unknown')
+      throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
+    if (res.meta?.error === 'previous_turn_running') throw new Halt('ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — ไม่กดหยุดหรือส่งงานทับ รอเทิร์นนั้นจบแล้วทำต่อ');
     if (res.status === 'rate_limited') throw new RateLimited();
     if (res.status === 'wrong_model')
       throw new Halt(
@@ -285,6 +290,8 @@ export class Machine {
     for (let i = 0; i <= MAX_RETRIES; i++) {
       const res = await this.turn(prompt, opts);
       if (res.status === 'ok') return res;
+      if (res.meta?.error === 'outcome_unknown')
+        throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
       last = res;
 
       // ยังไม่ได้ส่งอะไรถึง ChatGPT = ยังไม่เสียโควตา ลองใหม่ได้ฟรีโดยไม่กินเพดาน
@@ -1844,8 +1851,24 @@ export class Machine {
         const groups=reviewGroups(items.map(s=>({id:s.id,text:s.text || s.md,attribution:s.attribution || ''})));
         for(let i=0;i<groups.length;i++) {
           this.log('ok',`บรรณาธิการรายชิ้น · อ่านเต็มชุด ${i+1}/${groups.length} (${groups[i].length} ชิ้น)`);
-          const res=await this.turnWithRetry(itemReviewPrompt(this.book,groups[i]),{label:`ตรวจคุณภาพรายชิ้น ${i+1}/${groups.length}`});
-          issues.push(...reviewIssues(X.parseJson(res.text),groups[i]));
+          const prompt = itemReviewPrompt(this.book,groups[i]);
+          // Exact prompt includes full texts and rules. Reuse only a completed review.
+          const cache = (this.book.itemReviewCache ||= []);
+          const hit = cache.find(entry => entry.prompt === prompt);
+          if (hit) { issues.push(...hit.issues); continue; }
+          const res=await this.turnWithRetry(prompt,{label:`ตรวจคุณภาพรายชิ้น ${i+1}/${groups.length}`});
+          let findings = reviewIssues(X.parseJson(res.text),groups[i]);
+          for (let retry=0; retry<2 && findings.some(x=>x.incomplete); retry++) {
+            const missing = groups[i].filter(item=>findings.some(x=>x.incomplete && x.id===item.id));
+            const extra=await this.turnWithRetry(`${prompt}\nส่งผลตรวจเฉพาะรหัสที่ยังขาด: ${missing.map(x=>x.id).join(', ')} โดยเปรียบเทียบกับข้อความเต็มทั้งชุดด้านบน`,{label:'เติมผลตรวจรายชิ้นที่ขาด'});
+            findings = [...findings.filter(x=>!x.incomplete), ...reviewIssues(X.parseJson(extra.text),missing)];
+          }
+          if (!findings.some(x=>x.incomplete)) {
+            cache.push({prompt,issues:findings});
+            this.book.itemReviewCache = cache.slice(-60);
+            await this.save();
+          }
+          issues.push(...findings);
         }
       }
       this.book.itemQuality={signature,passed:!issues.length,editorial:!!this.book.runConsistency,issues,at:Date.now()};
@@ -2631,23 +2654,34 @@ export class Machine {
             this.log('ok', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: แนบรูปผู้เขียนเข้าห้องแชตแล้ว`);
           }
         } catch (e) {
-          // rate limit / ผู้ใช้กดหยุด / wrong model ต้องให้ state machine จัดการตามปกติ
-          // ห้ามนับเป็น "ภาพพัง" แล้วเผาโควตาลองซ้ำอีกครั้ง
-          if (e instanceof RateLimited || e instanceof Halt) throw e;
-          lastError = e?.message || String(e);
-          this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: เทิร์นสร้างภาพไม่สำเร็จ (${lastError})`);
-
+          // rate limit และการกดหยุดของผู้ใช้ ต้องให้ state machine จัดการตามปกติ
+          if (e instanceof RateLimited) throw e;
           /**
            * เทิร์นล้ม ไม่ได้แปลว่า ChatGPT ไม่ได้วาด
            *
            * เคสที่เจอบ่อยที่สุดคือคำสั่งส่งไปแล้ว ChatGPT วาดเสร็จเรียบร้อย
            * แต่ฝั่งเราหมดเวลารอหรือเสียการเชื่อมต่อกับหน้าเว็บระหว่างทาง
-           * ถ้า continue ทันทีจะไปเปิดห้องแชตใหม่ แล้วภาพที่วาดเสร็จแล้วหายไปพร้อมห้องเก่า
+           * ถ้าไปต่อทันทีจะเปิดห้องแชตใหม่ แล้วภาพที่วาดเสร็จแล้วหายไปพร้อมห้องเก่า
+           *
+           * "ยืนยันผลไม่ได้" (outcome_unknown) ก็คือสภาพเดียวกันนี้ ต่างแค่ชั้นบนสั่งหยุดทั้งขั้น
+           * จึงต้องส่องหน้าแชตก่อนยอมหยุด — การคว้าภาพไม่ส่งอะไรใหม่ ไม่มีทางทำให้งานซ้อน
+           * ถ้าส่องแล้วไม่มีภาพจริงค่อยหยุดตามเดิม
            */
+          if (e instanceof Halt && e.code !== 'outcome_unknown') throw e;
           const rescued = await this.grabRenderedImage(index, jobs.length, j, { tries: 4 });
-          if (!rescued?.dataUrl) continue;
-          this.log('ok', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: เทิร์นล้มแต่ภาพวาดเสร็จแล้ว — คว้ามาจากหน้าแชตได้`);
-          res = { status: 'ok', text: '', images: [], imageDataUrl: rescued.dataUrl, meta: {} };
+          if (rescued?.dataUrl) {
+            this.log(
+              'ok',
+              `ภาพ ${index + 1}/${jobs.length} · ${j.what}: เทิร์นไม่ยืนยันผล แต่ภาพวาดเสร็จแล้ว — คว้ามาจากหน้าแชตได้ ไม่ต้องสั่งวาดซ้ำ`,
+            );
+            res = { status: 'ok', text: '', images: [], imageDataUrl: rescued.dataUrl, meta: {} };
+          } else if (e instanceof Halt) {
+            throw e; // ส่องแล้วไม่มีภาพจริง หยุดตามเจตนาเดิมเพื่อกันงานซ้อน
+          } else {
+            lastError = e?.message || String(e);
+            this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: เทิร์นสร้างภาพไม่สำเร็จ (${lastError})`);
+            continue;
+          }
         }
         }
 
@@ -3727,7 +3761,13 @@ function imageFingerprint(dataUrl) {
   return `${s.length}|${s.slice(0, 96)}|${s.slice(mid, mid + 96)}|${s.slice(-96)}`;
 }
 
-class Halt extends Error {}
+class Halt extends Error {
+  /** code ใช้แยกว่าหยุดเพราะอะไร ผู้เรียกบางที่กู้เองได้ก่อนจะยอมหยุดจริง */
+  constructor(message, code = '') {
+    super(message);
+    this.code = code;
+  }
+}
 class RateLimited extends Error {}
 
 /**

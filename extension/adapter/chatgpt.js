@@ -54,6 +54,21 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+
+  /**
+   * รอให้หน้านี้ได้โฟกัสจริง ก่อนจะแตะคลิปบอร์ด
+   *
+   * navigator.clipboard.writeText ใช้ได้เฉพาะตอนเอกสาร "โฟกัสอยู่" เท่านั้น
+   * service worker สั่ง activate แท็บและ focus หน้าต่างก่อนยิงงานมาก็จริง
+   * แต่คำสั่งพวกนั้นคืนค่าก่อนที่โฟกัสจะมาถึงหน้าเว็บจริง และในสภาพที่ระบบปฏิบัติการ
+   * ไม่ยอมยกโฟกัสให้ (จอดับ ล็อกหน้าจอ ต่อผ่าน Remote Desktop หน้าต่างอื่นครองอยู่)
+   * มันไม่มีวันมาถึงเลย — เขียนคลิปบอร์ดตอนนั้นจะได้ NotAllowedError ทุกครั้ง
+   */
+  async function waitFocus(timeoutMs = 1500) {
+    const until = Date.now() + timeoutMs;
+    while (!document.hasFocus() && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+    return document.hasFocus();
+  }
   const imageTurns = new Map();
   const normalizePrompt = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   const composerMatches = (prompt) => {
@@ -425,7 +440,7 @@
     waitForDom(() => countAttachmentThumbs() >= want, { timeoutMs: 45000 }).then((v) => !!v);
 
   // ---------- ฉีดข้อความ ----------
-  async function injectText(text) {
+  async function injectText(text, turnId = null) {
     const box = await waitForComposer();
     if (!box) throw new Error('composer_not_found');
 
@@ -472,14 +487,29 @@
      * ProseMirror จึงรับเข้าสถานะครบเหมือนคนกด Ctrl+V เอง
      */
     let ok = false;
+    /**
+     * โฟกัสต้องมาก่อนคลิปบอร์ดเสมอ ไม่งั้นทางหลักแพ้ตั้งแต่ยังไม่เริ่ม
+     *
+     * เดิมยิง writeText ทันทีแล้วกลืน error ทิ้งใน catch เปล่า ๆ เวลาแท็บไม่ได้โฟกัส
+     * (จอดับ · ล็อกหน้าจอ · ต่อผ่าน Remote Desktop · หน้าต่างอื่นครองโฟกัส)
+     * มันจึงเงียบ ๆ ตกไปใช้ทางสำรองที่คอมเมนต์ข้างบนบอกเองว่าใช้กับข้อความยาวไม่ได้
+     * แล้วจบที่ "ข้อความเต็มช่องแต่ปุ่มส่งเทา" โดยไม่มีบรรทัดไหนบอกว่าเพราะโฟกัส
+     */
+    const hasFocus = await waitFocus(1500);
+    let clipboardError = hasFocus ? '' : 'แท็บ ChatGPT ไม่ได้โฟกัส';
     try {
       await navigator.clipboard.writeText(text);
       box.focus();
       ok = document.execCommand('paste');
       await frame();
       ok = ok && !!box.innerText.trim();
-    } catch (_) {
+      if (ok) clipboardError = '';
+    } catch (e) {
       ok = false;
+      clipboardError = e?.message || String(e);
+    }
+    if (clipboardError && turnId) {
+      report(turnId, 'typing', `วางผ่านคลิปบอร์ดไม่ได้ (${clipboardError}) — ใช้ทางสำรองแทน ซึ่งพลาดง่ายกับ Prompt ยาว`);
     }
 
     // ทางสำรองที่ 1: คำสั่งแทรกข้อความของเบราว์เซอร์
@@ -509,6 +539,7 @@
       await clearComposer(box);
       box.focus();
       try {
+        await waitFocus(800);
         await navigator.clipboard.writeText(text);
         document.execCommand('paste');
       } catch (_) {
@@ -580,6 +611,7 @@
     // ปุ่มที่ค้างแต่หน้านิ่ง ('stale') ไม่ใช่เหตุให้ล้มทั้งเทิร์น — ปล่อยให้ clickSend จัดการต่อ
     const how = await waitForBusyToClear(stopButtonVisible, {
       timeoutMs,
+      staleMs: Infinity, // Silence alone cannot establish that another turn has finished.
       turnId,
       label: 'รอเทิร์นก่อนหน้าจบ ',
     });
@@ -638,7 +670,7 @@
   function sendCandidates(box) {
     // ต้องหาใหม่ทุกครั้ง หน้า ChatGPT สร้างปุ่มชุดใหม่ทุกครั้งที่ re-render
     const form = box?.isConnected ? box.closest('form') : null;
-    const roots = form ? [form, document] : [document];
+    const roots = form ? [form] : [];
     const seen = new Set();
     const out = [];
     for (const root of roots) {
@@ -684,114 +716,45 @@
     }
   }
 
-  async function clickSend(composer = null, timeoutMs = 20000, expectedPrompt = null, turnId = null) {
-    const t0 = Date.now();
+  const normalizeMessage = (text) => String(text || '').replace(/\s+/g, ' ').trim();
+  function userMessageKey(node) {
+    return node.getAttribute('data-message-id') ||
+      node.closest('[data-testid^="conversation-turn"]')?.getAttribute('data-testid') || '';
+  }
+  function snapshotUserMessages() {
+    return $$('[data-message-author-role="user"]').map(node => ({
+      key:userMessageKey(node), text:normalizeMessage(node.innerText || node.textContent),
+    }));
+  }
+  function findUserReceipt(prompt, before) {
+    const expected = normalizeMessage(prompt);
+    const matches = $$('[data-message-author-role="user"]').filter(node =>
+      normalizeMessage(node.innerText || node.textContent) === expected);
+    const oldKeys = new Set(before.map(row=>row.key).filter(Boolean));
+    const identified = matches.find(node => userMessageKey(node) && !oldKeys.has(userMessageKey(node)));
+    if (identified) return identified;
+    const oldCount = before.filter(row=>row.text===expected).length;
+    return matches.length > oldCount ? matches.at(-1) : null;
+  }
+
+  async function clickSend(composer = null, timeoutMs = 12000, expectedPrompt = null, turnId = null, before = null) {
     const box = composer?.isConnected ? composer : await waitForComposer(15000);
-    if (!box) throw new Error('composer_not_found_before_send'); // ผู้เรียกครอบ try ไว้แล้ว
-
-    const textNow = () => (box.isConnected ? (box.innerText || box.textContent || '').trim() : '');
-    const userCountBefore = $$('[data-message-author-role="user"]').length;
-    const stopBefore = stopButtonVisible();
-    const verifyPrompt = () => {
-      if (expectedPrompt != null && !composerMatches(expectedPrompt)) throw new Error('composer_text_mismatch');
-    };
-
-    /**
-     * "ส่งแล้วหรือยัง" มีหลักฐานที่เชื่อได้จริงอยู่อย่างเดียว: ข้อความของเราโผล่ในบทสนทนา
-     *
-     * เกณฑ์ "ช่องพิมพ์ว่าง = ส่งแล้ว" เป็นกับดัก เพราะหน้า ChatGPT สร้างช่องพิมพ์ใหม่
-     * ทุกครั้งที่ re-render ตัวแปร box ที่เราถืออยู่จึงกลายเป็น element ที่หลุดจากหน้าไปแล้ว
-     * ซึ่งอ่าน innerText ได้ค่าว่างเสมอ — ระบบเลยสรุปว่า "ส่งสำเร็จ" ทั้งที่ Prompt
-     * ยังนอนอยู่ในช่องพิมพ์ให้เห็นเต็มตา แล้วไปนั่งรอคำตอบที่ไม่มีวันมาจนหมดเวลา
-     */
-    const accepted = async (waitMs = 1800) =>
-      !!(await waitForDom(
-        () => {
-          if ($$('[data-message-author-role="user"]').length > userCountBefore) return true;
-          if (box.isConnected && !textNow()) return true;
-          if (!stopBefore && stopButtonVisible()) return true;
-          return null;
-        },
-        { timeoutMs: waitMs },
-      ));
-
-    /**
-     * หน้าเว็บติดสถานะ "กำลังตอบ" ค้าง = ปุ่มส่งกลายเป็นปุ่มหยุด กดส่งไม่ได้ตลอดกาล
-     *
-     * เห็นกับตาในหน้าจอจริง: Prompt นอนอยู่ในช่องพิมพ์เต็ม ๆ ส่วนมุมขวาล่างเป็นปุ่มสี่เหลี่ยม
-     * (ปุ่มหยุด) ไม่ใช่ลูกศรส่ง ทั้งที่ ChatGPT วาดภาพเสร็จไปแล้วและหน้าจอนิ่งสนิท
-     * สถานะนี้ไม่หายเอง รอไปก็เท่านั้น — ต้องกดหยุดให้มันคืนสภาพ แล้วค่อยส่ง
-     */
-    const stopControl = () =>
-      $$('[data-testid="stop-button"]').find((b) => {
-        if (!b || b.disabled) return false;
-        const r = b.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      }) || null;
-
-    if (stopControl()) {
-      /**
-       * ให้โอกาสมันจบเองก่อน เผื่อกำลังตอบอยู่จริง
-       *
-       * ยี่สิบวินาทีเป็นเกณฑ์ที่ตั้งจากเทิร์นข้อความ ซึ่งสั้นเกินไปมากสำหรับเทิร์นสร้างภาพ
-       * ของโมเดลสายคิดก่อนตอบ ที่ใช้เวลาสามนาทีขึ้นไปเป็นเรื่องปกติ
-       * ผลที่เกิดขึ้นจริงคือเรากดปุ่มหยุดใส่งานที่กำลังวาดอยู่ดี ๆ แล้วส่งคำสั่งเดิมซ้ำ
-       * เห็นในหน้าแชตเป็น "Stopped thinking" ติดกันหลายเทิร์นโดยไม่ได้ภาพสักรูป
-       * แต่ "รอจนกว่าจะครบสามนาที" ก็ผิดอีกด้าน เพราะสถานะค้างไม่หายเอง
-       * จึงแยกสองกรณีออกจากกันด้วยเนื้อหาที่โตขึ้นจริง ไม่ใช่ด้วยเวลาที่ผ่านไป
-       */
-      const how = await waitForBusyToClear(stopControl, {
-        timeoutMs: 180000,
-        turnId,
-        label: 'รอเทิร์นก่อนหน้าจบก่อนส่งงานถัดไป ',
-      });
-      if (how === 'stale') {
-        // นิ่งสนิทแต่ปุ่มหยุดยังอยู่ = หน้าเว็บค้างสถานะ ต้องกดหยุดให้ช่องพิมพ์คืนสภาพตามที่อธิบายไว้ข้างบน
-        report(turnId, 'waiting_idle', 'หน้าเว็บค้างสถานะ “กำลังตอบ” ทั้งที่นิ่งสนิท — กดปุ่มหยุดหนึ่งครั้งให้ช่องพิมพ์คืนสภาพ');
-        stopControl()?.click();
-        for (let i = 0; i < 20 && stopControl(); i++) await napMs(150);
-      }
-      if (stopControl()) throw new Error('previous_turn_running');
-    }
-
-    /**
-     * รอให้ปุ่มส่ง "กดได้" ก่อน แล้วค่อยกด
-     *
-     * ปุ่มที่ยัง disabled คือสัญญาณว่าตัวแก้ไขข้อความยังไม่นับว่ามีเนื้อหา
-     * ของเดิมข้ามปุ่มที่กดไม่ได้แล้วไปงมทางอื่นทันที ทั้งที่แค่รออีกวินาทีเดียวมันก็เปิด
-     */
-    let ready = await waitForDom(() => (sendCandidates(box).some(sendUsable) ? true : null), { timeoutMs: 4000 });
-    if (!ready) {
-      await nudgeComposer(box);
-      ready = await waitForDom(() => (sendCandidates(box).some(sendUsable) ? true : null), { timeoutMs: 6000 });
-    }
-
-    // รอบแรก: กดปุ่มส่งที่กดได้จริง
-    for (const btn of sendCandidates(box).filter(sendUsable)) {
-      verifyPrompt();
-      btn.click();
-      if (await accepted()) return true;
-    }
-
-    // รอบสอง: Enter บนช่องพิมพ์ (ใช้ได้แม้ตอนที่หาปุ่มไม่เจอ)
-    verifyPrompt();
-    pressEnter(box);
-    if (await accepted(2200)) return true;
-
-    // รอบสาม: ปุ่มอาจเพิ่งเปิดใช้งานหลังหน้าเว็บวาดเสร็จ กดทันทีที่มีปุ่มที่กดได้
-    while (Date.now() - t0 <= timeoutMs) {
-      const btn = await waitForDom(() => sendCandidates(box).find(sendUsable) || null, {
-        timeoutMs: Math.max(500, timeoutMs - (Date.now() - t0)),
-      });
-      if (!btn) break;
-      verifyPrompt();
-      btn.click();
-      if (await accepted(800)) return true;
-      verifyPrompt();
-      pressEnter(box);
-      if (await accepted(800)) return true;
-    }
-    throw new Error('send_action_not_accepted');
+    if (!box) throw new Error('composer_not_found_before_send');
+    if (stopButtonVisible()) throw new Error('previous_turn_running');
+    before ||= snapshotUserMessages();
+    const received = () => findUserReceipt(expectedPrompt, before);
+    if (received()) return received();
+    // One scoped click only. The native fallback belongs to runTurn, not another loop.
+    const btn = await waitForDom(() => {
+      const live = $(S.composer);
+      return sendCandidates(live).find(sendUsable) || null;
+    }, {timeoutMs:4000});
+    if (!btn) throw new Error('send_action_not_accepted');
+    if (received()) return received();
+    if (stopButtonVisible()) throw new Error('previous_turn_running');
+    if (!composerMatches(expectedPrompt)) throw new Error('composer_text_mismatch');
+    btn.click();
+    return await waitForDom(received, {timeoutMs});
   }
 
   // ---------- รู้ได้อย่างไรว่าตอบจบ ----------
@@ -818,9 +781,6 @@
    */
   const IMAGE_GIVEUP_MS = 45000;
 
-  /** ข้อความไม่ยาวขึ้นเลยนานขนาดนี้ ให้ถือว่าจบ แม้ปุ่มหยุดจะยังบอกว่ากำลังพ่นอยู่ */
-  const STUCK_MS = 25000;
-
   /**
    * เจอแถบปุ่มแล้วยังต้องดูอีกจังหวะว่าข้อความไม่โตต่อ
    *
@@ -832,6 +792,21 @@
   /** แถบปุ่มบอกว่าจบ แต่ปุ่มหยุดยังอยู่ — ให้เวลาพิสูจน์ตัวเองเท่านี้ก่อนเชื่อแถบปุ่ม */
   const BAR_STUCK_MS = 2500;
 
+  let completedSetupReply = null;
+  function setupJson(turn, keys = []) {
+    if (!turn || !keys.length) return '';
+    const codes = $$(S.codeBlock, turn);
+    const raw = (codes.length ? codes.map(c=>c.textContent).join('\n') : turn.innerText || '').trim();
+    try {
+      const value = JSON.parse(raw);
+      return keys.some(key => Array.isArray(value?.[key]) && value[key].length > 0) ? raw : '';
+    } catch { return ''; }
+  }
+  function acceptedSetupStillCurrent() {
+    const saved = completedSetupReply;
+    return !!saved && lastAssistantTurn() === saved.turn && setupJson(saved.turn, saved.keys) === saved.raw;
+  }
+
   function waitForAnswer(
     turnId,
     anchor,
@@ -841,6 +816,7 @@
       startMs = 120000,
       minAssistantCount = 0,
       wantImages = false,
+      expectedJsonKeys = [],
       imageKey = () => '',
     } = {},
   ) {
@@ -856,6 +832,7 @@
       let imgSince = 0;
       let stuckSince = 0;
       let done = false;
+      let jsonSignature = '', jsonSince = 0;
 
       const finish = (status) => {
         if (done) return;
@@ -895,6 +872,15 @@
         const hasImg = !!turn.querySelector('img');
 
         const bar = actionBarFor(turn);
+        // Explicit structured setup contract: complete JSON is stronger evidence than
+        // a global Stop button. Never apply this shortcut to prose or image turns.
+        const json = !wantImages ? setupJson(turn, expectedJsonKeys) : '';
+        if (json !== jsonSignature) { jsonSignature = json; jsonSince = Date.now(); }
+        if (json && Date.now() - jsonSince >= 2500) {
+          completedSetupReply = {turn, keys:expectedJsonKeys, raw:json};
+          report(turnId, 'received', 'JSON ครบและนิ่งแล้ว — ส่งต่อให้ตรวจรายการ');
+          return finish('ok');
+        }
 
         /**
          * ปุ่มหยุดคือคำตัดสินว่า "ยังพ่นอยู่" แถบปุ่มแย้งมันไม่ได้
@@ -906,7 +892,7 @@
          * (อาการที่เห็น: ไม่พบรายการชื่อในคำตอบ [ยาว 31 ตัวอักษร · ตัดกลางคัน] — คิดชื่อต้องยิงซ้ำสามรอบ)
          *
          * ตอนนี้กลับด้าน: ปุ่มหยุดมองเห็นอยู่ = ยังไม่จบ ไม่ว่าจะเจอแถบปุ่มหรือไม่
-         * ส่วนปุ่มหยุดที่ค้างใน DOM ไม่ทำให้เทิร์นค้างถาวรอีกแล้ว เพราะมีด่าน STUCK_MS ข้างล่างรับไว้
+         * ถ้าสัญญาณขัดกัน ต้องมีแถบจบคำตอบจริงด้วย ไม่ตัดสินจากความนิ่งอย่างเดียว
          */
         if (stopButtonVisible()) {
           /**
@@ -924,8 +910,7 @@
              * ไม่ตัดสินทันทีเหมือนเดิม (ซึ่งทำให้คำตอบขาดกลาง) แต่ก็ไม่ต้องรอเต็ม 25 วินาที
              * ข้อความที่ไม่ขยับเลยสองวินาทีครึ่งทั้งที่ "จบแล้ว" ตามแถบปุ่ม ถือว่าจบจริง
              */
-            const need = bar ? BAR_STUCK_MS : STUCK_MS;
-            if (Date.now() - stuckSince >= need) return finish('ok');
+            if (bar && Date.now() - stuckSince >= BAR_STUCK_MS) return finish('ok');
           } else {
             stuckSince = 0;
           }
@@ -1472,7 +1457,13 @@
         };
       }
 
+      const acceptedSetup = opts.recoverCompletedSetup && acceptedSetupStillCurrent();
+      if (acceptedSetup && stopButtonVisible()) opts = {...opts, newThread:true};
       if (opts.newThread) {
+        // Do not navigate away from a turn that is still reasoning or drawing.
+        if (!acceptedSetup && !(await waitUntilIdle(opts.imageTimeoutMs ?? 240000, turnId))) {
+          return {turnId,status:'error',text:'',meta:{error:'previous_turn_running'}};
+        }
         report(turnId, 'new_thread');
         // เทิร์นสร้างภาพบังคับให้ห้องต้องว่างจริง ไม่งั้นเครื่องมือสร้างภาพจะเข้าโหมดแก้ภาพเดิม
         const nt = await newThread({ mustBeEmpty: !!opts.wantImages });
@@ -1485,6 +1476,7 @@
             meta: { error: 'new_thread_not_ready', detail: nt.reason, url: location.href },
           };
         }
+        completedSetupReply = null;
       }
       if (hitLimit()) return { turnId, status: 'rate_limited', text: '' };
 
@@ -1502,6 +1494,7 @@
       }
 
       const userBefore = $$('[data-message-author-role="user"]').length;
+      const userMessagesBefore = snapshotUserMessages();
       const assistantBefore = $$(S.assistantTurn).length;
 
       /**
@@ -1551,7 +1544,7 @@
        */
       let composerBox = null;
       try {
-        composerBox = await injectText(prompt);
+        composerBox = await injectText(prompt, turnId);
       } catch (e) {
         report(turnId, 'typing', `เขียนลงช่องพิมพ์ไม่สำเร็จ (${e?.message || e}) — จะลองทางสำรอง`);
         composerBox = $(S.composer);
@@ -1574,140 +1567,47 @@
         report(turnId, 'typing', 'ช่องพิมพ์ถูกล้างตอนหน้าเว็บวาดใหม่ — พิมพ์ Prompt ซ้ำอีกครั้ง');
         await waitComposerStable(600, 6000);
         try {
-          composerBox = await injectText(prompt);
+          composerBox = await injectText(prompt, turnId);
         } catch (e) {
           report(turnId, 'typing', `พิมพ์ซ้ำไม่สำเร็จ (${e?.message || e})`);
           break;
         }
       }
 
-      report(turnId, 'sending', 'กำลังกดส่งข้อมูลที่พิมพ์ลงใน ChatGPT');
-      /**
-       * กดส่งไม่สำเร็จ ต้อง "เดินต่อ" ไม่ใช่โยน error ทิ้งทั้งเทิร์น
-       *
-       * clickSend โยน send_action_not_accepted เมื่อกดไม่ติด ซึ่งวิ่งออกไปถึง catch ชั้นนอก
-       * แล้วจบเทิร์นทันที — ทางสำรองทั้งหมดที่เขียนไว้ข้างล่าง (กดส่งซ้ำ, ให้เบราว์เซอร์
-       * พิมพ์และกด Enter ให้, ขอให้ผู้ใช้กดเอง) จึงไม่เคยถูกเรียกใช้เลยสักครั้ง
-       * นี่คือเหตุผลที่ระบบยังค้างเหมือนเดิมทั้งที่แก้ทางส่งไปหลายรอบ
-       */
+      report(turnId, 'sending', 'กำลังกดส่ง และรอยืนยันข้อความในบทสนทนา');
+      const sendStartedAt = Date.now();
+      let fresh = null, sendError = '';
       try {
-        if (!composerMatches(prompt)) throw new Error('composer_text_mismatch');
-        await clickSend(composerBox, 20000, prompt, turnId);
+        fresh = await clickSend(composerBox, 12000, prompt, turnId, userMessagesBefore);
       } catch (e) {
-        if (e?.message === 'previous_turn_running') {
-          return { turnId, status: 'error', text: '', meta: { error: e.message } };
-        }
-        report(turnId, 'sending', `กดส่งด้วยวิธีปกติไม่สำเร็จ (${e?.message || e}) — ลองทางสำรอง`);
+        sendError = e?.message || String(e);
+        if (sendError === 'previous_turn_running')
+          return {turnId,status:'error',text:'',meta:{error:sendError}};
       }
-
-      // ปักหมุดที่ "ข้อความของเราที่เพิ่งเพิ่มขึ้นจริง" หน้าเว็บวาดให้แทบจะทันทีหลังกดส่ง
-      // ถ้าปักไม่ได้ (เว็บเปลี่ยนโครงสร้าง) ค่อยถอยไปใช้ข้อความล่าสุด
-      // แล้วบังคับเพิ่มว่าจำนวนคำตอบต้องมากขึ้นจริง กันการอ่านคำตอบเก่าซ้ำ
-      let fresh = await waitForDom(
-        () => {
-          const t = $$('[data-message-author-role="user"]');
-          return t.length > userBefore ? t[t.length - 1] : null;
-        },
-        { timeoutMs: 15000 },
-      );
-
-      /**
-       * ยืนยันซ้ำว่า Prompt ถูกส่งจริง ก่อนจะไปนั่งรอคำตอบ
-       *
-       * ถ้าข้อความของเราไม่โผล่ในบทสนทนาเลย แปลว่ามันยังค้างอยู่ในช่องพิมพ์
-       * การเดินหน้าไปรอคำตอบตรงนั้นคือการรอสิ่งที่ไม่มีวันมา แล้วจบเป็น timeout
-       * เผาเวลาสองนาทีต่อครั้งโดยไม่มีใครรู้ว่าติดตรงไหน — ลองกดส่งซ้ำหนึ่งครั้ง
-       * ถ้ายังไม่ไป ให้ล้มทันทีพร้อมบอกตรง ๆ ว่า Prompt ยังไม่ถูกส่ง
-       */
+      fresh ||= findUserReceipt(prompt, userMessagesBefore);
+      if (!fresh && (stopButtonVisible() || !composerMatches(prompt))) {
+        // Empty/replaced composer is ambiguous, NOT evidence that nothing was sent.
+        fresh = await waitForDom(()=>findUserReceipt(prompt,userMessagesBefore),{timeoutMs:15000});
+        if (!fresh) return {turnId,status:'error',text:'',meta:{
+          error:'outcome_unknown', detail:'ช่องพิมพ์เปลี่ยนหรือเริ่มตอบแล้ว แต่ยังจับข้อความที่ส่งไม่ได้ — ไม่ส่งซ้ำ',
+          sendMs:Date.now()-sendStartedAt,
+        }};
+      }
       if (!fresh) {
-        report(turnId, 'sending', 'ข้อความยังไม่โผล่ในบทสนทนา — กดส่งซ้ำอีกครั้ง');
+        report(turnId,'sending','ปุ่มปกติยังไม่ส่ง — ใช้ช่องทางเบราว์เซอร์สำรองหนึ่งครั้ง');
         try {
-          if (!composerMatches(prompt)) throw new Error('composer_text_mismatch');
-          await clickSend(composerBox, 20000, prompt, turnId);
-        } catch (_) {
-          /* ค่อยไปสรุปด้วยหลักฐานข้างล่าง */
-        }
-        fresh = await waitForDom(
-          () => {
-            const t = $$('[data-message-author-role="user"]');
-            return t.length > userBefore ? t[t.length - 1] : null;
-          },
-          { timeoutMs: 8000 },
-        );
+          const forced = await chrome.runtime.sendMessage({type:'sw.forceSend',text:prompt,requireDraft:true});
+          sendError = forced?.error || sendError;
+          fresh = await waitForDom(()=>findUserReceipt(prompt,userMessagesBefore),{timeoutMs:15000});
+          if (!fresh && forced?.ok) sendError = 'outcome_unknown';
+        } catch(e) { sendError = e?.message || String(e); }
       }
-
-      /**
-       * ปุ่มส่งของ ChatGPT เป็นของหน้าเว็บที่เราคุมไม่ได้จริง ๆ มันค้างเป็นวงกลมหมุนได้
-       * และไม่มีท่าไหนใน DOM ที่บังคับให้มันยอมส่งได้ทุกครั้ง
-       *
-       * เดิมทางออกสุดท้ายคือขอให้คนไปกด Enter เอง ซึ่งใช้ไม่ได้กับงานที่เดินอัตโนมัติ
-       * เพราะไม่มีใครนั่งเฝ้า ตอนนี้จึงเหลือแค่ทางที่เครื่องทำเองได้ แล้วล้มให้เร็วถ้าไม่ผ่าน
-       * ชั้นบนกู้ต่อได้ดีกว่าอยู่แล้ว — ส่งไม่ออกไม่เสียโควตา ลองใหม่ฟรี และเปิดห้องแชตใหม่ให้เอง
-       */
-      /**
-       * วิธีปกติแพ้แล้ว — ให้เบราว์เซอร์พิมพ์และกด Enter ให้เอง
-       *
-       * ล้างช่องก่อนเสมอ เพราะข้อความที่ค้างอยู่คือของที่ ProseMirror ไม่รู้จัก
-       * ถ้าป้อนทับลงไปจะได้ข้อความซ้อนกันสองชุด
-       */
-      // เหตุผลที่ส่งอัตโนมัติไม่ผ่าน ต้องเดินทางไปถึงข้อความที่บอกให้คนไปกด Enter ด้วย
-      // ไม่งั้นบรรทัดที่ขึ้นซ้ำทุกห้าวินาทีจะบอกแค่ "ไปกด Enter" โดยไม่มีวันบอกว่าทำไม
-      let handoffReason = '';
-      if (!fresh) {
-        try {
-          const composer = $(S.composer);
-          if (composer) {
-            composer.focus();
-            document.execCommand('selectAll', false, null);
-            document.execCommand('delete', false, null);
-            await frame();
-            composer.focus();
-          }
-          report(turnId, 'sending', 'กดส่งเองไม่ติด — ให้เบราว์เซอร์พิมพ์และกด Enter ให้แทน');
-          const forced = await chrome.runtime.sendMessage({ type: 'sw.forceSend', text: prompt });
-          if (forced?.ok) {
-            fresh = await waitForDom(
-              () => {
-                const t = $$('[data-message-author-role="user"]');
-                return t.length > userBefore ? t[t.length - 1] : null;
-              },
-              { timeoutMs: 12000 },
-            );
-            if (fresh) report(turnId, 'sending', 'ส่งสำเร็จด้วยช่องทางสำรองของเบราว์เซอร์');
-          } else if (forced?.error) {
-            handoffReason = forced.error;
-            report(turnId, 'sending', `ช่องทางสำรองส่งไม่ได้: ${forced.error}`);
-          }
-        } catch (e) {
-          handoffReason = e?.message || String(e);
-          report(turnId, 'sending', `ช่องทางสำรองส่งไม่ได้: ${handoffReason}`);
-        }
-      }
-
-      if (!fresh) {
-        const stuck = (($(S.composer)?.innerText || '').trim().length > 0);
-        return {
-          turnId,
-          status: 'error',
-          text: '',
-          meta: {
-            error: 'prompt_not_sent',
-            /**
-             * ไม่มีขั้นรอคนกด Enter อีกแล้ว — ล้มเทิร์นทันทีเพื่อให้ชั้นบนกู้เอง
-             *
-             * ชั้นบนมีทางกู้ที่ดีกว่าการรอคนอยู่แล้ว: ส่งไม่ออกนับเป็นความล้มที่ไม่เสียโควตา
-             * ลองใหม่ได้ฟรี และถ้าไม่ออกสองครั้งติดจะเปิดห้องแชตใหม่ให้เลย
-             * ซึ่งล้างสภาพช่องพิมพ์ที่ค้างอยู่ทิ้งทั้งหมด ได้ผลกว่ารอคนมากด
-             */
-            detail:
-              (stuck
-                ? 'Prompt อยู่ในช่องพิมพ์ของ ChatGPT แล้วแต่กดส่งไม่ติด'
-                : 'กดส่ง Prompt แล้วแต่ข้อความไม่โผล่ในบทสนทนา') +
-              (handoffReason ? ` · ช่องทางสำรองไม่ผ่านเพราะ: ${handoffReason}` : ''),
-            url: location.href,
-          },
-        };
-      }
+      if (!fresh) return {turnId,status:'error',text:'',meta:{
+        error:'outcome_unknown',
+        detail:`ยังยืนยันข้อความที่ส่งไม่ได้ · ช่องทางสำรอง: ${sendError || 'ไม่พบข้อความใหม่'} · เก็บงานไว้โดยไม่ยิงซ้ำ`,
+        sendMs:Date.now()-sendStartedAt,
+      }};
+      report(turnId,'submitted',`ยืนยันข้อความตรงกับ Prompt แล้ว · ${((Date.now()-sendStartedAt)/1000).toFixed(1)} วินาที`);
 
       const anchor = fresh;
       if (opts.wantImages) {
@@ -1769,10 +1669,14 @@
         startMs: opts.startMs ?? 120000,
         minAssistantCount,
         wantImages: !!opts.wantImages,
+        expectedJsonKeys: opts.expectedJsonKeys || [],
         imageKey: () => readImages(imgsBefore, anchor).join('|'),
       });
 
-      if (status !== 'ok') return { turnId, status, text: '', meta: { model: modelBefore } };
+      if (status !== 'ok') return { turnId, status, text: '', meta: {
+        model: modelBefore,
+        ...(status === 'timeout' ? {error:'outcome_unknown', detail:'หมดเวลารอ แต่ยังยืนยันไม่ได้ว่า ChatGPT หยุดแล้ว จึงไม่ส่งข้อความซ้ำ'} : {}),
+      } };
 
       const { text, blocks } = readAnswer(anchor);
 
@@ -1849,6 +1753,8 @@
   }
 
   // ---------- รับคำสั่ง ----------
+  let activeTurnId = null;
+  const completedTurns = new Map();
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'gpt.ping') {
       sendResponse({ ok: true, url: location.href });
@@ -1886,9 +1792,22 @@
     }
 
     if (msg?.type === 'gpt.run') {
+      if (completedTurns.has(msg.turnId)) {
+        sendResponse({ok:true,accepted:msg.turnId});
+        chrome.runtime.sendMessage({type:'gpt.result',...completedTurns.get(msg.turnId)}).catch(()=>{});
+        return false;
+      }
+      if (activeTurnId) {
+        sendResponse(activeTurnId === msg.turnId ? {ok:true,accepted:msg.turnId} : {ok:false,error:'previous_turn_running'});
+        return false;
+      }
+      activeTurnId = msg.turnId;
       // ตอบรับทันที แล้วส่งผลกลับทีหลังเป็น gpt.result
       sendResponse({ ok: true, accepted: msg.turnId });
       runTurn(msg.turnId, msg.prompt, msg.opts).then((res) => {
+        completedTurns.set(msg.turnId,res);
+        if (completedTurns.size > 10) completedTurns.delete(completedTurns.keys().next().value);
+        activeTurnId = null;
         chrome.runtime.sendMessage({ type: 'gpt.result', ...res }).catch(() => {});
       });
       return false;
