@@ -77,3 +77,67 @@ test('หน้าจอบอกตรง ๆ ว่าได้ไม่คร
   assert.match(render, /กด “สุ่มใหม่” เพื่อขอชุดเต็มอีกครั้ง/);
   assert.match(source, /renderTopicChoices\(res\.short\)/);
 });
+
+/**
+ * เลือกหัวข้อจากกระแสแล้วต้องได้หัวข้อนั้น ไม่ใช่ถูกตั้งชื่อใหม่ให้โดยไม่ได้สั่ง
+ * ของเดิมกดเลือกปุ๊บยิงถาม ChatGPT ให้คิดชื่อทันที เสียโควตาหนึ่งเทิร์นทุกครั้งที่กดดู
+ */
+const pickBlock = source.slice(
+  source.indexOf('function renderTopicPicked'),
+  source.indexOf('\n}', source.indexOf('function renderTopicPicked')) + 2,
+);
+
+function pickScope(seed) {
+  const title = { value: '' };
+  const handlers = {};
+  const box = {
+    innerHTML: '',
+    querySelector(sel) {
+      if (!box.innerHTML.includes(sel.replace(/[[\]]/g, ''))) return null;
+      const el = { onclick: null, addEventListener: (_, fn) => (handlers[sel] = fn) };
+      Object.defineProperty(el, 'onclick', { set: (fn) => (handlers[sel] = fn), get: () => handlers[sel] });
+      return el;
+    },
+  };
+  const calls = [];
+  const scope = {
+    trendSeed: seed,
+    $: () => title,
+    esc: (s) => String(s),
+    status: (s) => calls.push(`status:${s}`),
+    resetOutlineDirection: () => calls.push('reset'),
+    renderTopicChoices: () => calls.push('back'),
+    nameFromTopic: async () => calls.push('askedForName'),
+  };
+  vm.createContext(scope);
+  vm.runInContext(`${pickBlock}\nglobalThis.pick = renderTopicPicked;`, scope);
+  scope.pick(box);
+  return { title, box, calls, handlers };
+}
+
+test('เลือกหัวข้อแล้วหัวข้อนั้นกลายเป็นชื่อเรื่องทันที โดยไม่ถาม ChatGPT', () => {
+  const f = pickScope({ trend: 'เรียนเรื่องใหม่ให้ทัน', why_now: 'คนล้นข้อมูล' });
+  assert.equal(f.title.value, 'เรียนเรื่องใหม่ให้ทัน');
+  assert.equal(f.calls.includes('askedForName'), false);
+  assert.ok(f.box.innerHTML.includes('เรียนเรื่องใหม่ให้ทัน'));
+  assert.ok(f.box.innerHTML.includes('หัวข้อที่เลือก'));
+});
+
+test('อยากได้ชื่อใหม่ต้องกดสั่งเอง — ปุ่มมีอยู่แต่ไม่ทำงานเอง', () => {
+  const f = pickScope({ trend: 'หัวข้อหนึ่ง' });
+  assert.ok(f.box.innerHTML.includes('data-name-it'));
+  assert.ok(f.box.innerHTML.includes('ให้ ChatGPT คิดชื่อจากหัวข้อนี้'));
+});
+
+test('การกดเลือกหัวข้อไม่เรียกตัวตั้งชื่ออีกต่อไป', () => {
+  const handler = source.slice(source.indexOf("box.querySelectorAll('[data-topic]')"), source.indexOf('\n}', source.indexOf("box.querySelectorAll('[data-topic]')")));
+  assert.match(handler, /renderTopicPicked\(box\)/);
+  assert.equal(/nameFromTopic/.test(handler), false);
+});
+
+test('ถ้าตั้งชื่อไปแล้วไม่ถูกใจ กลับไปใช้หัวข้อเดิมได้', () => {
+  const named = source.slice(source.indexOf('function renderTopicNamed'), source.indexOf('function renderTopicChoices'));
+  assert.match(named, /data-use-topic/);
+  assert.match(named, /ใช้หัวข้อเดิมเป็นชื่อ/);
+  assert.match(named, /data-use-topic\]'\)\?\.addEventListener\('click', \(\) => renderTopicPicked\(box\)\)/);
+});

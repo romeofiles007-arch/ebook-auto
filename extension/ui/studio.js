@@ -1166,6 +1166,43 @@ async function nameFromTopic({ box = $('trendIdeas'), fresh = false } = {}) {
   status('ได้ชื่อเล่มแล้ว — กด “ตั้งชื่อใหม่” ถ้ายังไม่ถูกใจ');
 }
 
+/**
+ * เลือกหัวข้อแล้วต้องได้หัวข้อนั้น ไม่ใช่ถูกตั้งชื่อใหม่ให้โดยไม่ได้สั่ง
+ *
+ * ของเดิมพอกดเลือกหัวข้อ จะยิงถาม ChatGPT ให้คิดชื่อเล่มทันทีในจังหวะเดียวกัน
+ * ผู้ใช้ที่ตั้งใจเลือกหัวข้อจากกระแสจึงเห็นชื่อที่ตัวเองไม่ได้ขอมาแทนหัวข้อที่เพิ่งเลือก
+ * และเสียโควตาข้อความไปหนึ่งเทิร์นทุกครั้งที่กดเลือก แม้จะแค่กดดูว่าหัวข้อไหนน่าสนใจ
+ *
+ * ตอนนี้เลือกแล้วจบตรงนั้น หัวข้อที่เลือกกลายเป็นชื่อเรื่องตั้งต้นทันทีโดยไม่ต้องคุยกับใคร
+ * ถ้าอยากได้ชื่อที่ขายกว่านี้ค่อยกดปุ่มขอเอง ซึ่งเป็นการสั่งของผู้ใช้จริง ๆ
+ */
+function renderTopicPicked(box = $('trendIdeas')) {
+  if (!trendSeed?.trend) return renderTopicChoices();
+  $('title').value = trendSeed.trend;
+  resetOutlineDirection();
+  box.innerHTML = `<b>หัวข้อที่เลือก</b>
+    <div class="trendPick">
+      <h3>${esc(trendSeed.trend)}</h3>
+      ${trendSeed.why_now ? `<p class="muted">${esc(trendSeed.why_now)}</p>` : ''}
+      <p class="muted">ใช้หัวข้อนี้เป็นชื่อเรื่องแล้ว แก้ในช่องด้านบนได้ หรือให้ ChatGPT ช่วยตั้งชื่อที่ขายกว่านี้ก็ได้</p>
+      <div class="trendActions">
+        <button type="button" data-name-it class="primary inline">✨ ให้ ChatGPT คิดชื่อจากหัวข้อนี้</button>
+        <button type="button" data-back-topics>เลือกหัวข้ออื่น</button>
+      </div>
+    </div>`;
+  box.querySelector('[data-name-it]').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    try {
+      await nameFromTopic({ box, fresh: true });
+    } catch (e) {
+      box.innerHTML = `<b>ตั้งชื่อไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}</div>`;
+      status('ตั้งชื่อไม่สำเร็จ');
+    }
+  };
+  box.querySelector('[data-back-topics]').onclick = () => renderTopicChoices();
+  status('ได้หัวข้อแล้ว — เสนอสารบัญต่อได้เลย หรือให้ช่วยตั้งชื่อก่อนก็ได้');
+}
+
 function renderTopicNamed(namePick, box) {
   box.innerHTML = `<b>ชื่อเล่ม</b>
     <div class="trendPick">
@@ -1175,6 +1212,7 @@ function renderTopicNamed(namePick, box) {
       <p class="muted">จากหัวข้อ: ${esc(trendSeed?.trend || '-')}</p>
       <div class="trendActions">
         <button type="button" data-rename class="primary inline">🎲 ตั้งชื่อใหม่</button>
+        ${trendSeed?.trend ? '<button type="button" data-use-topic>ใช้หัวข้อเดิมเป็นชื่อ</button>' : ''}
         <button type="button" data-back-topics>เลือกหัวข้ออื่น</button>
       </div>
     </div>`;
@@ -1187,6 +1225,7 @@ function renderTopicNamed(namePick, box) {
       status('ตั้งชื่อไม่สำเร็จ');
     }
   };
+  box.querySelector('[data-use-topic]')?.addEventListener('click', () => renderTopicPicked(box));
   box.querySelector('[data-back-topics]').onclick = () => renderTopicChoices();
 }
 
@@ -1209,15 +1248,9 @@ function renderTopicChoices(short = '') {
       .join('') +
     '</div>';
   box.querySelectorAll('[data-topic]').forEach((choice) => {
-    choice.onclick = async () => {
-      box.querySelectorAll('[data-topic]').forEach((b) => (b.disabled = true));
+    choice.onclick = () => {
       trendSeed = structuredClone(trendPool[Number(choice.dataset.topic)]);
-      try {
-        await nameFromTopic({ box, fresh: true });
-      } catch (e) {
-        box.innerHTML = `<b>ตั้งชื่อไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}</div>`;
-        status('ตั้งชื่อไม่สำเร็จ');
-      }
+      renderTopicPicked(box);
     };
   });
 }
