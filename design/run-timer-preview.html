@@ -1,0 +1,20 @@
+<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/extension/ui/run-status.css">
+<style>body{background:#0b1020;font:16px system-ui;color:#eaf0ff;margin:20px}main{max-width:760px}button{margin:4px;padding:8px 12px;border-radius:8px;border:1px solid #36664a;background:#111a2d;color:#eaf0ff;cursor:pointer}</style>
+<main><h1>นาฬิกาจับเวลา · ตัวอย่างจำลอง</h1>
+<p>กดเปลี่ยนสถานะเพื่อดูว่านาฬิกามุมขวาบนเดิน/หยุด/ค้างตามงานจริงไหม</p>
+<div id="btns"></div><pre id="out"></pre></main>
+<script type="module">
+import {mountRunTimer, nextClock} from '/extension/ui/run-timer.js';
+const paint = mountRunTimer(document.body);
+let clock = null;
+for (const kind of ['ready','working','waiting','input','stopped','done']) {
+  const b=document.createElement('button'); b.textContent=kind;
+  b.onclick=()=>{ const run={kind, at:Date.now()}; clock=nextClock(clock, run); run.clock=clock; paint(run);
+    document.getElementById('out').textContent=JSON.stringify(clock); };
+  document.getElementById('btns').append(b);
+}
+// เริ่มงานย้อนหลัง 1 ชั่วโมง 2 นาที เพื่อดูรูปแบบเลขแบบยาว
+document.getElementById('btns').insertAdjacentHTML('beforeend','');
+window.seed=(ms)=>{clock={base:ms,since:Date.now(),running:true,done:false};paint({kind:'working',at:Date.now(),clock});};
+</script></html>

@@ -1,0 +1,12 @@
+<!doctype html><html lang="th"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/extension/ui/run-status.css">
+<style>body{background:#111b2e;font:16px system-ui;color:#fff;margin:20px}main{max-width:800px;margin:auto}</style>
+<main><h1>สถานะงาน · ตัวอย่างจำลอง</h1><div id="wide"></div><div id="narrow" style="max-width:320px"></div></main>
+<script type="module">
+import {mountRunStatus} from '/extension/ui/run-status.js';
+for(const kind of ['working','waiting','input','stopped','done']) {
+ const target=document.createElement('div');document.querySelector(kind==='stopped'?'#narrow':'#wide').append(target);
+ const paint=mountRunStatus(target,()=>{});
+ paint({kind,at:Date.now(),step:'write',reason:{working:'กำลังตรวจและบันทึกต้นฉบับ',waiting:'รอ ChatGPT ตอบ · ยังเห็นคำตอบเพิ่มอยู่',input:'เลือกสารบัญที่ต้องการใน Studio',stopped:'ตัวอย่างข้อความยาวสำหรับตรวจการย่อและเลื่อนรายละเอียด\n'.repeat(80),done:'70 หน้า · ส่งออก PDF แล้ว'}[kind],action:['input','stopped'].includes(kind)?'resume':'',actionLabel:'เปิด Studio เพื่อดำเนินการ'});
+}
+</script></html>

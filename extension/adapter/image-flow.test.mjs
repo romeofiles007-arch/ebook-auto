@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 const workerSource = await readFile(new URL('../sw.js', import.meta.url), 'utf8');
 const adapterSource = await readFile(new URL('./chatgpt.js', import.meta.url), 'utf8');
 
-function worker({ mismatch = false, session = {} } = {}) {
+function worker({ mismatch = false, staleDisabledStop = false, session = {} } = {}) {
   let listener;
   const calls = [];
   const event = { addListener() {} };
@@ -35,8 +35,30 @@ function worker({ mismatch = false, session = {} } = {}) {
       sendCommand: (target, method, params, done) => { calls.push({ target, method, params }); done({}); },
     },
     scripting: { executeScript: async (request) => {
-      calls.push({ verify: !!request.args, target: request.target });
-      return [{ result: request.args ? !mismatch : true }];
+      const verify = request.args?.length === 1;
+      calls.push({ verify, target: request.target });
+      if (staleDisabledStop && request.args?.length === 2) {
+        const box = {
+          innerText: request.args[0],
+          focus() { page.document.activeElement = box; },
+        };
+        const stop = {
+          disabled: true,
+          getAttribute: () => '',
+          getBoundingClientRect: () => ({ width: 40, height: 40 }),
+        };
+        const page = { document: {
+          activeElement: null,
+          querySelector: (selector) => selector === '#prompt-textarea' ? box : null,
+          querySelectorAll: (selector) => selector === '[data-testid="stop-button"]' ? [stop] : [],
+        } };
+        const result = vm.runInNewContext(
+          `(${request.func.toString()})(${JSON.stringify(request.args[0])}, true)`,
+          page,
+        );
+        return [{ result }];
+      }
+      return [{ result: verify ? !mismatch : true }];
     } },
     alarms: { create() {}, onAlarm: event },
   };
@@ -68,6 +90,13 @@ test('duplicate or mismatched text is never submitted and debugger is detached',
   assert.equal(result.error, 'composer_text_mismatch');
   assert.equal(w.calls.some((c) => c.params?.key === 'Enter'), false);
   assert.ok(w.calls.some((c) => c.detach));
+});
+
+test('browser Enter ignores a disabled stale Stop spinner after an image completed', async () => {
+  const w = worker({ staleDisabledStop: true });
+  const result = await w.send({ type: 'sw.forceSend', text: 'next image prompt', requireDraft: true });
+  assert.equal(result.ok, true);
+  assert.ok(w.calls.some((c) => c.params?.key === 'Enter'));
 });
 
 test('automatic image recovery uses the original tab and turn', async () => {
@@ -113,7 +142,7 @@ async function adapterFixture() {
       getAttribute(name) { return name === 'src' ? src : ''; },
     };
   }
-  return { ...context.fixture, nodes, images, node };
+  return { ...context.fixture, document, nodes, images, node };
 }
 
 test('old saved selector is migrated to support image-only assistant sections', async () => {
@@ -132,4 +161,42 @@ test('image scan excludes author uploads, earlier replies and later turns', asyn
     a.node(6, 'https://chatgpt.com/files/later.png'),
   );
   assert.deepEqual(Array.from(a.scanImages(undefined, anchor).images), ['https://chatgpt.com/files/wanted.png']);
+});
+
+test('image scan sees generated images rendered outside the first main portal', async () => {
+  const a = await adapterFixture();
+  const anchor = a.node(2);
+  a.nodes.push(anchor);
+  a.images.push(a.node(3, 'https://chatgpt.com/backend-api/files/generated.png'));
+  const firstMain = { querySelectorAll: () => [], querySelector: () => null };
+  a.document.querySelector = (sel) => sel === 'main' ? firstMain : null;
+  assert.deepEqual(Array.from(a.scanImages(undefined, anchor).images), [
+    'https://chatgpt.com/backend-api/files/generated.png',
+  ]);
+});
+
+test('disabled composer is classified as recoverable without shortening image generation waits', () => {
+  assert.match(adapterSource, /COMPOSER_STUCK_SILENCE_MS\s*=\s*30000/);
+  assert.match(adapterSource, /staleMs:\s*COMPOSER_STUCK_SILENCE_MS/);
+  assert.match(adapterSource, /STUCK_SILENCE_MS\s*=\s*120000/);
+  assert.match(adapterSource, /timeoutMs:\s*opts\.imageTimeoutMs\s*\?\?\s*480000/);
+  assert.match(adapterSource, /sendError === 'composer_busy_stuck'[\s\S]*error:sendError/);
+});
+
+test('a captured image gets a short stuck-spinner grace without shortening ordinary turns', () => {
+  const start = adapterSource.indexOf('const STUCK_SILENCE_MS');
+  const end = adapterSource.indexOf('async function waitUntilIdle', start);
+  const values = vm.runInNewContext(`${adapterSource.slice(start, end)}; [idleSilenceMs(false), idleSilenceMs(true)]`);
+  assert.deepEqual([...values], [120000, 8000]);
+  assert.match(adapterSource, /if \(captured\.dataUrl\) completedImageTurn = \{ anchor/);
+  assert.match(adapterSource, /if \(capturedImageIsLast\)[\s\S]*visibleStopButton\(\)\?\.click\(\)/);
+});
+
+test('browser-native Enter is attempted before the fragile DOM button', () => {
+  const start = adapterSource.indexOf("report(turnId, 'sending', 'กำลังกดส่ง");
+  const end = adapterSource.indexOf("report(turnId,'submitted'", start);
+  const block = adapterSource.slice(start, end);
+  assert.ok(block.indexOf("type:'sw.forceSend'") >= 0);
+  assert.ok(block.indexOf("type:'sw.forceSend'") < block.indexOf('clickSend('));
+  assert.match(block, /native\?\.ok[\s\S]*outcome_unknown[\s\S]*ไม่กดซ้ำ/);
 });

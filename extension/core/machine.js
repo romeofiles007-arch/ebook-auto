@@ -28,7 +28,7 @@ import { compileBook, calibrate } from '../typeset/compiler.js';
 import { jitter, sleep } from '../transport/index.js';
 import { turnDelay } from './production-mode.js';
 import { generateImage, DEFAULT_IMAGE_MODEL } from './imageApi.js';
-import { wantsAuthorRef, promptWantsAuthorRef, prepareRefImage, dataUrlToFile, AUTHOR_REF_RULE } from './imageRef.js';
+import { wantsAuthorRef, promptWantsAuthorRef, prepareRefImage, dataUrlToFile, enforceAuthorRefPrompt } from './imageRef.js';
 
 export const STEPS = [
   'health',
@@ -92,6 +92,7 @@ const NO_COST_ERRORS = new Set([
   'composer_text_mismatch',
   'send_action_not_accepted',
   'composer_not_found_before_send',
+  'composer_busy_stuck',
 ]);
 const MAX_FREE_RETRIES = 4;
 
@@ -350,6 +351,13 @@ export class Machine {
       if (res.meta?.error === 'outcome_unknown')
         throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
       last = res;
+
+      // วงกลมที่ปุ่มส่งนิ่งครบเกณฑ์ไม่หายด้วยการกดซ้ำในหน้าเดิม และ prompt ยังไม่ถูกส่ง
+      // ข้ามการลองเดิมสี่รอบแล้วส่งหลักฐานให้ CEO เลือก reload ทันที
+      if (res.meta?.error === 'composer_busy_stuck') {
+        i = MAX_RETRIES;
+        break;
+      }
 
       // ยังไม่ได้ส่งอะไรถึง ChatGPT = ยังไม่เสียโควตา ลองใหม่ได้ฟรีโดยไม่กินเพดาน
       if (isNoCostFailure(res) && free < MAX_FREE_RETRIES) {
@@ -1059,6 +1067,8 @@ export class Machine {
             {
               color: P.figureColorOn(this.book),
               palette: this.book.style?.palette || [],
+              // ภาพในเล่มต้องอยู่โลกเดียวกับปก จึงต้องเห็นสเปกของปกที่เลือกไว้จริง
+              cover: this.book.style || null,
               // บอกให้รู้ว่ารูปอื่นในเล่มวาดอะไรไปแล้ว จะได้ไม่วาดซ้ำแนวเดิม
               otherSubjects: figures.filter((x) => x.kind === 'image').map((x) => x.subject || x.caption),
             },
@@ -2426,7 +2436,7 @@ export class Machine {
         // Keep the user-selected reference even when the auditor rewrites its heading.
         if (wantsAuthorRef(this.book, j) || j.needsAuthorRef) {
           j.needsAuthorRef = true;
-          if (!promptWantsAuthorRef(j.prompt)) j.prompt += AUTHOR_REF_RULE;
+          j.prompt = enforceAuthorRefPrompt(j.prompt);
         }
       }
       return n;
@@ -2635,6 +2645,7 @@ export class Machine {
       let saved = false;
       let freeRetries = 0;
       let dupeHits = 0;
+      let ceoRecoveries = 0;
       /**
        * โหมด API ไม่ต้องยุ่งกับหน้าเว็บเลย จึงไม่มีเรื่องห้องแชตให้จัดการ
        *
@@ -2695,6 +2706,9 @@ export class Machine {
          * ไม่งั้นผู้ใช้จะได้ผลไม่เหมือนกันเพียงเพราะสลับโหมด ทั้งที่ตั้งค่าไว้อย่างเดียวกัน
          */
         const needsRef = wantsAuthorRef(this.book, j) || j.needsAuthorRef || promptWantsAuthorRef(j.prompt);
+        // ป้องกันชั้นสุดท้ายก่อนส่ง: แม้แผนกพิสูจน์คำสั่งจะเขียน prompt ใหม่ทั้งก้อน
+        // ตัวเลือกของผู้ใช้ยังต้องชนะประโยค NO HUMAN / ignore attached photo ทุกครั้ง
+        if (needsRef) j.prompt = enforceAuthorRefPrompt(j.prompt);
         const ref = needsRef ? await this.authorRef() : null;
         if (needsRef && !ref?.dataUrl) throw new Halt('หยุดสร้างภาพ: ไม่พบรูปผู้เขียนที่เลือกไว้ กรุณาแนบรูปใน Studio แล้วเริ่มต่อ');
         if (ref) this.log('ok', `ภาพ ${j.name} · แนบรูปผู้เขียน ${ref.name} (${ref.width}×${ref.height}px)`);
@@ -2799,7 +2813,42 @@ export class Machine {
             );
             res = { status: 'ok', text: '', images: [], imageDataUrl: rescued.dataUrl, meta: {} };
           } else if (e instanceof Halt) {
-            throw e; // ส่องแล้วไม่มีภาพจริง หยุดตามเจตนาเดิมเพื่อกันงานซ้อน
+            /**
+             * ยืนยันผลไม่ได้ และส่องหน้าแชตแล้วไม่มีภาพจริง — เดิมหยุดทั้งเล่มตรงนี้เงียบ ๆ
+             *
+             * นี่คือจุดที่ขั้นสร้างภาพตายบ่อยที่สุด และเป็นจุดที่ CEO ไม่เคยถูกปลุกเลย
+             * เพราะ outcome_unknown ถูกโยนข้ามหัวผู้คุมกระบวนการไปตรง ๆ
+             * ผู้ใช้จึงเห็นเป็น "เปิดโหมด CEO ไว้แล้วแต่มันไม่ตื่นสักที"
+             *
+             * ท่าที่ปลอดภัยมีทางเดียวคือล้างหน้าเว็บทิ้งแล้วเริ่มรูปนี้ใหม่จากหน้าที่สะอาด
+             * (ห้ามสั่งลองใหม่ในหน้าเดิม เพราะเทิร์นเก่าอาจยังค้างอยู่จริงและจะกลายเป็นงานซ้อน)
+             */
+            if (ceoRecoveries < 1) {
+              ceoRecoveries++;
+              const decision = await this.askSupervisor({
+                step: `สร้างภาพ: ${j.what}`,
+                status: 'halted',
+                attempts: attempt,
+                lastError: `${e.message} · ส่องหน้าแชตแล้วไม่พบภาพ`,
+                log: this.recentLog(),
+              });
+              if (decision?.action === 'reload_tab') {
+                const done = await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch(() => null);
+                this.log(
+                  done?.ok ? 'ok' : 'warn',
+                  done?.ok
+                    ? `CEO โหลดหน้า ChatGPT ใหม่แล้ว — เริ่ม ${j.what} อีกครั้งจากหน้าที่สะอาด`
+                    : 'CEO สั่งโหลดหน้า ChatGPT ใหม่ แต่โหลดไม่สำเร็จ',
+                );
+                if (done?.ok) {
+                  this.job.imageThreadStarted = false; // หน้าใหม่แล้ว ต้องเปิดห้องของรอบนี้เอง
+                  lastError = e.message;
+                  await sleep(1500);
+                  continue;
+                }
+              }
+            }
+            throw e; // ผู้คุมสั่งหยุด หรือไม่มีผู้คุม — หยุดตามเจตนาเดิมเพื่อกันงานซ้อน
           } else {
             lastError = e?.message || String(e);
             this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: เทิร์นสร้างภาพไม่สำเร็จ (${lastError})`);
@@ -2812,7 +2861,7 @@ export class Machine {
          * ล้มก่อนที่ Prompt จะถึง ChatGPT = ยังไม่เสียโควตา ห้ามนับเป็นครั้งที่ลอง
          * ไม่งั้นรูปหนึ่งรูปจะหมดสิทธิ์ตั้งแต่ยังไม่เคยได้สั่งวาดจริงสักครั้ง
          */
-        if (isNoCostFailure(res) && freeRetries < MAX_FREE_RETRIES) {
+        if (isNoCostFailure(res) && res.meta?.error !== 'composer_busy_stuck' && freeRetries < MAX_FREE_RETRIES) {
           freeRetries++;
           attempt--;
           this.log(
@@ -2826,6 +2875,41 @@ export class Machine {
 
         if (isNoCostFailure(res) || res.meta?.error === 'previous_turn_running') {
           lastError = res.meta?.detail || res.meta?.error || 'prompt_not_sent';
+          // ภาพยังไม่ถูกสั่งจริง จึงไม่มีภาพค้างให้เสียและไม่มีความเสี่ยงส่งซ้ำ
+          // ให้ CEO แก้หน้าเว็บที่ค้างได้ตรงจุด แทนการข้ามภาพแล้วปล่อยทั้งเล่มไม่ครบ
+          if (isNoCostFailure(res) && ceoRecoveries < 1) {
+            ceoRecoveries++;
+            const decision = await this.askSupervisor({
+              step: `สร้างภาพ: ${j.what}`,
+              status: res.status || 'error',
+              attempts: freeRetries + 1,
+              lastError,
+              log: this.recentLog(),
+            });
+            if (decision?.action === 'reload_tab') {
+              const done = await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch(() => null);
+              this.log(done?.ok ? 'ok' : 'warn', done?.ok
+                ? `CEO โหลดหน้า ChatGPT ใหม่แล้ว — จะส่งคำสั่ง ${j.what} อีกครั้ง`
+                : 'CEO สั่งโหลดหน้า ChatGPT ใหม่ แต่โหลดไม่สำเร็จ');
+              if (done?.ok) {
+                freeRetries = 0;
+                attempt--;
+                await sleep(1500);
+                continue;
+              }
+            }
+            if (decision?.action === 'retry') {
+              attempt--;
+              await sleep(1500);
+              continue;
+            }
+            if (decision?.action === 'new_thread' && this.book.threadMode !== 'reuse') {
+              this.job.imageThreadStarted = false;
+              attempt--;
+              await sleep(1000);
+              continue;
+            }
+          }
           this.log('warn', `ภาพ ${j.what}: ยังส่งคำสั่งไม่สำเร็จ (${lastError}) — หยุดก่อนดึงภาพจากคำตอบเก่า`);
           break;
         }
@@ -3654,7 +3738,7 @@ export function plannedImageJobs(book) {
     // ลวดลายพื้นหลังเป็นพื้นผิว ไม่มีคนอยู่ในภาพ การใส่กฎกายวิภาคเข้าไปมีแต่จะชวนให้วาดคนขึ้นมา
     const prompt = j.kind === 'pattern' ? j.prompt : j.prompt + P.HUMAN_ANATOMY_RULE;
     return wantsAuthorRef(book, j)
-      ? { ...j, prompt: prompt + AUTHOR_REF_RULE, needsAuthorRef: true }
+      ? { ...j, prompt: enforceAuthorRefPrompt(prompt), needsAuthorRef: true }
       : { ...j, prompt };
   });
 }

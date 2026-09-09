@@ -10,6 +10,9 @@
  * ไม่ต้องเดา ไม่ต้องวนลูป และขอทีละหลายสิบชิ้นต่อหนึ่งข้อความได้
  */
 
+import { authorVoiceBlock } from './prompts.js';
+import { referenceContext } from './references.js';
+
 export const ITEM_KINDS = {
   quote: {
     label: 'คำคม',
@@ -116,9 +119,9 @@ ${book.trendSeed?.trend ? `หัวข้อตั้งต้น: ${book.trend
 \`\`\``;
 }
 
-export function itemBatchPrompt({ book, outline, theme, count, avoid, startIndex }) {
+export function itemBatchPrompt({ book, outline, theme, count, avoid, startIndex, requestedIds }) {
   const k = ITEM_KINDS[book.itemKind] || ITEM_KINDS.quote;
-  const ids = Array.from({ length: count }, (_, i) => `${theme.n}.${startIndex + i}`);
+  const ids = requestedIds || Array.from({ length: count }, (_, i) => `${theme.n}.${startIndex + i}`);
 
   return `เขียน${k.label} ${count} ชิ้นสำหรับหมวด "${theme.title}"
 
@@ -128,6 +131,8 @@ export function itemBatchPrompt({ book, outline, theme, count, avoid, startIndex
 โทน: ${book.tone}
 
 ข้อกำหนดของแต่ละชิ้น
+${authorVoiceBlock(book)}
+${referenceContext(book)}
 - ${k.brief}
 - ความยาว ${k.len} ประมาณ ${k.lines}
 - แต่ละชิ้นต้องจบในตัว อ่านเดี่ยว ๆ ได้ ไม่อ้างถึงชิ้นอื่น

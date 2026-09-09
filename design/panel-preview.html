@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="th">
+<head><base href="/extension/ui/"><style>body{max-width:355px;margin:auto!important}</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ebook Auto</title>
+  <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="crew.css">
+</head>
+<body><main>
+  <div class="brand">📚 Ebook Auto</div>
+  <p>ติดตามงานที่นี่ · สร้างและจัดการหนังสือใน Studio</p>
+  <button id="studio">เปิด Studio</button>
+  <button id="chat">เปิด ChatGPT</button>
+  <section aria-label="ทีมงานและสถานะล่าสุด">
+    <div id="panelCrew" class="crew-stage"><span class="crew-sprite crew-art" aria-hidden="true"><img class="crew-strip" src="crew/research-work.png" alt=""></span><div class="crew-description"><strong>ทีมงานพร้อมเริ่ม</strong><span>สถานะจะอัปเดตเมื่อ Studio เริ่มทำงาน</span></div><span class="crew-sprite crew-backdrop" aria-hidden="true"><img class="crew-strip" src="crew/research-work.png" alt=""></span></div>
+    <div id="crewRoster" class="crew-roster"></div>
+    <div id="live" class="live" role="status">พร้อมเริ่มงาน</div>
+  </section>
+  <section class="terminal" aria-label="บันทึกการทำงาน">
+    <div class="terminal-head"><b>EBOOK AUTO · LOG</b><button id="logFollow" aria-pressed="true">ตามล่าสุด</button></div>
+    <div id="panelLog" role="log" aria-live="off" tabindex="0"></div>
+    <div class="terminal-foot" id="logUpdated">รอข้อมูลจาก Studio<span aria-hidden="true"> ▋</span></div>
+  </section>
+</main><script type="module" src="/design/panel-preview.js?v=2"></script></body>
+</html>

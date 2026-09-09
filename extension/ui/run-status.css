@@ -1,0 +1,21 @@
+.run-status{position:static;display:grid;gap:6px;min-width:0;padding:12px 16px;margin:10px 0;background:#09100d;color:#b3ecc4;border:1px solid #36664a;border-radius:12px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 4px 16px #0003}
+.run-status strong{color:#b8c5d0}.run-status[data-state=working] strong,.run-status[data-state=done] strong{color:#66ed98}.run-status[data-state=waiting] strong{color:#82c9ff}.run-status[data-state=input] strong{color:#ffdc78}.run-status[data-state=stopped] strong{color:#ff9a93}
+.run-status small{color:#a5b9b0}.run-status button{width:fit-content;margin:2px 0 0;padding:7px 14px;color:#05120b;background:#a7e5ba;border:0;border-radius:6px;font:inherit;cursor:pointer}.run-status button[hidden]{display:none}
+.run-status-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 12px}
+.run-status .run-status-toggle{margin:0;padding:6px 8px;border:1px solid #36664a;background:transparent;color:#b3ecc4;font-size:12px}
+.run-status-reason{overflow-wrap:anywhere;white-space:pre-wrap;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;max-height:4.5em;overflow:hidden}
+.run-status.details-expanded .run-status-reason{display:block;-webkit-line-clamp:unset;max-height:min(40vh,18rem);overflow:auto;scrollbar-color:#36664a #09100d}
+.run-status button:focus-visible,.run-status-reason:focus-visible{outline:2px solid #82c9ff;outline-offset:3px}
+
+/* นาฬิกาจับเวลามุมขวาบน — เล็กพอที่จะไม่แย่งความสนใจ แต่อ่านออกโดยไม่ต้องเพ่ง
+   ลอยอยู่เหนือเนื้อหาเพราะต้องเห็นได้ทุกจังหวะของงาน ไม่ว่าจะเลื่อนหน้าไปถึงไหน */
+.run-timer{position:fixed;top:10px;right:10px;z-index:60;display:flex;align-items:center;gap:7px;padding:5px 10px;border:1px solid #36664a;border-radius:999px;background:#09100de6;color:#b3ecc4;font:600 13px/1 ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums;box-shadow:0 4px 14px #0006;backdrop-filter:blur(3px);pointer-events:none}
+.run-timer[hidden]{display:none}
+.run-timer-value{letter-spacing:.5px}
+.run-timer-face{width:9px;height:9px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px #66ed9822}
+.run-timer[data-state=running]{border-color:#3f8a59;color:#7bf0a8}
+.run-timer[data-state=running] .run-timer-face{animation:run-timer-beat 1s steps(2,end) infinite}
+.run-timer[data-state=paused]{border-color:#7a4a46;color:#ffb0a8;box-shadow:0 0 0 3px #ff9a9310}
+.run-timer[data-state=done]{border-color:#4a6fa8;color:#a9cdff}
+@keyframes run-timer-beat{0%{opacity:1}50%{opacity:.25}100%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.run-timer[data-state=running] .run-timer-face{animation:none}}

@@ -1,0 +1,24 @@
+<!doctype html><html lang="th"><meta charset="utf-8"><base href="/extension/ui/"><link rel="stylesheet" href="studio.css"><main class="app"><h1>ตัวอย่างการเลือกรูปแบบอ้างอิง</h1><label><input id="bm_references" type="checkbox" checked> บรรณานุกรม</label>      <div id="referenceFormatBox" class="reference-format" hidden>
+        <label for="referenceStyle">รูปแบบอ้างอิง — เลือกครั้งเดียว</label>
+        <select id="referenceStyle">
+          <option value="apa">APA 7</option><option value="modern-language-association">MLA</option>
+          <option value="chicago-author-date">Chicago / Turabian (นาม–ปี)</option><option value="harvard-cite-them-right">Harvard (Cite Them Right)</option>
+          <option value="vancouver">Vancouver</option><option value="ieee">IEEE</option>
+        </select>
+        <p id="referenceStyleHint"></p>
+        <div class="reference-example" aria-live="polite"><b>ตัวอย่างตายตัว · ไม่เรียก AI</b><p>ในเนื้อหา: <span id="referenceInlineExample"></span></p><b>รายการท้ายเล่ม</b><p id="referenceBibliographyExample"></p></div>
+        <p class="muted">ระบบจัดรูปแบบรายการท้ายเล่มให้ ตัวอย่างในเนื้อหาเป็นแนวทางสำหรับผู้เขียน ไม่ได้แทรกเลขอ้างอิงหรือเชิงอรรถให้อัตโนมัติ</p>
+      </div>
+<p>จำนวนคำขอเครือข่าย: <output id="networkCount">0</output></p>  <details class="more" data-step="book" id="referenceOptions">
+    <summary>บรรณานุกรม — ค้นแหล่งจริงและเลือกรูปแบบอ้างอิง</summary>
+    <p class="muted">ค้นงานวิชาการจาก Crossref ซึ่งรับข้อมูลจากสำนักพิมพ์ เปิด DOI เพื่ออ่านต้นทางก่อนเลือกใช้ การมี DOI ยืนยันรายการในทะเบียน ไม่ได้รับรองคุณภาพหรือว่ารองรับทุกข้อความในเล่ม</p>
+    <label for="referenceQuery">หัวข้อค้นหรือ DOI (คำค้นภาษาอังกฤษมักได้ผลมากกว่า)</label>
+    <div class="row"><input id="referenceQuery" placeholder="เช่น humor communication หรือ 10.xxxx/xxxxx"><button id="referenceSearch" type="button">ค้นแหล่งอ้างอิง</button></div>
+    <p class="muted">รูปแบบนี้ใช้กับรายการท้ายเล่ม ไม่ได้แทรกเลขอ้างอิงหรือเชิงอรรถในเนื้อหาให้เอง</p>
+    <div id="referenceResults"></div>
+    <p class="muted">ติ๊กเลือกแหล่งที่อ่านแล้วได้เลย ระบบจะจัดรูปแบบให้ตอนเริ่มสร้างเล่ม ไม่ต้องกดยืนยันซ้ำ สำหรับแบบตัวเลขให้เลือกตามลำดับที่ต้องการอ้างในเนื้อหา</p>
+    <textarea id="references" readonly style="min-height:110px;margin-top:10px" placeholder="รายการที่เลือกและจัดรูปแบบแล้วจะปรากฏที่นี่"></textarea>
+    <div id="referencesState" class="muted" role="status">ยังไม่ได้ค้นแหล่งอ้างอิง</div>
+  </details>
+
+<input id="title" value="communication" hidden><input id="bm_about" type="checkbox" hidden><textarea id="aboutAuthor" hidden></textarea></main><script type="module" src="/design/reference-preview.js"></script></html>

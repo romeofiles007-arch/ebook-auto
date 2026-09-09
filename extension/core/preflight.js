@@ -16,6 +16,11 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
   const ok = (id, label) => r.push({ id, label, level: 'ok' });
   const fail = (id, label, detail) => r.push({ id, label, level: 'fail', detail });
   const warn = (id, label, detail) => r.push({ id, label, level: 'warn', detail });
+  const incompleteReviews = Object.entries(book.review || {}).filter(([, r]) =>
+    r?.coverage?.skipped || r?.coverage?.missed?.length ||
+    (r?.coverage && r.coverage.reviewed < r.coverage.sections));
+  if (incompleteReviews.length) fail('review_coverage', 'ยังตรวจคุณภาพไม่ครบ',
+    `ตรวจบท ${incompleteReviews.map(([id]) => id).join(', ')} ใหม่ก่อนส่งออก`);
   if (book.contentMode === 'items' && book.itemQuality?.passed === false)
     fail('item_quality', 'รายชิ้นยังไม่ผ่านการตรวจคุณภาพ', (book.itemQuality.issues || []).slice(0,5).map(x=>`${x.id}: ${x.reason}`).join(' · '));
 

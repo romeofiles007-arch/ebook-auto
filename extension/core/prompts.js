@@ -883,6 +883,7 @@ ${fictionBatchOutputRules([section.id])}`;
  * นี่คือขั้นที่เอาผลตรวจที่จ่ายเงินไปแล้วมาใช้จริง
  */
 export function repairPrompt(args) {
+  if (args.book.contentMode === 'fiction') return `แก้ฉากนิยายเฉพาะปัญหาที่ระบุ รักษา POV น้ำเสียง ตัวละคร กฎโลก เหตุการณ์และปมเดิม ห้ามเปลี่ยนเป็นบทความสอนผู้อ่าน ห้ามเพิ่มข้อเท็จจริงหรือแก้จุดที่ไม่เกี่ยวข้อง\n${bookContext(args.book, args.book.outline, args.book.bible || {}, {})}\nปัญหา: ${JSON.stringify(args.issues)}\nต้นฉบับเต็ม:\n${args.currentText}\n${outputRules(args.section.id, true)}`;
   return proseRepair({ ...args, voice: authorVoiceBlock(args.book), output: outputRules(args.section.id, true) });
 }
 
@@ -893,10 +894,11 @@ export function consistencyPrompt(chapter, sections, bible, book = {}, partLabel
 
 function fictionConsistencyPrompt(chapter, sections, bible, book) {
   const summaries = sections.map((s) => {
-    const summary = bible.sectionSummaries?.[s.id] || String(s.md || '').replace(/\s+/g, ' ').slice(0, 500);
+    const summary = String(s.md || s.text || '');
     return `${s.id} ${s.title}: ${summary || '(ยังไม่มีข้อมูล)'}`;
   }).join('\n');
   const canon = [
+    ...(bible.characters || book.outline?.cast || []).map((x) => `CHARACTER: ${typeof x === 'string' ? x : JSON.stringify(x)}`),
     ...(bible.worldFacts || []).map((x) => `WORLD: ${typeof x === 'string' ? x : JSON.stringify(x)}`),
     ...(bible.timeline || []).map((x) => `TIME: ${typeof x === 'string' ? x : JSON.stringify(x)}`),
     ...(bible.openThreads || []).map((x) => `OPEN: ${typeof x === 'string' ? x : JSON.stringify(x)}`),
@@ -905,8 +907,10 @@ function fictionConsistencyPrompt(chapter, sections, bible, book) {
 
   return `ตรวจบทที่ ${chapter.n} "${chapter.title}" ในฐานะ continuity editor ของนิยาย ${book.fictionGenre || ''}
 
-ฉากในบทนี้
+อ่านต้นฉบับเต็มทุกฉาก ตัดสินเฉพาะฉากที่ส่งมา ปมที่ยังไม่ถึงเวลาคลี่คลายไม่ถือเป็นข้อผิดพลาด
 ${summaries}
+
+ต้องตอบ section_verdicts ครบทุกรหัส: ${sections.map(s => s.id).join(', ')} โดย section เป็นรหัสฉาก และ verdict เป็น ok หรือ needs_revision พร้อม reason ห้ามอ้างว่าตรวจฉากที่ไม่ได้รับ
 
 ${canon ? `Story Bible ปัจจุบัน\n${canon}\n` : ''}
 ${bible.chapterSummaries?.length ? `บทก่อนหน้า\n${bible.chapterSummaries.map((s, i) => `บทที่ ${i + 1}: ${s}`).join('\n')}\n` : ''}
@@ -923,6 +927,7 @@ ${bible.chapterSummaries?.length ? `บทก่อนหน้า\n${bible.chap
 \`\`\`json
 {
   "continuity_issues": [{"section":"2.3","type":"timeline|character|pov|world|relationship|setup_payoff","problem":"...","fix":"..."}],
+  "section_verdicts": [{"section":"${sections[0]?.id || '1.1'}","verdict":"ok","reason":"..."}],
   "duplicates": [{"section":"2.3","with":"2.1","what":"..."}],
   "unpaid_promises": ["..."],
   "reorder": [],
@@ -1085,7 +1090,11 @@ ${fiction ? `\nStory Bible / ตัวละครที่อาจใช้บ
 5. กำหนดตำแหน่ง typography ของ title / subtitle / author เป็นเปอร์เซ็นต์ของ "พื้นที่ปกหน้าไม่รวม bleed" เพื่อให้ระบบวางข้อความจริงทีหลัง
 6. ภาพต้องอ่านออกตอนย่อเป็น thumbnail บนมือถือ
 7. visual_metaphor ต้องเป็นสิ่งที่วาดออกมาได้จริง ไม่ใช่นามธรรม
-8. palette ของแต่ละทิศทางมี 3 สีเท่านั้น
+8. ภาษาภาพของปกเลือกได้ทุกแบบ — ภาพถ่ายเหมือนจริง ภาพวาด ภาพเวกเตอร์ กราฟิกแบน คอลลาจ ภาพพิมพ์ 3D render ฯลฯ — แต่ต้องเลือกให้เหมาะกับ "เนื้อหาและตลาดของเล่มนี้" และต้องบอกใน why_it_fits ว่าทำไมภาษาภาพนี้ถึงเหมาะกับเล่มนี้โดยเฉพาะ
+   ห้ามเลือกเพราะเป็นค่าเริ่มต้นที่ปลอดภัย ถ้าเนื้อหาเป็นเรื่องจริงของคนจริง ภาพถ่ายมักจะจริงใจกว่า ถ้าเป็นแนวคิดที่มองไม่เห็น ภาพวาดหรือกราฟิกอาจสื่อได้ตรงกว่า — ตัดสินจากเนื้อหา ไม่ใช่จากความเคยชิน
+   ภาษาภาพที่เลือกต้องทำออกมาให้ถึงระดับงานขาย: ภาพถ่ายต้องเหมือนภาพถ่ายจริง ภาพวาดต้องเห็นฝีมือและวัสดุจริงของสื่อนั้น ไม่ใช่ภาพเวกเตอร์สำเร็จรูปแบบคลิปอาร์ต
+8b. palette 3 สีที่ต้องส่งมา คือสีที่ "มีอยู่จริงในภาพที่คุณกำลังบรีฟ" เพื่อให้ระบบเอาไปวางตัวหนังสือให้อ่านออก ไม่ใช่รหัสสีที่สั่งให้ย้อมทั้งปกให้เหลือสามสีนี้
+   ภาพมีสีได้มากกว่าสามสีตามธรรมชาติของภาษาภาพที่เลือก ห้ามบังคับให้ทุกอย่างกลายเป็นแผ่นสีแบนสามสี เพราะนั่นคือหน้าตาที่ทำให้ปกดูเก่า
 9. หลีกเลี่ยง cliché ตามหมวดหนังสือ เช่น หลอดไฟ ลูกศรพุ่งขึ้น กระปุกออมสิน จับมือ คนยืนจ้องจอโฮโลแกรมแบบโปสเตอร์เกม เว้นแต่บริบทของเล่มทำให้จำเป็นจริงและคุณมีวิธีตีความใหม่
 9b. ห้ามใช้ "มือส่งสินค้า/พัสดุข้ามโต๊ะให้อีกมือหนึ่งรับ โดยมีแล็ปท็อป/หน้าจอเป็นฉากหลังพร้อมเครื่องหมายถูกหรือ UI ยืนยันการซื้อสำเร็จ" เด็ดขาด — นี่คือ stock photo แม่แบบมาตรฐานของหน้า SaaS/e-commerce landing page ที่ใช้ซ้ำกันทุกเว็บ ต่อให้บริบทเล่มเป็นธุรกิจออนไลน์/ขายของออนไลน์ก็ห้ามใช้ ให้หาเครื่องหมายของผลลัพธ์จริงที่เจาะจงกับเล่มนี้แทน (เช่น สมุดจดออเดอร์ที่เขียนด้วยมือ ใบปะหน้ากล่องพัสดุใบเดียวที่กำลังเขียนที่อยู่ นิ้วกดปุ่มโอนเงินบนมือถือเครื่องเดียวไม่ใช่แล็ปท็อป ฯลฯ) ที่ไม่ซ้ำกับแม่แบบ stock photo นี้
 10. สำหรับ non-fiction ห้ามออกแบบเหมือน stock illustration ทั่วไป ต้องมี visual idea ที่ผูกกับ thesis จริง
@@ -1099,20 +1108,24 @@ ${fiction ? `\nStory Bible / ตัวละครที่อาจใช้บ
 18. visual_metaphor ต้องระบุ subject + action + evidence of outcome ครบ และ why_it_fits ต้องอธิบายว่าผู้อ่านเห็นอะไรแล้วเชื่อมกับ thesis อย่างไรโดยไม่อาศัยชื่อเรื่อง
 19. ค่าทุกอย่างใน schema ตัวอย่างด้านล่างเป็น "คำอธิบายช่อง" ไม่ใช่คำตอบตัวอย่างที่ให้ลอก — โดยเฉพาะ palette ห้ามคืนค่าสีที่ลอกหรือดัดแปลงเล็กน้อยจากตัวอย่าง ต้องเลือกสีขึ้นใหม่จากอารมณ์ ยุคสมัย ฉาก และหมวดของเล่มนี้เท่านั้น
 20. ห้ามใช้ชุดสี "กรมท่าเข้ม + เหลืองทอง/อำพัน + ครีมอ่อน" เป็นคำตอบตั้งต้น และห้ามใช้ภาษาภาพ "ภาพประกอบแบนกึ่งอินโฟกราฟิก / จัดวางของบนโต๊ะทำงานมองจากด้านบน / หน้าจอกับกระดาษที่มีจุดกลมและลูกศร" เว้นแต่เล่มนี้เป็นหนังสือเกี่ยวกับการออกแบบข้อมูลจริง ๆ ชุดสีและภาษาภาพนี้คือค่าเริ่มต้นที่ AI ชอบตอบซ้ำจนปกหนังสือทุกเล่มหน้าตาเหมือนกัน ซึ่งเป็นสิ่งที่ต้องหลีกเลี่ยงที่สุด
-21. ให้ palette และภาษาภาพมาจากหมวด/อารมณ์ของเล่มจริง ๆ และทั้ง 3 ทิศทางต้องต่างกันที่ "กลยุทธ์สี" ด้วย ไม่ใช่ต่างแค่องค์ประกอบภาพ เช่น ทางหนึ่งใช้สีเดียวคุมทั้งปก ทางหนึ่งใช้คู่สีตัดกันแรง ทางหนึ่งใช้โทนเอกรงค์เกือบขาวดำ — เลือกให้เหมาะกับเล่มนี้เอง
-22. ภาษาภาพมีให้เลือกกว้างกว่าภาพประกอบเวกเตอร์: ภาพถ่ายจริงระยะใกล้, ภาพวาดสีน้ำ/สีน้ำมัน, ภาพพิมพ์แกะไม้, ลายเส้นหมึกดำ, คอลลาจกระดาษฉีก, กราฟิกยุค 70s, มินิมอลตัวหนังสือล้วน, ภาพเชิงสัญลักษณ์เหนือจริง ฯลฯ เลือกสิ่งที่ตรงกับเนื้อหาและตลาดของเล่มนี้ที่สุด
+21. ทั้ง 3 ทิศทางต้องต่างกันที่ "ภาษาภาพและวิธีทำภาพ" จริง ๆ ไม่ใช่ต่างแค่ของในภาพ — ต่างที่สื่อที่ใช้ ตัวแบบ ระยะ มุมมอง แสง และวิธีจัดองค์ประกอบ เช่น ทางหนึ่งเป็นภาพถ่ายระยะใกล้มากของมือที่กำลังทำงาน ทางหนึ่งเป็นภาพวาดสีฝุ่นที่เห็นเนื้อสี ทางหนึ่งเป็นคอลลาจกระดาษจริงที่เห็นขอบฉีก
+22. ภาษาภาพเลือกได้กว้าง และต้องระบุให้ชัดว่าใช้แบบไหนกับเพราะอะไร ตัวอย่าง: ภาพถ่ายสารคดีจับจังหวะจริง, ภาพถ่ายบุคคลในสถานที่จริง, ภาพถ่ายระยะใกล้มากของมือ/วัตถุ/พื้นผิว, ภาพวาดสีน้ำ/สีฝุ่น/สีน้ำมันที่เห็นเนื้อสี, ภาพพิมพ์แกะไม้หรือสกรีน, ลายเส้นหมึก, คอลลาจกระดาษจริง, กราฟิกแบนที่ออกแบบมาอย่างตั้งใจ, 3D render ที่ทำวัสดุและแสงจริงจัง, ภาพเชิงสัญลักษณ์เหนือจริง
+   ไม่ว่าเลือกแบบไหน ต้องอธิบายในสเปกว่า "ทำอย่างไร" ให้เจาะจงพอที่คนอื่นทำตามได้ (สื่อ วัสดุ ฝีแปรง/เกรน/เส้น แสง มุมมอง) ไม่ใช่บอกแค่ชื่อสไตล์ลอย ๆ
 23. ปกหน้าทุกทิศทาง "ต้องมีคนอยู่ในภาพ" เพื่อให้ผู้อ่านเชื่อมโยงตัวเองเข้ากับเรื่องได้ — ระบุลงในช่อง human_element ว่าเป็นใคร กำลังทำอะไร อยู่ในช่วงเวลาไหนของเรื่อง และเห็นในระยะใด (เช่น เต็มตัว ครึ่งตัว เฉพาะมือกับสิ่งที่ทำ เงาย้อนแสง หรือมองจากด้านหลัง)
    - นิยาย: ต้องเป็นตัวละคร canon จากรายชื่อที่ให้มา และรักษา appearance ตามข้อมูลนั้น ห้ามสปอยล์ปมสำคัญ
    - non-fiction: ให้เป็นคนที่ผู้อ่านกลุ่มเป้าหมายมองแล้วรู้สึกว่า "นี่คือฉัน" กำลังลงมือทำสิ่งที่หนังสือสอนจริง ๆ ในสถานที่จริง
    - คนในภาพต้องกำลัง "ทำอะไรบางอย่างที่มีความหมายกับเนื้อหา" ไม่ใช่ยืนเฉย ๆ ยิ้มเข้ากล้อง ชูนิ้วโป้ง กอดอก หรือโพสท่าแบบภาพ stock
    - ถ้าเล่มนี้ไม่เหมาะจะมีใบหน้าคนจริง ๆ ให้ใช้การปรากฏตัวแบบอื่นแทนได้ เช่น เห็นเฉพาะมือที่กำลังทำงาน เงา รอยเท้า หรือที่นั่งที่เพิ่งมีคนลุกไป แต่ห้ามไม่มีร่องรอยมนุษย์เลย
-24b. สีของปกต้องตรงกับ "พลังงานของเนื้อหา" ตามบรีฟข้างบน ไม่ใช่ตรงกับความปลอดภัยของหมวดหนังสือ
+24b. สีต้องมาจากฉาก แสง และวัสดุของภาพนั้นเอง ไม่ใช่จากชุดสีที่กำหนดไว้ก่อนแล้วเอาไปย้อมทับ
+   ห้ามฟิลเตอร์ย้อนยุค ซีเปีย ดูโอโทน หรือคุมทั้งปกให้เหลือโทนเดียวจนภาพตาย เว้นแต่เนื้อหาต้องการอย่างนั้นจริงและอธิบายเหตุผลได้
+   ให้เลือก "แสงและวัสดุ" ที่ตรงกับพลังงานของเนื้อหา (เช่น แดดเช้าคมชัด แสงหน้าต่างนุ่ม สีฝุ่นบนกระดาษหยาบ หมึกทับซ้อนบนกระดาษพิมพ์) แล้วปล่อยให้สีออกมาเองจากสิ่งนั้น
    - energy level 4-5 (สดใส คึกคัก มีชีวิต): ต้องมีสีที่สดจริงอย่างน้อย 1 สีในชุด (chroma สูง เห็นแล้วรู้สึกทันที) และพื้นปกโดยรวมต้องสว่างหรือมีสีจัด ห้ามคุมทั้งปกด้วยสีหม่น
    - energy level 3: ให้มีสีเด่นหนึ่งสีตัดกับพื้นชัดเจน ไม่ใช่สามสีที่ความสดใกล้กันจนจมกันเอง
    - energy level 1-2 (หม่น หนัก เศร้า): อนุญาตให้ใช้โทนหม่นได้ แต่ต้องหม่นอย่างตั้งใจและยังมีจุดสว่าง/จุดสีหนึ่งจุดที่ทำให้ปกไม่ตาย
-24c. ห้ามส่งชุดสีที่ "ขุ่นทั้งชุด" มาเป็นคำตอบ ถ้าทั้งสามสีเป็นสีเทาอมน้ำตาล เขียวขี้ม้า เบจหม่น กรมท่าจม หรือสีที่ดูเหมือนถูกเทสีเทาผสมลงไปทุกสี = ปกจะดูเก่าและไม่มีใครหยิบ ให้ทิ้งแล้วเลือกใหม่ เว้นแต่บรีฟระบุ energy level 1-2 อย่างชัดเจน
-24d. ตรวจ contrast ของชุดสีก่อนตอบ: ต้องมีสีที่สว่างที่สุดกับสีที่เข้มที่สุดต่างกันมากพอให้ตัวหนังสือคมและปกเด้งบนจอมือถือ ห้ามสามสีที่มีค่าน้ำหนักใกล้กันหมด
-24e. คนบนปกต้องมี "ชีวิต" และภาษาภาพของคนต้องเลือกให้เข้ากับเนื้อหา ไม่ใช่ค่าเริ่มต้นเดียวกันทุกเล่ม — ระบุใน human_render_style ว่าจะวาดคนด้วยภาษาภาพแบบไหน เช่น ภาพวาดสีน้ำ ลายเส้นหมึกหนา ภาพพิมพ์สกรีนสองสี คอลลาจกระดาษฉีก การ์ตูนกึ่งสมจริง เงาทึบมีมิติ ภาพถ่ายระยะใกล้ หรือภาพวาดแบบโปสเตอร์ยุค 60s
+24c. palette ที่ส่งมาต้องเป็นสีที่ "มีอยู่จริงในภาพนั้น" ไม่ใช่สีที่คิดขึ้นลอย ๆ — ระบุได้ว่ามาจากอะไรในภาพ (เช่น สีผนัง สีเสื้อ สีแสงแดด สีหมึกที่ใช้พิมพ์)
+24d. ตรวจ contrast ก่อนตอบ: ต้องมีสีที่สว่างที่สุดกับสีที่เข้มที่สุดต่างกันมากพอให้ตัวหนังสือที่วางทับภาพยังคมและอ่านออกบนจอมือถือ และบริเวณที่จะวางข้อความต้องเป็นพื้นที่ที่เรียบพอ (ท้องฟ้า ผนัง พื้น เงา พื้นสีเรียบ) ไม่ใช่บริเวณที่รกที่สุดของภาพ
+24e. คนบนปกต้องมี "ชีวิต" — ระบุใน human_render_style ว่าทำภาพคนคนนี้อย่างไรในภาษาภาพที่เลือก: ระยะ (ครึ่งตัว เต็มตัว เฉพาะมือ) มุมมอง (ระดับสายตา สูง ต่ำ จากด้านหลัง) และแสงที่ตกบนตัวเขา ถ้าเป็นภาพถ่ายให้บอกความยาวโฟกัสและระยะชัดลึก ถ้าเป็นภาพวาด/ภาพพิมพ์/คอลลาจให้บอกสื่อ ฝีแปรงหรือเส้น และวิธีจัดการใบหน้า
+   ทั้งสามทิศทางต้องใช้วิธีทำคนที่ต่างกันจริง ห้ามเป็นแบบเดียวกันทั้งสามทาง
    - ต้องระบุท่าทางและอารมณ์ที่อ่านออกจากภาษากาย (กำลังหัวเราะ ก้มหน้าคิด เอื้อมมือ วิ่ง ยืนนิ่งกลางความวุ่นวาย ฯลฯ) ให้ตรงกับ energy ของเล่ม
    - ห้ามคนหน้านิ่งไร้อารมณ์ ยืนตรงกลาง มองกล้อง หรือใบหน้าแบบภาพ stock ที่ใช้กับหนังสือเล่มไหนก็ได้
    - ถ้าเล่มนี้พลังงานสูง คนบนปกต้องกำลังเคลื่อนไหวหรือแสดงอารมณ์ชัด ไม่ใช่ยืนดูสงบ
@@ -1146,14 +1159,14 @@ ${fiction ? `\nStory Bible / ตัวละครที่อาจใช้บ
       "risk": "ข้อควรระวัง",
       "visual_metaphor": "ฉากหรือวัตถุจริงหนึ่งประโยค",
       "human_element": "คนในภาพคือใคร กำลังทำอะไรที่เกี่ยวกับเนื้อหาโดยตรง อารมณ์และท่าทางที่อ่านออกจากภาษากาย เห็นในระยะไหน และวางอยู่ตรงไหนของปก (บังคับต้องมี)",
-      "human_render_style": "ภาษาภาพที่ใช้วาดคนคนนี้โดยเฉพาะ และเหตุผลที่เข้ากับเนื้อหา (ต้องต่างจากอีกสองทิศทาง)",
+      "human_render_style": "วิธีทำภาพคนคนนี้ในภาษาภาพที่เลือก: สื่อที่ใช้ ระยะ มุมมอง แสง และรายละเอียดที่ทำให้เขามีชีวิต (ต้องต่างจากอีกสองทิศทาง)",
       "composition": "อธิบาย focal point, scale, camera/view, negative space และ visual hierarchy",
-      "style": "ภาษาภาพร่วมสมัยที่เหมาะกับเล่ม",
-      "color_strategy": "กลยุทธ์สีของทางนี้ เช่น สีเดียวคุมทั้งปก / คู่สีตัดกันแรง / เอกรงค์เกือบขาวดำ พร้อมบอกว่าตรงกับ energy ระดับไหนของเล่ม",
+      "style": "ภาษาภาพและวิธีทำภาพที่เจาะจงพอให้ทำตามได้ (เช่น ภาพถ่ายสารคดีในโรงงานจริง / ภาพวาดสีฝุ่นบนกระดาษหยาบเห็นเนื้อสี / คอลลาจกระดาษจริงเห็นขอบฉีก / 3D render วัสดุจริงแสงสตูดิโอ) พร้อมเหตุผลสั้น ๆ ว่าเหมาะกับเนื้อหาเล่มนี้อย่างไร",
+      "color_strategy": "สีจะออกมาอย่างไรจากฉาก แสง และวัสดุที่เลือก (มาจากอะไรในภาพบ้าง) ไม่ใช่การกำหนดชุดสีแล้วย้อมทับ",
       "energy_match": "ชุดสีและภาพนี้ให้พลังงานระดับ 1-5 เท่าไร และตรงกับ energy ของเนื้อหาอย่างไร",
-      "palette": [{"hex":"เลือกเองเป็น #RRGGBB ที่มาจากอารมณ์/เนื้อหาของเล่มนี้","name":"ชื่อสีที่หนึ่ง","role":"พื้น | สีเด่น | สีตัด"},{"hex":"#RRGGBB","name":"ชื่อสีที่สอง","role":"..."},{"hex":"#RRGGBB","name":"ชื่อสีที่สาม","role":"..."}],
-      "texture": "...",
-      "lighting": "...",
+      "palette": [{"hex":"#RRGGBB สีที่มีอยู่จริงในภาพนี้","name":"มาจากอะไรในภาพ","role":"พื้นที่ส่วนใหญ่ของภาพ | สีเด่นในภาพ | สีที่ตัดกันมากที่สุด (ใช้วางตัวหนังสือ)"},{"hex":"#RRGGBB","name":"...","role":"..."},{"hex":"#RRGGBB","name":"...","role":"..."}],
+      "texture": "พื้นผิวและวัสดุที่เห็นในภาพ (ผิวไม้ ผ้า โลหะ เนื้อสี เกรนกระดาษ รอยหมึก ฯลฯ)",
+      "lighting": "แหล่งแสง ทิศทาง และคุณภาพแสงในภาพนี้",
       "mood": "สามคำ",
       "background_element": "องค์ประกอบที่จะต่อเนื่องไปปกหลัง",
       "typography": {
@@ -1235,7 +1248,8 @@ ${cards || '(ไม่มีทิศทางส่งมา)'}
   เหตุผล: ข้อความในช่องเหล่านี้ถูกส่งตรงเข้าเครื่องมือสร้างภาพในฐานะคำบรรยายปก ไม่มีขั้นตอนเรียบเรียงคั่นกลาง
   ถ้าเขียนเป็นคำสั่งแก้ เครื่องมือจะเข้าใจว่ากำลังให้แก้ภาพเดิมที่ไม่เคยมีอยู่ แล้วหยุดถามหาไฟล์ต้นฉบับแทนที่จะวาด
   และของเดิมที่ยกมาเพื่อจะห้าม จะถูกวาดออกมาด้วย เพราะมันคือภาพที่บรรยายไว้ชัดที่สุดในประโยคนั้น
-- ถ้าแก้ palette ต้องส่ง 3 สีครบเป็น #RRGGBB ที่สดและมีคอนทราสต์พอตามบรีฟ ห้ามส่งสีหม่นชุดเดิมกลับมา
+- ภาษาภาพของแต่ละทางต้องเหมาะกับเนื้อหาและอธิบายเหตุผลได้ ถ้าทางไหนเลือกภาษาภาพเพราะความเคยชินหรือบอกแค่ชื่อสไตล์ลอย ๆ ให้เขียน style ใหม่ให้เจาะจงว่าทำอย่างไรและเหมาะกับเล่มนี้เพราะอะไร
+- ถ้าแก้ palette ต้องส่ง 3 สีครบเป็น #RRGGBB ที่เป็นสีที่มีอยู่จริงในภาพนั้น และต่างค่าน้ำหนักกันพอให้ตัวหนังสือที่วางทับอ่านออก — palette นี้ใช้เลือกสีตัวหนังสือ ไม่ใช่คำสั่งย้อมสีภาพ
 - ถ้าคนบนปกยังนิ่งหรือไร้อารมณ์ ต้องเขียน human_element และ human_render_style ใหม่ให้มีท่าทาง อารมณ์ และภาษาภาพที่ชัดเจน
 
 ตอบเป็น JSON ในบล็อกโค้ดเดียวเท่านั้น
@@ -1321,6 +1335,11 @@ export const FIGURE_STYLES = {
     label: 'ภาพถ่ายขาวดำ',
     brief: 'high-contrast black and white documentary photograph, clear single subject',
     note: 'เล่มที่ต้องการความสมจริง',
+  },
+  photoColor: {
+    label: 'ภาพถ่ายสี — ชุดเดียวกับปก',
+    brief: 'photorealistic documentary photograph, real people and real objects in a real place, natural available light, natural depth of field, no illustration and no 3D render',
+    note: 'ภาพในเล่มเป็นภาพถ่ายจริงในโลกเดียวกับปก แสงและสีชุดเดียวกัน',
   },
 };
 
@@ -1478,6 +1497,16 @@ export function interiorFigurePrompt(styleKey, subject, widthMm, heightMm = 45, 
     : '';
   const st = FIGURE_STYLES[styleKey] || FIGURE_STYLES.line;
   if (!st.brief) return null;
+  /**
+   * ภาพในเล่มต้องเป็นเล่มเดียวกับปก ไม่ใช่ของที่ถูกวาดขึ้นแยกกันคนละโลก
+   *
+   * คำสั่งภาพในเล่มเดิมไม่เคยรู้เลยว่าปกเล่มนี้หน้าตาอย่างไร มันเห็นแค่ชื่อสไตล์กับชุดสี
+   * ผลคือปกเป็นภาพถ่ายจริงแต่ภาพข้างในเป็นกราฟิกแบน ๆ คนละโทน เปิดดูแล้วเหมือนคนละเล่มปนกัน
+   */
+  const cover = opts.cover || null;
+  const coverEcho = cover?.style
+    ? `\nSAME BOOK AS THE COVER — this figure must sit in the same visual world as this book's cover artwork: ${cover.style}.${cover.lighting ? ` The cover light is ${cover.lighting}; use light of the same kind and direction.` : ''}${cover.texture ? ` Materials and surfaces seen on the cover: ${cover.texture}.` : ''} Match its medium, its level of realism, its light and its colour temperature so the cover and the interior read as one designed book. Do not invent a different look for the inside.`
+    : '';
   // สไตล์บางตัวเขียนล็อกไว้ว่าขาวดำ ถ้าเล่มนี้เอาภาพสีต้องถอดคำพวกนั้นออก
   // ไม่งั้นคำสั่งจะขัดกันเอง ("black line art on white" ปะทะ "full colour")
   const brief = opts.color
@@ -1494,13 +1523,13 @@ CANVAS IS ${orientation}. Use the entire ${aspect} frame as the composition; do 
 Composition: the subject must fill roughly 75-90% of the frame in the requested orientation, with only practical print margins. If the subject is an interface or process, redesign its information architecture horizontally to fit the landscape frame instead of showing a tall page mockup. No border, picture frame, floating sheet, or unused outer canvas.
 Output target: exactly ${Math.round(widthMm)} × ${Math.round(heightMm)} mm at print size, ${pxW} × ${pxH} px, aspect ${aspect}. A different orientation is a failed output. Important content must stay inside the central 90%.
 ${opts.color
-    ? `Colour: full colour, using the book palette as flat fills — ${(opts.palette || [])
+    ? `Colour: full colour that lives in the same world as this book's cover artwork — same kind of light, same colour temperature, same level of saturation. ${(opts.palette || [])
         .map((c) => c?.hex)
         .filter(Boolean)
-        .join(', ') || 'the book palette'}. Keep the line work crisp and add colour as flat areas. No gradients, no photorealistic shading, no rainbow of unrelated hues. Meaning must still read if the colour is removed.`
+        .join(', ') || 'The cover colours'} are colours sampled from the cover, given here so this figure sits beside it without clashing: echo that colour world, do not paste those hex values in as flat brand fills. No candy-bright unrelated hues, no corporate gradient, no rainbow of icon colours. Meaning must still read if the colour is removed.`
     : 'Must remain legible when printed in grayscale at 300 dpi on uncoated paper — rely on shape and contrast, not colour.'}
 Line weight heavy enough to survive printing at ${Math.round(widthMm)} mm wide.
-Negative: no text, no letters, no numbers, no labels, no captions, no watermark, no thin hairlines, no photorealistic clutter.${distinct}`;
+Negative: no text, no letters, no numbers, no labels, no captions, no watermark, no thin hairlines.${coverEcho}${distinct}`;
 }
 
 // ---------- 8. prompt ภาพ ----------
@@ -1561,10 +1590,10 @@ export function frontCoverPrompt(style, book, outline) {
    * แล้วคืนปกโทนหม่นซีดที่ดูเก่าและไม่มีใครหยิบ จึงต้องสั่งซ้ำตรงนี้ด้วย
    */
   const energyRule = energy >= 4
-    ? `Colour energy: this book is bright and alive (energy ${energy}/5${digest?.energy?.label ? ` — ${digest.energy.label}` : ''}). Render the palette at full strength: clean saturated colour, luminous light, crisp contrast. The cover must feel vivid and inviting on a shelf. Do NOT desaturate, grey down, dull, dust, fade, or lay a muddy wash over the palette. No sepia, no washed-out vintage filter, no grey haze.`
+    ? `Light and colour: this book is bright and alive (energy ${energy}/5${digest?.energy?.label ? ` — ${digest.energy.label}` : ''}). Build it on bright, clean, directional light — real punch, crisp highlights, honest shadows — and let the colour come out of that light and those materials at full natural strength.`
     : energy && energy <= 2
-      ? `Colour energy: this book is quiet and heavy (energy ${energy}/5${digest?.energy?.label ? ` — ${digest.energy.label}` : ''}). A restrained low-key palette is right, but it must read as deliberate and rich, never dirty or washed out — keep one clear point of light or one clean accent so the cover is not a dead grey rectangle.`
-      : `Colour energy: keep the palette clean and deliberate. Hold the given hex values true — no grey wash, no dusty filter, no muddy blending that flattens the palette into one dull tone. One colour must clearly dominate and one must clearly contrast with it.`;
+      ? `Light and colour: this book is quiet and heavy (energy ${energy}/5${digest?.energy?.label ? ` — ${digest.energy.label}` : ''}). Use low, soft, directional light — late day, a single window, one lamp — and keep one clear point of light so the frame is not a dead grey rectangle. The darkness must come from the light in the scene, not from a filter laid over a finished image.`
+      : `Light and colour: choose a light source and time of day that suits the subject, then let the colour fall where that light and those materials put it.`;
   const digestCue = digest
     ? `\nWhat this book actually is: ${digest.one_line || ''}${digest.reader_payoff ? ` Reader payoff: ${digest.reader_payoff}.` : ''}${digest.signature_moment ? ` The most visual moment in the book: ${digest.signature_moment}.` : ''}${Array.isArray(digest.concrete_objects) && digest.concrete_objects.length ? ` Real objects from the book you may draw: ${digest.concrete_objects.slice(0, 6).join(', ')}.` : ''}${pb.must_feel ? ` The colours must feel: ${pb.must_feel}.` : ''}${pb.must_not_feel ? ` The colours must NOT feel: ${pb.must_not_feel}.` : ''}`
     : '';
@@ -1582,15 +1611,16 @@ export function frontCoverPrompt(style, book, outline) {
 
   return `Generate a TALL PORTRAIT image, ${spec.widthMm.toFixed(0)}×${spec.heightMm.toFixed(0)} mm (ratio ${spec.ratio}) — noticeably taller than wide. Do NOT return a square or landscape image.
 
-COVER ARTWORK ONLY for a ${book.genre || (book.contentMode === 'fiction' ? 'fiction' : 'non-fiction')} book about ${book.topic}. This artwork is only the visual layer; the system will typeset the exact real title, subtitle and author later according to the GPT art-director layout below.
+COVER ARTWORK ONLY for a ${book.genre || (book.contentMode === 'fiction' ? 'fiction' : 'non-fiction')} book about ${book.topic}.
+Visual language — execute EXACTLY this, chosen by the art director because it fits this book: ${style.style}. Commit to it fully and craft it to a level that sells: if it is photographic, it must read as a real photograph with real light, real material texture and natural depth of field; if it is painted, printed, drawn, collaged or rendered, the medium itself must be visible and convincing — real pigment, ink, paper, tool marks or physically-lit materials. What is never acceptable in any medium is generic clip-art: default flat vector shapes, stock icon sets, and the same weightless corporate illustration used on every website. This artwork is only the visual layer; the system will typeset the exact real title, subtitle and author later according to the GPT art-director layout below.
 
 Art-director direction: ${style.name || 'recommended direction'}.
 Sales angle: ${style.sales_angle || ''}
 Why it fits: ${style.why_it_fits || ''}
 Visual concept: ${style.visual_metaphor}.${digestCue}
 Human subject (REQUIRED — the cover must include a person so readers connect with it): ${style.human_element || 'a person from the book\'s world actively doing the thing this book is about, shown in a real setting — not posing for the camera'}.
-How to render that person: ${style.human_render_style || `in the same visual language as the rest of the cover (${style.style}), given a distinct artistic handling rather than a default realistic render`}.${digest?.human?.feeling ? ` Their emotional state: ${digest.human.feeling}.` : ''}
-The person must be genuinely doing something meaningful to the subject matter, caught mid-action, with readable body language and real feeling in posture, gesture and face${energy >= 4 ? ' — this book is energetic, so give them visible movement or expression, not calm standing' : ''}. Never a smiling model facing the viewer, thumbs-up, crossed arms, blank neutral expression, or any posed stock-photo attitude. An expressionless, generically handsome face staring out of the cover is a failed output. Stylisation is welcome: painted, printed, drawn, collaged or graphic treatment of the figure beats a default photoreal person, as long as it matches the stated visual language. If a full face would weaken the design, show them from behind, in silhouette, cropped at the shoulders, or only their hands at work — but a human presence must be visible and must carry emotion.
+How this person is made: ${style.human_render_style || `made in the same visual language as the rest of the cover (${style.style}), at the same distance, angle and light as the rest of the frame`}.${digest?.human?.feeling ? ` Their emotional state: ${digest.human.feeling}.` : ''}
+The person must be genuinely doing something meaningful to the subject matter, caught mid-action, with readable body language and real feeling in posture, gesture and face${energy >= 4 ? ' — this book is energetic, so give them visible movement or expression, not calm standing' : ''}. Never a smiling model facing the viewer, thumbs-up, crossed arms, blank neutral expression, or any posed stock-photo attitude. An expressionless, generically handsome face staring out of the cover is a failed output. Render them in the same visual language as the rest of the cover, executed at the same level of craft — a photographic cover needs a real person really photographed; a painted, printed, drawn, collaged or rendered cover needs that medium honestly applied to the figure too. What fails in every medium is a generic faceless mannequin or a default stock figure dropped into the scene. If a full face would weaken the design, show them from behind, in silhouette, cropped at the shoulders, or only their hands at work — but a human presence must be visible and must carry emotion.
 Composition: ${style.composition || 'one dominant focal point with strong thumbnail readability'}.
 ${fictionCue}
 
@@ -1607,8 +1637,8 @@ Keep the area under each text block calm and low-detail so the letters stay cris
 - ${zone('author')}
 Do not place faces, critical clues, small focal details, or high-contrast texture underneath those text boxes.`}
 
-Style: ${style.style}, ${style.texture}, ${style.lighting}.
-Palette: strictly ${pal(style)} — no additional dominant hues. Reproduce these hex values faithfully.${style.color_strategy ? ` Colour strategy: ${style.color_strategy}.` : ''}
+Execution: ${style.style}. Surfaces and materials that must be visible: ${style.texture}. Light: ${style.lighting}.
+Colour: let the colour come out of that scene, that light and those materials. ${pal(style)} are colours sampled FROM this intended image, given so the system knows what to typeset the title in — they are NOT a three-colour palette to repaint the whole cover with, and the image may hold far more colour than these. Do not flatten everything into three flat fills, and do not lay a vintage filter, sepia, duotone or single-tone wash over the frame unless the concept genuinely calls for it.${style.color_strategy ? ` Where those colours come from in the frame: ${style.color_strategy}.` : ''}
 ${energyRule}
 Mood: ${style.mood}.
 Thumbnail rule: one unmistakable visual hook; no clutter; readable silhouette and hierarchy at phone thumbnail size.
@@ -1729,14 +1759,14 @@ export function backCoverPrompt(style, book = {}) {
   const baked = backCoverTextBaked(book);
   return `Generate a TALL PORTRAIT image, ${spec.widthMm.toFixed(0)}×${spec.heightMm.toFixed(0)} mm (ratio ${spec.ratio}) — noticeably taller than wide. Do NOT return a square or landscape image.
 
-BACK COVER for the same book. Build it from the written style spec below only — there is no front cover file to look at and none is needed: style ${style.style}, texture ${style.texture}, lighting ${style.lighting}, palette ${pal(style)}.${baked ? '' : ' Artwork only — the system will typeset all real text later.'}
+BACK COVER for the same book, and it must come from THE SAME PRODUCTION as the front cover — same visual language, same medium and craft, same place and world, same light, same materials, same colour of that light. A photographic front means a photograph from the same shoot; a painted, printed, collaged or rendered front means the same hand, tools and stock. Build it from the written spec below only; there is no front cover file to look at and none is needed: visual language ${style.style}, surfaces and materials ${style.texture}, light ${style.lighting}, colours present in that world ${pal(style)}.${baked ? '' : ' Artwork only — the system will typeset all real text later.'}
 
 Concept: a designed continuation of the same visual world described in this style spec — use ${style.background_element} as a recognisable secondary motif, with the main subject transformed, cropped, repeated, or reduced rather than merely deleted.
 Composition: ${baked
     ? `this must look intentionally designed, not like an empty beige page. Place a restrained continuation motif around the top and/or outer edge, covering roughly 20-35% of the canvas. Keep the area holding the text calm and near-uniform in palette color ${style.palette?.[2]?.hex || '#F2EFE9'} so the words read cleanly in dark ${style.palette?.[0]?.hex || '#0F2A3D'}.`
     : `the artwork must fill the whole canvas with real content — a designed back cover, never a blank sheet with a few marks in one corner. Build a full-bleed field: the palette colours cover the entire canvas edge to edge, and the continuation motif is present across the upper third and along both outer edges. The text block will be overlaid later inside the region from roughly 10% to 90% across and 15% to 55% down: keep THAT region calmer and lower in contrast than the rest, but it must still carry the background colour, texture and light of this cover — calmer means quieter artwork, NOT empty paper. A back cover that returns as an almost blank page with a few strokes near the top is a failed output, no matter how tasteful those strokes are.`} Keep the left edge visually compatible with the spine.${authorArea}${authorDrawn}
-Colour rule: hold the palette at the same strength as the front cover — same saturation, same light, same mood. A back cover that comes back greyer, dustier or more washed out than the front is a failed output.${(Number(book.coverDigest?.energy?.level) || 0) >= 4 ? ' This book is bright and energetic: keep the colour clean and vivid, never muted.' : ''}
-Continuity rule: follow the same written style spec (visual language, scale logic, materials, lighting direction and signature motif) so it reads as the same book. Do not invent a second unrelated scene. Do not return a blank background with tiny objects along the bottom.
+Colour rule: this is the same light on the same materials as the front cover — same colour temperature, same contrast, same mood. A back cover that comes back greyer, dustier, warmer, cooler or more washed out than the front reads as a different book and is a failed output.${(Number(book.coverDigest?.energy?.level) || 0) >= 4 ? ' This book is bright and energetic: keep the colour clean and vivid, never muted.' : ''}
+Continuity rule: follow the same written spec (visual language, medium and craft, scale logic, materials, direction and quality of light, and the signature element) so the two covers read as one deliberate piece of work for one book. Do not invent a second unrelated scene. Do not return a blank background with tiny objects along the bottom.
 Meaning rule: the continuation motif must come from the book's actual visual concept and remain recognisable. Abstract corner brackets, empty geometric frames, decorative rectangles, generic corporate panels, and ornamental borders do not count as a back-cover concept and are forbidden.
 Canvas: portrait ${spec.widthMm.toFixed(1)} × ${spec.heightMm.toFixed(1)} mm, exact ratio ${spec.ratio}, edge to edge.
 ${baked ? backCoverTextRule(book) : ''}

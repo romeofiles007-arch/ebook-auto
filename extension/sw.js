@@ -362,6 +362,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 const norm = s => String(s || '').replace(/\s+/g,' ').trim();
                 if (norm(box.innerText) !== norm(expected)) return false;
                 const busy = [...document.querySelectorAll('[data-testid="stop-button"]')].some(b => {
+                  // ChatGPT ค้างปุ่มวงกลมชื่อ Stop answering ไว้ได้แม้ภาพเสร็จแล้ว แต่ปุ่มนั้น disabled
+                  // ผู้ใช้กด Enter เองส่งต่อได้ตามปกติ จึงนับว่า busy เฉพาะปุ่ม Stop ที่กดได้จริง
+                  if (b.disabled || b.getAttribute?.('aria-disabled') === 'true') return false;
                   const r=b.getBoundingClientRect(); return r.width>0 && r.height>0;
                 });
                 if (busy) return false;

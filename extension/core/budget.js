@@ -364,7 +364,7 @@ export function estimateTurns(book) {
   const cap = book.maxCharsPerTurn || 6000;
   const secPerChapter = 4;
   const perSection = budget / (chapters * secPerChapter);
-  const fitPerTurn = Math.max(1, Math.floor(cap / Math.max(1, perSection)));
+  const fitPerTurn = Math.min(book.maxSectionsPerTurn || Infinity, Math.max(1, Math.floor(cap / Math.max(1, perSection))));
   const batches = Math.ceil((chapters * Math.ceil(secPerChapter / fitPerTurn)) * 1.15);
 
   const write = batches;

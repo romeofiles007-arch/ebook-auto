@@ -1,0 +1,19 @@
+.ceo-panel{display:flex;align-items:center;gap:12px;margin:14px 0;padding:12px 0;border-bottom:1px solid #2c3a5c;min-width:0}
+.ceo-scene{position:relative;flex:0 0 120px;width:120px;height:120px;overflow:hidden}
+.ceo-portrait{display:block;width:100%;height:100%;background:url('crew/ceo-animation.png') 0 100%/400% 200% no-repeat;animation:ceo-frames 4.8s steps(1,end) infinite}
+.ceo-panel strong{display:block;font-size:13px;color:#eaf0ff}
+.ceo-detail{display:block;font-size:12px;line-height:1.6;color:#b6c5de;margin-top:5px;overflow-wrap:anywhere}
+.ceo-sleep{display:none;position:absolute;top:6%;left:55%;color:#a8d7ff;font:700 15px/1 Consolas,monospace;animation:ceo-sleep 3s ease-in-out infinite}
+.ceo-panel.sleeping .ceo-portrait{background-position-y:0%;animation-duration:4.8s}
+.ceo-panel.sleeping .ceo-sleep{display:block}
+.ceo-panel.awake .ceo-portrait{background-position-y:100%;animation-duration:4.8s}
+.ceo-panel.working .ceo-portrait{background-position-y:100%;animation-duration:1.8s}
+.ceo-panel.working .ceo-sleep{display:none}
+.ceo-scan{display:none;position:absolute;left:59%;top:45%;width:17%;height:2px;background:#81efff;transform:rotate(-8deg)}
+.ceo-panel.working .ceo-scan{display:block;animation:ceo-scan 1.8s ease-in-out infinite}
+/* Four distinct poses per row. Step between exact cells; never pan across adjacent frames. */
+@keyframes ceo-frames{0%,100%{background-position-x:0%}25%{background-position-x:33.333333%}50%{background-position-x:66.666667%}75%{background-position-x:100%}}
+@keyframes ceo-scan{0%,100%{opacity:.25;transform:translateY(0) rotate(-8deg)}50%{opacity:1;transform:translateY(13px) rotate(-8deg)}}
+@keyframes ceo-sleep{0%,100%{opacity:.4;transform:translateY(2px)}50%{opacity:1;transform:translateY(-4px)}}
+@media(max-width:340px){.ceo-scene{flex-basis:100px;width:100px;height:100px}.ceo-panel{gap:8px}}
+@media(prefers-reduced-motion:reduce){.ceo-panel .ceo-portrait,.ceo-panel .ceo-sleep,.ceo-panel .ceo-scan{animation:none}}

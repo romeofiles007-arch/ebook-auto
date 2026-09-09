@@ -6,16 +6,23 @@
 
 import * as db from '../core/db.js';
 import { mountRunStatus } from './run-status.js';
+import { mountRunTimer, nextClock } from './run-timer.js';
 
 const paintRunStatus = mountRunStatus(document.querySelector('main'), async (state) => {
   if (state.action === 'resume') return resumeGo();
   const target = document.getElementById(state.action || 'start');
   target?.scrollIntoView({behavior:'smooth', block:'start'});
 });
+const paintRunTimer = mountRunTimer(document.body);
+/** นาฬิกาจับเวลาของงานปัจจุบัน — Studio เป็นเจ้าของเวลา แล้วส่งติดไปกับสถานะให้แผงข้างอ่านตาม */
+let jobClock = null;
 function runState(kind, reason, action = '', actionLabel = '') {
   const step = book?.job?.step;
   const run = {kind, reason, action, actionLabel, at:Date.now(), step:STEP_NAMES[step] || step || 'เตรียมเล่ม'};
+  jobClock = nextClock(jobClock, run);
+  run.clock = jobClock;
   paintRunStatus(run);
+  paintRunTimer(run);
   chrome.runtime.sendMessage({type:'ui.activity', event:{id:`run:${run.at}:${Math.random()}`, at:run.at, run}}).catch(()=>{});
 }
 import { productionSettings } from '../core/production-mode.js';
@@ -290,7 +297,8 @@ function setPhase(name, detail = '') {
     else completedDepts.delete(dept);
     // เข้ารอบใหม่ของแผนกนี้ = ล้างผลล้มของรอบก่อน ไม่งั้นแดงค้างทั้งที่กำลังทำใหม่อยู่
     if (dept !== activeDept && deptNotes.get(dept)?.level === 'bad') deptNotes.delete(dept);
-    activeDept = dept;
+    const collaborators = COLLABORATORS_OF_STEP.get(name);
+    activateDepartments(collaborators?.length ? collaborators : [dept]);
   }
   renderSteps();
 }
@@ -365,11 +373,38 @@ const DEPARTMENTS = [
 ];
 
 const DEPT_OF_STEP = new Map(DEPARTMENTS.flatMap((d, i) => d.steps.filter((st) => d.id !== 'proof').map((st) => [st, i])));
+const DEPT_INDEX = new Map(DEPARTMENTS.map((d, i) => [d.id, i]));
+
+/**
+ * หลายแผนกที่รับผิดชอบ "ช่วงงานเดียวกัน" ตามสิ่งที่โค้ดทำจริง
+ *
+ * - outline จบด้วย assignQuotas: นักวางโครงกำหนดตอน ขณะที่ฝ่ายจัดเล่มแบ่งงบหน้าให้แต่ละตอน
+ * - fit วัด/คอมไพล์หน้าและอาจเรียก rewrite: ฝ่ายจัดเล่มคุมจำนวนหน้า นักเขียนแก้เนื้อหาตามแผน
+ *
+ * ขั้น write ปกติยังเป็นนักเขียนคนเดียว ฝ่ายจัดเล่มไม่ได้ทำงานเบื้องหลังพร้อมกัน จึงไม่แสดงเกินจริง
+ */
+const COLLABORATORS_OF_STEP = new Map([
+  ['outline', ['planner', 'layout']],
+  ['fit', ['layout', 'writer']],
+]);
+const IMAGE_DEPT_OF_STAGE = new Map([
+  ['check', 'proof'],
+  ['verify_all', 'proof'],
+  ['compile', 'layout'],
+]);
 
 // ผลงานล่าสุด/ปัญหาล่าสุดของแต่ละแผนก เก็บไว้ระหว่างที่หน้ายังเปิดอยู่
 const deptNotes = new Map();
 const completedDepts = new Set();
 let activeDept = -1;
+let activeDepts = new Set();
+
+function activateDepartments(ids) {
+  const next = [...new Set((ids || []).map((id) => typeof id === 'number' ? id : DEPT_INDEX.get(id)))]
+    .filter((i) => Number.isInteger(i) && i >= 0);
+  activeDepts = new Set(next);
+  if (next.length) activeDept = next[0];
+}
 
 /**
  * ระดับความหนักของผลล่าสุด — ok · warn · bad
@@ -406,7 +441,7 @@ function noteDept(step, text, level = 'ok') {
 const renderSteps = () => {
   $('steps').innerHTML = DEPARTMENTS.map((d, i) => {
     const note = deptNotes.get(i);
-    const progress = i === activeDept && crewWorking ? 'active' : completedDepts.has(i) ? 'done' : '';
+    const progress = activeDepts.has(i) && crewWorking ? 'active' : completedDepts.has(i) ? 'done' : '';
     const severity = note?.level === 'bad' ? 'bad' : note?.level === 'warn' ? 'warn' : '';
     const mark = severity === 'bad' ? '✕' : severity === 'warn' ? '!' : progress === 'active' ? '⟳' : progress === 'done' ? '✓' : i + 1;
     return (
@@ -419,7 +454,10 @@ const renderSteps = () => {
     );
   }).join('');
   const d = DEPARTMENTS[activeDept] || DEPARTMENTS[0];
-  publishActivity('', 'crew', { id: d.id, name: d.name, working: crewWorking,
+  const members = [...activeDepts].map((i) => DEPARTMENTS[i]).filter(Boolean);
+  const visible = members.length ? members : [d];
+  publishActivity('', 'crew', { id: d.id, ids: visible.map((member) => member.id),
+    name: visible.map((member) => member.name).join(' + '), working: crewWorking,
     detail: activeDept < 0 ? (currentMode || 'ทีมงานพร้อมเริ่ม · สร้างหนังสือใน Studio') :
       $('detail').textContent || deptNotes.get(activeDept)?.text || d.role });
 };
@@ -533,15 +571,16 @@ function logMachine(e) {
       compile: '✓ Images OK · กำลังประกอบ Ebook',
     }[e.stage] || `กำลังทำภาพ ${pos} · ${label}`;
     setPhase('images', stage);
+    const stageDept = IMAGE_DEPT_OF_STAGE.get(e.stage) || 'art';
+    activateDepartments([stageDept]);
     if (['verify_all', 'compile'].includes(e.stage)) {
-      activeDept = DEPARTMENTS.findIndex((d) => d.id === 'proof');
       setNote(activeDept, stage, 'ok');
       if (e.stage === 'compile') {
-        completedDepts.add(activeDept);
+        completedDepts.add(DEPT_INDEX.get('proof'));
         completedDepts.add(DEPARTMENTS.findIndex((d) => d.id === 'art'));
         renderSteps();
       }
-    }
+    } else if (e.stage === 'check') renderSteps();
     publishActivity(`${stage}${e.name ? ` · ไฟล์ ${e.name}` : ''}`, e.stage === 'failed' ? 'warn' : 'info');
     status(e.stage === 'failed' ? 'Image Phase 2 หยุดรอแก้' : 'กำลังทำ Image Phase 2');
     // อัปเดตแถวของรูปที่กำลังทำอยู่ในหน้า Phase 2 ให้เห็นสด ๆ ว่าอยู่ขั้นไหน
@@ -553,7 +592,7 @@ function logMachine(e) {
   }
   if (e.type === 'log') {
     addEvent('system', e.level || 'log', e.message);
-    if (/แผนกพิสูจน์คำสั่งภาพ/.test(e.message || '')) activeDept = DEPARTMENTS.findIndex((d) => d.id === 'proof');
+    if (/แผนกพิสูจน์คำสั่งภาพ/.test(e.message || '')) activateDepartments(['proof']);
     noteActiveDept(e.message, LEVEL_OF_LOG[e.level] || 'ok');
     if (book?.lastCompile?.pages)
       showPages(book.lastCompile.pages, expectedPhysicalPages(book), book.pageTolerance ?? 2);
@@ -642,7 +681,8 @@ setInterval(() => {
   if (
     shouldAutoContinue({
       // เปิดโหมด CEO ไว้ = ผู้ใช้สั่งให้ API คุมกระบวนการ ซึ่งรวมถึงการกดทำต่อให้ด้วย
-      unattended: unattended || ceoModeOn(),
+      // แต่ถ้าผู้คุมตัดสินไปแล้วว่าให้หยุด คำตัดสินนั้นต้องยึด ไม่ใช่ถูกเงื่อนไขนี้ปลุกกลับมาทุกห้าวินาที
+      unattended: !ceoStopped && (unattended || ceoModeOn()),
       busy: machineBusy || hasPendingTurn(),
       job: book?.job,
       quietMs: lastActivityAt ? Date.now() - lastActivityAt : 0,
@@ -657,7 +697,7 @@ setInterval(() => {
       autoContinueStep = book.job.step;
       autoContinues = 0;
     }
-    if (autoContinues >= AUTO_CONTINUE_MAX) {
+    if (autoContinues >= autoContinueMax()) {
       /**
        * ครบเพดานที่จุดเดิม — เดิมเลิกทันที ซึ่งถูกเมื่อไม่มีใครตัดสินใจแทนได้
        * แต่ถ้าเปิดโหมด CEO ไว้ ให้มันเป็นคนตัดสินว่าควรกดต่ออีกหรือหยุดจริง
@@ -670,7 +710,7 @@ setInterval(() => {
     lastActivityAt = Date.now(); // กันไม่ให้รอบถัดไปยิงซ้อนระหว่างที่ resumeGo กำลังตั้งตัว
     addEvent(
       'system',
-      `กดทำต่อให้เอง ${autoContinues}/${AUTO_CONTINUE_MAX}`,
+      `กดทำต่อให้เอง ${autoContinues}/${autoContinueMax()}`,
       `งานนิ่งมาเกิน ${AUTO_CONTINUE_QUIET_MS / 1000} วินาทีที่ขั้น ${STEP_NAMES[book.job.step] || book.job.step} โดยไม่มีอะไรเดินอยู่`,
     );
     resumeGo();
@@ -821,6 +861,8 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
   else if (parse === parseTrendAnswer) opts = {...opts, expectedJsonKeys:['topics','trends']};
   else if (opts.label === 'เสนอสารบัญหลายทาง') opts = {...opts, expectedJsonKeys:['directions']};
   let last = null;
+  let bestPartial = null;
+  let bestPartialWhy = '';
   for (let i = 1; i <= attempts; i++) {
     const res = (await transport.send(prompt, opts)) || { status: 'error' };
     let fatal = false;
@@ -839,6 +881,11 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
         return res;
       }
       res.error = out.error;
+      // ได้มาไม่ครบแต่ใช้ได้จริง — เก็บชุดที่ยาวที่สุดไว้ เผื่อลองจนครบแล้วยังไม่ได้ครบ
+      if (out.partial?.length && out.partial.length > (bestPartial?.length || 0)) {
+        bestPartial = out.partial;
+        bestPartialWhy = out.error;
+      }
       fatal = !!out.fatal;
     } else {
       return res;
@@ -856,14 +903,21 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
    * ยังหยุดค้างเหมือนเดิม ซึ่งเป็นจุดที่ค้างจริงบ่อยที่สุด
    */
   const decided = await superviseFailure(last, prompt, opts, { attempts, transport });
-  if (!decided) return last;
+  if (!decided) return bestPartial ? { ...last, data: bestPartial, error: null, short: bestPartialWhy } : last;
   if (decided.status !== 'ok') return { ...decided, error: turnErrorMessage(decided) };
   if (parse) {
+    let out = null;
     try {
-      const out = parse(decided);
-      if (!out || out.error || out.data == null) return last;
-      decided.data = out.data;
-    } catch (_) { return last; }
+      out = parse(decided);
+    } catch (_) {
+      out = null;
+    }
+    if (!out || out.error || out.data == null) {
+      const rescued = out?.partial?.length > (bestPartial?.length || 0) ? out.partial : bestPartial;
+      if (rescued?.length) return { ...decided, data: rescued, error: null, short: out?.error || bestPartialWhy };
+      return last;
+    }
+    decided.data = out.data;
   }
   return decided;
 }
@@ -1136,14 +1190,16 @@ function renderTopicNamed(namePick, box) {
   box.querySelector('[data-back-topics]').onclick = () => renderTopicChoices();
 }
 
-function renderTopicChoices() {
+function renderTopicChoices(short = '') {
   const box = $('trendIdeas');
   if (!trendPool.length) {
     box.innerHTML = '<b>ยังไม่มีหัวข้อ</b><div class="muted">กดปุ่มสุ่มอีกครั้งเพื่อให้ ChatGPT เสนอหัวข้อใหม่</div>';
     return;
   }
   box.innerHTML =
-    '<b>เลือกหัวข้อที่สนใจ</b><div class="titleIdeaList">' +
+    '<b>เลือกหัวข้อที่สนใจ</b>' +
+    (short ? `<div class="muted">${esc(short)} · กด “สุ่มใหม่” เพื่อขอชุดเต็มอีกครั้ง</div>` : '') +
+    '<div class="titleIdeaList">' +
     trendPool
       .map(
         (t, i) =>
@@ -1167,13 +1223,33 @@ function renderTopicChoices() {
 }
 
 /** อ่านรายการชื่อจากคำตอบ — ใช้ร่วมกันทั้งปุ่มคิดชื่อและการตั้งชื่อจากหัวข้อ */
+/**
+ * ขอมาสิบ ได้มาหนึ่ง แล้วระบบบอกว่าสำเร็จ — นั่นคือรายการที่เลือกไม่ได้จริง
+ *
+ * ตัวอ่าน JSON กู้คำตอบที่ถูกตัดกลางคันได้ (salvageTruncatedJson) ซึ่งดีเวลาคำตอบเกือบครบ
+ * แต่พอคำตอบขาดตั้งแต่รายการที่สอง มันจะกู้ได้แค่ก้อนแรกก้อนเดียวแล้วผ่านฉลุย
+ * เพราะเกณฑ์เดิมคือ "มีอย่างน้อยหนึ่ง" หน้าจอจึงขึ้นตัวเลือกเดียวให้เลือก
+ * ทั้งที่คำสั่งขอไปสิบข้อ และผู้ใช้ไม่มีทางรู้ว่านั่นคือคำตอบที่ขาด ไม่ใช่คำตอบที่โมเดลตั้งใจ
+ *
+ * ขั้นต่ำตั้งไว้ราวครึ่งหนึ่งของที่ขอ ต่ำกว่านั้นให้ลองใหม่ แต่ต้องไม่ทิ้งของที่ได้มาแล้ว
+ * ถ้าลองจนครบแล้วยังได้เท่าเดิม ให้เอาที่มีขึ้นจอพร้อมบอกตรง ๆ ว่าได้ไม่ครบ
+ */
+const MIN_TITLE_CHOICES = 4;
+const MIN_TOPIC_CHOICES = 5;
+
+const shortListError = (got, want, what) =>
+  `ได้${what}มา ${got} รายการ จากที่ขอไว้อย่างน้อย ${want} — คำตอบน่าจะถูกตัดกลางคัน`;
+
 function parseTitleAnswer(r) {
   const parsed = parseJson(r.text);
   const list = (parsed?.titles || [])
     .map((x) => (typeof x === 'string' ? { title: x } : x))
     .filter((x) => x?.title)
     .slice(0, 12);
-  return list.length ? { data: list } : { error: `ไม่พบรายการชื่อในคำตอบ ${answerEvidence(r.text, parsed)}` };
+  if (!list.length) return { error: `ไม่พบรายการชื่อในคำตอบ ${answerEvidence(r.text, parsed)}` };
+  if (list.length < MIN_TITLE_CHOICES)
+    return { error: shortListError(list.length, MIN_TITLE_CHOICES, 'ชื่อหนังสือ'), partial: list };
+  return { data: list };
 }
 
 /** อ่านรายการหัวข้อจากคำตอบ แล้วแปลงเป็นรูปที่ส่วนอื่นของระบบใช้อยู่แล้ว (trend / why_now) */
@@ -1186,9 +1262,10 @@ function parseTrendAnswer(res) {
     .map((x) => ({ trend: x?.topic || x?.trend || '', why_now: x?.why || x?.why_now || '' }))
     .filter((x) => x.trend)
     .slice(0, 12);
-  return pool.length
-    ? { data: pool }
-    : { error: `ไม่พบรายการหัวข้อในคำตอบ ${answerEvidence(raw, parsed)}` };
+  if (!pool.length) return { error: `ไม่พบรายการหัวข้อในคำตอบ ${answerEvidence(raw, parsed)}` };
+  if (pool.length < MIN_TOPIC_CHOICES)
+    return { error: shortListError(pool.length, MIN_TOPIC_CHOICES, 'หัวข้อ'), partial: pool };
+  return { data: pool };
 }
 
 async function generateTrendIdeas() {
@@ -1222,7 +1299,7 @@ async function generateTrendIdeas() {
     );
     if (res?.error) throw new Error(res.error);
     trendPool = res.data;
-    renderTopicChoices();
+    renderTopicChoices(res.short);
     setMode(currentMode);
     status('เลือกหัวข้อที่สนใจได้เลย');
     if (!autoPilot()) runState('input', 'เลือกหัวข้อบนหน้าจอ Studio', 'trendIdeas', 'เปิดตัวเลือกหัวข้อ');
@@ -1952,11 +2029,11 @@ function syncCeoMode() {
 function makeSupervisor() {
   if (!ceoModeOn()) return null; // ไม่ได้เปิดโหมด หรือไม่มีคีย์ = เดินด้วยตัวกู้อัตโนมัติเดิมทุกอย่าง
   const owner = book;
-  const publishCeo = (working, detail, requestId) => {
+  const publishCeo = (working, detail, requestId, until) => {
     const at = Date.now();
     chrome.runtime.sendMessage({ type: 'ui.activity', event: {
       id: `ceo-${at}-${Math.random()}`, at,
-      ceo: { working, detail, requestId, at, until: working ? at + 75000 : 0 },
+      ceo: { working, called: true, detail, requestId, at, until },
     } }).catch(() => {});
   };
   const ask = async (prompt, label) => {
@@ -1984,7 +2061,8 @@ function makeSupervisor() {
   };
   return async (ctx) => {
     const requestId = `ceo-${Date.now()}-${Math.random()}`;
-    publishCeo(true, `กำลังตรวจปัญหา · ${ctx.step || 'เตรียมเล่ม'}`, requestId);
+    const visualUntil = Date.now() + 5 * 60 * 1000;
+    publishCeo(true, `กำลังตรวจปัญหา · ${ctx.step || 'เตรียมเล่ม'}`, requestId, visualUntil);
     let resultDetail = 'พักรอ · ทีมงานดำเนินการต่อได้';
     try {
     const res = await ask(supervisorPrompt(ctx), 'ผู้คุมกระบวนการ: เลือกท่าต่อไป');
@@ -1994,7 +2072,7 @@ function makeSupervisor() {
     resultDetail = decision.action === 'stop' ? `หยุดรอคุณ · ${decision.reason || 'ยังแก้ปัญหาไม่ได้'}` : `ตัดสินใจแล้ว · ${decision.reason || decision.action}`;
     if (decision.action !== 'repair_json' || !ctx.raw) return decision;
     // ซ่อมรูปแบบจากของที่เว็บตอบมาแล้ว — ไม่สั่งเว็บใหม่ จึงไม่กินโควตาข้อความ
-    publishCeo(true, 'กำลังซ่อมรูปแบบคำตอบ · ตรวจรายการบนจอ', requestId);
+    publishCeo(true, 'กำลังซ่อมรูปแบบคำตอบ · ตรวจรายการบนจอ', requestId, visualUntil);
     const fixed = await ask(repairPrompt(ctx.raw, ctx.wantKeys || []), 'ผู้คุมกระบวนการ: ซ่อมรูปแบบคำตอบ');
     const repaired = parseJson(fixed.text);
     if (!repaired) throw new Error('ซ่อมรูปแบบคำตอบไม่สำเร็จ');
@@ -2003,7 +2081,7 @@ function makeSupervisor() {
       resultDetail = `CEO ติดปัญหา · ${e?.message || e}`;
       throw e;
     } finally {
-      publishCeo(false, resultDetail, requestId);
+      publishCeo(false, resultDetail, requestId, visualUntil);
     }
   };
 }
@@ -2053,6 +2131,29 @@ let autoContinueTotal = 0;
 let askingResume = false;
 
 /**
+ * เปิดโหมด CEO ไว้ = ให้มันตัดสินเร็วขึ้น ไม่ใช่รอกดต่อเปล่า ๆ สามรอบก่อน
+ *
+ * รอบกดต่อหนึ่งรอบไม่ได้ใช้เวลา 45 วินาที แต่ใช้เวลาเท่ากับการเดินขั้นนั้นใหม่ทั้งขั้น
+ * ขั้นสร้างภาพที่ล้มด้วยการหมดเวลาใช้เวลารอบละหลายนาที กว่าจะครบสามรอบก็ผ่านไปครึ่งชั่วโมง
+ * ผู้ใช้จึงเห็นเป็น "เปิดโหมด CEO ไว้แล้วแต่มันไม่ตื่นสักที" ทั้งที่มันแค่ยังไม่ถึงคิว
+ * กดต่อฟรีหนึ่งรอบก็พอที่จะพิสูจน์ว่าอาการหายเองได้ไหม ถ้ากลับมาที่เดิมคือถึงคิวของ CEO แล้ว
+ */
+function autoContinueMax() {
+  return ceoModeOn() ? 1 : AUTO_CONTINUE_MAX;
+}
+
+/**
+ * ผู้คุมกระบวนการสั่งหยุดแล้ว ต้องหยุดจริง
+ *
+ * เดิม stopHere() หยุดด้วยการปลดธง unattended อย่างเดียว แต่นาฬิกาเฝ้าดูอ่านเงื่อนไขเป็น
+ * `unattended || ceoModeOn()` ซึ่งยังจริงอยู่ตลอดเมื่อเปิดโหมด CEO ไว้
+ * อีกห้าวินาทีถัดมาเงื่อนไขจึงเข้าครบเหมือนเดิมแล้ววนกลับมาถาม CEO ซ้ำไม่รู้จบ
+ * — เสียค่า API ทุกรอบโดยที่งานไม่ขยับสักนิด และบันทึกก็เต็มไปด้วยข้อความหยุดซ้ำ ๆ
+ * ธงนี้ถูกล้างเมื่อคนสั่งเริ่มหรือสั่งทำต่อเองเท่านั้น ซึ่งเป็นความหมายของ "รอให้คุณมาดู" พอดี
+ */
+let ceoStopped = false;
+
+/**
  * ครบเพดานที่จุดเดิมแล้ว — ให้ผู้คุมกระบวนการตัดสินว่าจะกดต่ออีกหรือหยุดจริง
  * ไม่มีผู้คุม (ไม่ได้เปิดโหมด CEO) = หยุดตามเดิม เพราะไม่มีใครรับผิดชอบการตัดสินใจนั้น
  */
@@ -2060,6 +2161,7 @@ async function askResumeDecision() {
   if (askingResume) return;
   const stopHere = (why) => {
     unattended = false;
+    ceoStopped = true;
     addEvent('system', 'เลิกกดทำต่อให้เอง', why);
     status('งานค้างซ้ำที่เดิม — หยุดกดต่อให้เองแล้ว รอให้คุณมาดู');
   };
@@ -2127,6 +2229,7 @@ async function runFullAuto() {
 
   fullAutoRunning = true;
   unattended = true; // ผู้ใช้สั่งให้เดินจนจบเอง ตัวกดทำต่อให้เองจึงมีสิทธิ์ทำงานตั้งแต่ตรงนี้
+  ceoStopped = false; // เริ่มรอบใหม่ = ล้างคำตัดสินหยุดของผู้คุมจากรอบก่อน
   autoContinues = 0;
   autoContinueStep = '';
   autoContinueTotal = 0;
@@ -2559,6 +2662,8 @@ async function resumeGo() {
 
   $('resume').classList.add('hidden');
   $('start').classList.add('hidden');
+  // มีคนมาดูแล้วและสั่งเดินต่อ คำตัดสิน "หยุดรอคุณ" ของผู้คุมจึงหมดหน้าที่
+  ceoStopped = false;
   fullAutoRunning = book.automation?.mode === 'full';
   if (book.job.step === 'done') return finish();
   if (['gate_images', 'images'].includes(book?.job?.step)) {
@@ -2610,6 +2715,7 @@ async function startNewBook() {
   completedDepts.clear();
   resetReferenceSources();
   activeDept = -1;
+  activeDepts.clear();
   renderSteps();
   book = null;
   machine = null;

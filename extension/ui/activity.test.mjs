@@ -22,12 +22,20 @@ test('concurrent activity keeps ordered bounded history and restores crew after 
   const session = {};
   const send = worker(session);
   await Promise.all(Array.from({ length: 220 }, (_, i) => send({ type: 'ui.activity', event: { id: String(i), at: i, message: `event ${i}` } })));
-  await send({ type: 'ui.activity', event: { id: 'crew', at: 221, message: '', crew: { id: 'art', working: true } } });
+  await send({ type: 'ui.activity', event: { id: 'crew', at: 221, message: '', crew: { id: 'art', ids: ['art', 'proof'], working: true } } });
   const snapshot = await worker(session)({ type: 'ui.activitySnapshot' });
   assert.equal(snapshot.events.length, 200);
   assert.equal(snapshot.events[0].id, '20');
   assert.equal(snapshot.events.at(-1).id, '219');
   assert.equal(snapshot.crew.id, 'art');
+  assert.deepEqual(snapshot.crew.ids, ['art', 'proof']);
+  const run={kind:'stopped',reason:'connection lost',at:222,action:'resume'};
+  await send({type:'ui.activity',event:{id:'run',at:222,run}});
+  const restored=await worker(session)({type:'ui.activitySnapshot'});
+  assert.deepEqual(restored.run,run);
+  const ceo={working:true,at:223,until:75223,requestId:'decision-1'};
+  await send({type:'ui.activity',event:{id:'ceo',at:223,ceo}});
+  assert.deepEqual((await worker(session)({type:'ui.activitySnapshot'})).ceo,ceo);
 });
 test('Studio routes image generation to art instead of proof', async () => {
   const studio = await readFile(new URL('./studio.js', import.meta.url), 'utf8');
@@ -35,6 +43,26 @@ test('Studio routes image generation to art instead of proof', async () => {
   const end = studio.indexOf('// ผลงานล่าสุด', start);
   const result = vm.runInNewContext(`${studio.slice(start, end)}; DEPARTMENTS[DEPT_OF_STEP.get('images')].id`);
   assert.equal(result, 'art');
+});
+test('Studio declares only real same-phase department collaboration', async () => {
+  const studio = await readFile(new URL('./studio.js', import.meta.url), 'utf8');
+  const start = studio.indexOf('const DEPARTMENTS =');
+  const end = studio.indexOf('// ผลงานล่าสุด', start);
+  const result = vm.runInNewContext(
+    `${studio.slice(start, end)}; ({outline: COLLABORATORS_OF_STEP.get('outline'), fit: COLLABORATORS_OF_STEP.get('fit'), write: COLLABORATORS_OF_STEP.get('write')})`,
+  );
+  assert.deepEqual([...result.outline], ['planner', 'layout']);
+  assert.deepEqual([...result.fit], ['layout', 'writer']);
+  assert.equal(result.write, undefined);
+});
+test('image status moves from proofing to artwork and final layout accurately', async () => {
+  const studio = await readFile(new URL('./studio.js', import.meta.url), 'utf8');
+  const start = studio.indexOf('const DEPARTMENTS =');
+  const end = studio.indexOf('// ผลงานล่าสุด', start);
+  const result = vm.runInNewContext(
+    `${studio.slice(start, end)}; ['check','generate','verify_all','compile'].map((stage) => IMAGE_DEPT_OF_STAGE.get(stage) || 'art')`,
+  );
+  assert.deepEqual([...result], ['proof', 'art', 'proof', 'layout']);
 });
 test('completed step clears only a transient send warning, retaining unresolved findings and partial images', async () => {
   const studio = await readFile(new URL('./studio.js', import.meta.url), 'utf8');

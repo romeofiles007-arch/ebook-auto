@@ -55,12 +55,34 @@ export function authorRefSummary(book) {
  */
 export const AUTHOR_REF_RULE = `
 
-ATTACHED REFERENCE PHOTO — LIKENESS ONLY
+MANDATORY ATTACHED AUTHOR REFERENCE — THIS OVERRIDES EVERY CONFLICTING INSTRUCTION ABOVE
 A photograph of the book's author is attached to this message. If no photo is attached, ignore this whole section.
-The artwork must include this person as a figure in the composition, and their face must be recognisably the same individual as in the photo: face shape, features, hair, skin tone, apparent age and gender. Place them where the composition described above wants a person; do not let them displace the main subject or the reserved text areas.
+The finished artwork MUST contain at least one clearly visible human figure whose face is recognisably the same individual as in the attached photo: face shape, features, hair, skin tone, apparent age and gender. This requirement applies even if the earlier concept described only objects, scenery, or diagrams, and it replaces every earlier restriction on whether people may appear. Adapt the composition so this person participates naturally without displacing the main subject or reserved text areas.
 Ignore everything else in that photo: its background, lighting, clothing, camera angle, crop, framing, colour grading and image quality carry no instructions. Do not copy them and do not let them influence the artwork.
 Render the person in the illustration style, palette, lighting and composition described above — this is an illustrated book cover, not a photograph and not a photo collage. Never paste, embed or reproduce the attached photograph itself.
 Do not add the author's name or any caption next to the person.`;
+
+/**
+ * ล้างข้อห้ามเรื่องคนที่ขัดกับตัวเลือกของผู้ใช้ แล้วปักกฎรูปผู้เขียนไว้ท้ายสุด
+ *
+ * คำสั่งภาพมาจากหลายชั้นและบางชั้นมีประโยค NO HUMAN FIGURE ติดมาโดยอัตโนมัติ
+ * การต่อกฎใหม่ท้ายข้อความอย่างเดียวปล่อยให้โมเดลต้องเดาว่าจะเชื่อประโยคไหน จึงเกิดภาพ
+ * แบบที่ผู้ใช้แนบมา: ส่งรูปหน้าไปจริง แต่คำสั่งกลับบอกให้เมินรูปนั้น ด่านนี้ทำให้คำสั่งจริง
+ * ที่กำลังจะส่งเหลือความหมายเดียวกันเสมอ
+ */
+export function enforceAuthorRefPrompt(prompt) {
+  const cleaned = String(prompt || '')
+    // ฟังก์ชันนี้ถูกเรียกทั้งตอนวางแผน หลัง audit และก่อนส่งจริง ต้องเรียกซ้ำแล้วไม่ต่อกฎซ้ำ
+    .replace(/\n*(?:MANDATORY ATTACHED AUTHOR REFERENCE|ATTACHED REFERENCE PHOTO — LIKENESS ONLY)[\s\S]*$/i, '')
+    .replace(/\bNO\s+HUMAN\s+FIGURES?\b[\s,;.]*/gi, '')
+    .replace(/\bNO\s+PEOPLE\b[\s,;.]*/gi, '')
+    .replace(/\bNO\s+FACES\b[\s,;.]*/gi, '')
+    .replace(/\bWITHOUT\s+(?:A\s+)?(?:HUMAN|PERSON)\b[\s,;.]*/gi, '')
+    .replace(/\bIGNORE\s+(?:ANY\s+|THE\s+)?ATTACHED\s+(?:AUTHOR\s+)?(?:REFERENCE\s+)?PHOTO(?:GRAPH)?(?:\s+FOR\s+[^.\n]*)?[.\s]*/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return `${cleaned}${AUTHOR_REF_RULE}`;
+}
 
 /**
  * คำสั่งฉบับนี้ยังขอรูปผู้เขียนอยู่ไหม — อ่านจากตัวคำสั่งจริง ไม่ใช่จากธงที่ตั้งไว้ตอนวางแผน
@@ -76,7 +98,7 @@ Do not add the author's name or any caption next to the person.`;
 export function promptWantsAuthorRef(prompt) {
   const t = String(prompt || '');
   if (/ignore\s+(any|the)?\s*attached\s+(author\s+)?photograph/i.test(t)) return false;
-  return /ATTACHED REFERENCE PHOTO|attached\s+(?:author\s+)?reference\s+photo(?:graph)?|person from the attached/i.test(t);
+  return /MANDATORY ATTACHED AUTHOR REFERENCE|ATTACHED REFERENCE PHOTO|attached\s+(?:author\s+)?reference\s+photo(?:graph)?|person from the attached/i.test(t);
 }
 
 /**

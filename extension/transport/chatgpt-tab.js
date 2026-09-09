@@ -24,6 +24,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     clearTimeout(p.timer);
     p.resolve(msg);
   } else if (msg.type === 'gpt.progress') {
+    // Reply time starts after acceptance, not while loading or uploading.
+    if (msg.phase === 'waiting' && !p.answerStarted) {
+      p.answerStarted = true;
+      clearTimeout(p.timer);
+      p.timer = setTimeout(p.expire, p.answerBudget);
+    }
     p.onProgress(msg);
   }
   return false;
@@ -62,14 +68,17 @@ export class ChatGptTabTransport {
     const imageTimeoutMs = opts.wantImages ? (opts.imageTimeoutMs ?? 240000) : 0;
     // แนบไฟล์คือการอัปโหลดจริงผ่านหน้าเว็บ ต้องเผื่อเวลาให้ ไม่งั้นเทิร์นที่แนบรูปจะถูกตัดจบทั้งที่กำลังอัปโหลดอยู่
     const attachMs = opts.attachments?.length ? 45000 : 0;
-    const outerTimeoutMs = answerTimeoutMs + imageTimeoutMs + attachMs + 30000;
+    const outerTimeoutMs = 600000 + attachMs; // bounded preparation, including an existing busy turn
+    const startedAt = Date.now();
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
+      const complete = (result) => resolve({...result, meta:{...result.meta, elapsedMs:Date.now()-startedAt}});
+      const expire = () => {
         pending.delete(turnId);
-        resolve({ turnId, status: 'timeout', text: '' });
-      }, outerTimeoutMs);
+        complete({ turnId, status: 'timeout', text: '', meta:{error:'outcome_unknown', detail:'ขาดการยืนยันผลจากแท็บ ยังไม่ส่งซ้ำเพื่อป้องกันงานซ้อน'} });
+      };
+      const timer = setTimeout(expire, outerTimeoutMs);
 
-      pending.set(turnId, { resolve, timer, onProgress: this.onProgress });
+      pending.set(turnId, { resolve:complete, timer, expire, answerBudget:(opts.wantImages ? imageTimeoutMs : answerTimeoutMs)+attachMs+30000, onProgress: this.onProgress });
 
       chrome.runtime
         .sendMessage({
@@ -79,6 +88,8 @@ export class ChatGptTabTransport {
           opts: {
             newThread: !!opts.newThread,
             wantImages: !!opts.wantImages,
+            expectedJsonKeys: opts.expectedJsonKeys,
+            recoverCompletedSetup: !opts.wantImages && opts.recoverCompletedSetup !== false,
             expectModel: opts.expectModel ?? this.expectModel,
             timeoutMs: answerTimeoutMs,
             imageTimeoutMs: opts.wantImages ? imageTimeoutMs : undefined,
@@ -88,13 +99,13 @@ export class ChatGptTabTransport {
         })
         .then((ack) => {
           if (!ack?.ok) {
-            clearTimeout(timer);
+            clearTimeout(pending.get(turnId)?.timer);
             pending.delete(turnId);
             resolve({ turnId, status: 'error', text: '', meta: { error: ack?.error } });
           }
         })
         .catch((e) => {
-          clearTimeout(timer);
+          clearTimeout(pending.get(turnId)?.timer);
           pending.delete(turnId);
           resolve({ turnId, status: 'error', text: '', meta: { error: String(e) } });
         });

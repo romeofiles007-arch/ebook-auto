@@ -22,6 +22,7 @@ function fixture({ supervisor = null, total = 0 } = {}) {
     status: () => {},
     resumeGo: () => events.push('RESUME'),
     unattended: true,
+    ceoModeOn: () => !!supervisor,
     autoContinues: 3,
     lastActivityAt: 0,
     AUTO_CONTINUE_MAX: 3,
@@ -64,4 +65,38 @@ test('ถามผู้คุมแล้วพัง = หยุดไว้�
   await f.ask();
   assert.equal(f.events.includes('RESUME'), false);
   assert.match(f.events.join('\n'), /เน็ตหลุด/);
+});
+
+/**
+ * คำตัดสิน "หยุดรอคุณ" ต้องยึดจริง
+ *
+ * นาฬิกาเฝ้าดูอ่านเงื่อนไขเป็น `unattended || ceoModeOn()` การปลดธง unattended อย่างเดียว
+ * จึงไม่มีผลเลยเมื่อเปิดโหมด CEO ไว้ อีกห้าวินาทีก็วนกลับมาถามซ้ำ เสียค่า API ทุกรอบ
+ * โดยที่งานไม่ขยับ ต้องมีธงของตัวเองที่ล้างได้ด้วยมือคนเท่านั้น
+ */
+test('ผู้คุมสั่งหยุด = ปักธงหยุดไว้ ไม่ให้นาฬิกาปลุกซ้ำทุกห้าวินาที', async () => {
+  const f = fixture({ supervisor: async () => ({ action: 'stop', reason: 'อาการเดิมซ้ำ' }) });
+  await f.ask();
+  assert.equal(vm.runInContext('ceoStopped', f.scope), true);
+});
+
+test('ผู้คุมสั่งให้ทำต่อ = ไม่ปักธงหยุด', async () => {
+  const f = fixture({ supervisor: async () => ({ action: 'retry' }) });
+  await f.ask();
+  assert.equal(vm.runInContext('ceoStopped', f.scope), false);
+});
+
+test('เพดานกดต่อที่จุดเดิมสั้นลงเมื่อเปิดโหมด CEO — ไม่ต้องรอครบสามรอบกว่าจะถึงคิวมัน', () => {
+  const f = fixture({ supervisor: async () => ({ action: 'retry' }) });
+  assert.equal(vm.runInContext('autoContinueMax()', f.scope), 1);
+  const off = fixture({ supervisor: null });
+  assert.equal(vm.runInContext('autoContinueMax()', off.scope), 3);
+});
+
+test('นาฬิกาเคารพธงหยุดของผู้คุม', async () => {
+  const src = await readFile(new URL('./studio.js', import.meta.url), 'utf8');
+  assert.match(src, /unattended: !ceoStopped && \(unattended \|\| ceoModeOn\(\)\)/);
+  assert.match(src, /if \(autoContinues >= autoContinueMax\(\)\)/);
+  // ล้างธงได้ด้วยการที่คนสั่งเริ่มหรือสั่งทำต่อเองเท่านั้น
+  assert.equal((src.match(/^\s*ceoStopped = false;/gm) || []).length, 2);
 });

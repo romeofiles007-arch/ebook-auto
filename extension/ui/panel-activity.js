@@ -1,4 +1,13 @@
 import { crewMarkup, crewSource } from './crew-sprites.js';
+import { mountRunStatus } from './run-status.js';
+import { mountRunTimer } from './run-timer.js';
+import { mountCeoPanel } from './ceo-panel.js';
+const paintCeo = mountCeoPanel(document.getElementById('ceoPanel'));
+const paintRunStatus = mountRunStatus(document.querySelector('main'), async () => {
+  const result = await chrome.runtime.sendMessage({type:'sw.openStudio'});
+  if (!result?.ok) throw new Error(result?.error || 'เปิด Studio ไม่สำเร็จ');
+});
+const paintRunTimer = mountRunTimer(document.body);
 const $ = (id) => document.getElementById(id);
 const events = new Map();
 let follow = true;
@@ -30,29 +39,43 @@ const MOTION_WINDOW_MS = 20000;
 function paintCrewMotion() {
   if (!crewState) return;
   const live = crewState.working !== false && Date.now() - lastAt < MOTION_WINDOW_MS;
+  const activeIds = new Set(validCrewIds(crewState));
   $('panelCrew').classList.toggle('working', live);
-  $('panelCrew').querySelector('strong').textContent = `${live ? 'กำลังทำงาน · ' : ''}${crewState.name}`;
+  $('panelCrew').querySelector('strong').textContent = `${live ? (activeIds.size > 1 ? 'กำลังทำงานร่วมกัน · ' : 'กำลังทำงาน · ') : ''}${crewState.name}`;
   $('crewRoster').querySelectorAll('[data-crew]').forEach((item) => {
-    item.classList.toggle('working', item.dataset.crew === crewState.id && live);
+    item.classList.toggle('working', activeIds.has(item.dataset.crew) && live);
   });
 }
 
+function validCrewIds(crew) {
+  return [...new Set([crew?.id, ...(Array.isArray(crew?.ids) ? crew.ids : [])])]
+    .filter((id) => crewIds.includes(id));
+}
+
 function showCrew(crew) {
-  if (!crew || !crewIds.includes(crew.id)) return;
-  crewState = crew;
+  const activeIds = validCrewIds(crew);
+  if (!activeIds.length) return;
+  crewState = { ...crew, id: activeIds[0], ids: activeIds };
   const el = $('panelCrew');
-  el.querySelectorAll('.crew-strip').forEach((img) => {
-    const src = crewSource(crew.id);
-    if (img.getAttribute('src') !== src) img.src = src;
-  });
+  const art = el.querySelector('.crew-active-art');
+  art.innerHTML = activeIds.map((id) => crewMarkup(id, 'crew-art')).join('');
+  const backdrop = el.querySelector('.crew-backdrop .crew-strip');
+  const src = crewSource(activeIds[0]);
+  if (backdrop?.getAttribute('src') !== src) backdrop.src = src;
   el.querySelector('.crew-description span').textContent = crew.detail;
   $('crewRoster').querySelectorAll('[data-crew]').forEach((item) => {
-    item.classList.toggle('current', item.dataset.crew === crew.id);
+    item.classList.toggle('current', activeIds.includes(item.dataset.crew));
   });
   paintCrewMotion();
 }
 function accept(event) {
   if (!event?.id) return;
+  if (event.ceo) paintCeo(event.ceo);
+  if (event.run) {
+    paintRunStatus({...event.run, actionLabel:event.run.action ? 'เปิด Studio เพื่อดำเนินการ' : ''});
+    paintRunTimer(event.run);
+    paintCeo(null, event.run);
+  }
   lastAt = Math.max(lastAt, event.at || 0);
   if (event.crew) showCrew(event.crew);
   else paintCrewMotion(); // เหตุการณ์อื่นก็เป็นหลักฐานว่ายังเดินอยู่
@@ -164,6 +187,11 @@ document.addEventListener('keydown', (e) => {
 new ResizeObserver(() => stickToBottom($('panelLog'), { instant: true })).observe($('panelLog'));
 chrome.runtime.onMessage.addListener((m) => { if (m.type === 'ui.activity') accept(m.event); });
 chrome.runtime.sendMessage({ type: 'ui.activitySnapshot' }).then((snapshot) => {
+  paintCeo(snapshot?.ceo || null, snapshot?.run || null);
+  if (snapshot?.run) {
+    paintRunStatus({...snapshot.run, actionLabel:snapshot.run.action ? 'เปิด Studio เพื่อดำเนินการ' : ''});
+    paintRunTimer(snapshot.run); // เปิดแผงกลางงาน ต้องเห็นเวลาที่เดินมาแล้ว ไม่ใช่เริ่มนับใหม่
+  }
   const receivedLive = lastAt > 0;
   for (const e of snapshot?.events || []) {
     if (!events.has(e.id)) accept({ ...e, crew: null });
