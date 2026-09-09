@@ -65,3 +65,71 @@ test('ขั้นวางแผนภาพถูกสั่งให้ก�
   assert.match(p, /คนนั่งหน้าแล็ปท็อป/);
   assert.match(p, /ถ้าสรุปสองรูปด้วยประโยคเดียวกันได้/);
 });
+
+/**
+ * ความหลากหลายที่แท้จริงมีอยู่ในเล่มอยู่แล้ว — แต่ละตอนเล่าคนละเรื่อง
+ * คนวาดแค่ไม่เคยได้อ่านมัน ได้แต่ประโยค subject ที่ย่อมาอีกทีจนเหลือแต่หัวข้อกว้าง ๆ
+ */
+const { figureNearbyText } = await import('./prompts.js');
+
+const md = `## หัวข้อที่ไม่ใช่สิ่งที่ตาเห็น
+
+ย่อหน้าแรกเล่าถึงร้านกาแฟเล็กในซอยที่เปิดตีห้า เจ้าของยกลังนมขึ้นวางบนเคาน์เตอร์ไม้ที่มีรอยครูดจากการใช้งานมาสิบปี
+
+![](fig:fig-1.1-1.png 80% 60mm)
+
+ย่อหน้ากลางเล่าถึงสมุดจดออเดอร์ปกหนังที่เปียกฝนจนหมึกเลอะ วางอยู่ข้างเครื่องคิดเลขที่ปุ่มสึกจนมองไม่เห็นตัวเลข
+
+:::box สรุป
+- ของในกล่องสรุปไม่ใช่ฉากที่ต้องวาด
+:::
+
+ย่อหน้าท้ายเล่าถึงตอนปิดร้าน เก้าอี้ถูกคว่ำขึ้นบนโต๊ะ และไฟหน้าร้านดวงเดียวที่ยังเปิดค้างไว้จนถึงเช้า`;
+
+test('ตัดเนื้อหาตามตำแหน่งที่ภาพจะไปอยู่ ไม่ใช่ตัดจากต้นตอนเสมอ', () => {
+  assert.match(figureNearbyText(md, 'after_intro'), /ร้านกาแฟเล็กในซอย/);
+  assert.match(figureNearbyText(md, 'before_conclusion'), /เก้าอี้ถูกคว่ำขึ้นบนโต๊ะ/);
+  assert.equal(/ร้านกาแฟเล็กในซอย/.test(figureNearbyText(md, 'before_conclusion')), false);
+});
+
+test('หัวข้อ ภาพที่แทรกไว้ และกล่องสรุป ไม่ใช่สิ่งที่ต้องวาด', () => {
+  const out = figureNearbyText(md, 'middle');
+  assert.equal(/หัวข้อที่ไม่ใช่สิ่งที่ตาเห็น/.test(out), false);
+  assert.equal(/fig-1\.1-1\.png/.test(out), false);
+  assert.equal(/ของในกล่องสรุป/.test(out), false);
+});
+
+test('ตอนที่ยังไม่มีเนื้อหา ไม่ทำให้คำสั่งภาพพัง', () => {
+  assert.equal(figureNearbyText('', 'middle'), '');
+  const p = interiorFigurePrompt('photoColor', 'ภาพหนึ่ง', 120, 80, '3:2', { color: true, nearby: '' });
+  assert.equal(/WHAT THIS PART OF THE BOOK ACTUALLY DESCRIBES/.test(p), false);
+  assert.match(p, /HOW THIS ONE IS FRAMED/);
+});
+
+test('เนื้อหาจริงถูกส่งเข้าคำสั่งวาด และมีอำนาจเหนือชุดมุมกล้องสำเร็จรูป', () => {
+  const p = interiorFigurePrompt('photoColor', 'สมุดจดออเดอร์', 120, 80, '3:2', {
+    color: true,
+    nearby: figureNearbyText(md, 'middle'),
+    figureIndex: 1,
+  });
+  assert.match(p, /WHAT THIS PART OF THE BOOK ACTUALLY DESCRIBES/);
+  assert.match(p, /สมุดจดออเดอร์ปกหนังที่เปียกฝน/);
+  assert.match(p, /Every place, object, action and detail in the picture must be something this passage names/);
+  assert.match(p, /the passage wins/);
+});
+
+test('เครื่องผลิตส่งเนื้อหาบริเวณนั้นไปให้จริง', async () => {
+  const machine = await readFile(new URL('./machine.js', import.meta.url), 'utf8');
+  assert.match(machine, /nearby: P\.figureNearbyText\(rec\.md, f\.placement\)/);
+});
+
+test('ขั้นวางแผนถูกสั่งให้หยิบของจากตอนนั้นจริง', () => {
+  const p = figurePlanPrompt(
+    { contentMode: 'prose', topic: 'ร้านกาแฟ', language: 'th' },
+    { chapters: [{ n: 1, title: 'บทที่ 1', sections: [] }] },
+    [],
+    'photoColor',
+  );
+  assert.match(p, /subject ต้องหยิบของที่ "ตอนนั้นบรรยายไว้จริง" มาใช้/);
+  assert.match(p, /ถ้าเอา subject ไปวางกับตอนอื่นแล้วยังใช้ได้พอดี/);
+});

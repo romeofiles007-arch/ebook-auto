@@ -1392,6 +1392,8 @@ ${chapters
   ถ้าภาพจะเข้าใจได้ต่อเมื่อมีคำกำกับ เช่น ป้ายชื่อ หัวคอลัมน์ เลขลำดับ หรือคำบนวัตถุ แปลว่าอันนั้นต้องเป็น box ไม่ใช่ image
 - ห้าม subject แบบแบ่งช่องเทียบหลายเวอร์ชัน (สองช่อง สี่ช่อง ก่อน/หลัง ถูก/ผิด) เพราะผู้อ่านแยกแต่ละช่องไม่ออกถ้าไม่มีคำกำกับ ให้ใช้ box แทน
 - subject ยาวไม่เกินสองประโยค บอกสิ่งที่ตาเห็นจริง ไม่ใช่อธิบายตรรกะหรือเงื่อนไขของเนื้อหา
+- subject ต้องหยิบของที่ "ตอนนั้นบรรยายไว้จริง" มาใช้ — สถานที่ วัตถุ การกระทำ หรือตัวอย่างที่เนื้อหาตรงนั้นพูดถึง
+  ห้ามใช้ภาพจำมาตรฐานของหัวข้อเล่ม ถ้าเอา subject ไปวางกับตอนอื่นแล้วยังใช้ได้พอดี แปลว่ายังไม่ได้มาจากตอนนั้นจริง
 - ภาพทุกรูปในเล่มต้องต่างกันที่ "สิ่งที่ตาเห็น" จริง ๆ ไม่ใช่ต่างแค่คำบรรยาย — กระจายทั้งสถานที่ ตัวแบบ ระยะ และชนิดของของที่อยู่ในภาพ
   ห้ามให้ทั้งเล่มวนอยู่กับฉากเดิมซ้ำ ๆ (คนนั่งหน้าแล็ปท็อป · มือถือในมือ · ของวางบนโต๊ะทำงานมองจากด้านบน · กราฟลอยข้างคน)
   ทดสอบก่อนตอบ: ถ้าสรุปสองรูปด้วยประโยคเดียวกันได้ แปลว่ามันคือรูปเดียวกัน ให้เปลี่ยนรูปหนึ่งเป็นฉากอื่นหรือทิ้งไป
@@ -1512,6 +1514,39 @@ const FIGURE_MOMENTS = [
   'the moment just after, showing the trace it left behind',
 ];
 
+/**
+ * เนื้อหาตรงบริเวณที่ภาพจะไปวางอยู่ — ตัดออกมาเป็นก้อนสั้น ๆ ให้คนวาดอ่าน
+ *
+ * ภาพในเล่มเคยถูกสั่งด้วยประโยค subject ประโยคเดียวที่ย่อมาจากตอนนั้นอีกที
+ * คนวาดจึงไม่เคยเห็นของจริงที่หนังสือบรรยายไว้เลย ได้แต่เดาจากหัวข้อกว้าง ๆ
+ * แล้วหยิบภาพจำมาตรฐานของหัวข้อนั้นมาใช้ ซึ่งเป็นภาพเดียวกันไม่ว่าเนื้อหาจะเล่าอะไร
+ * ของที่หนังสือเล่าไว้จริง — สถานที่ วัตถุ การกระทำ ตัวเลข ของใช้ — คือบ่อความหลากหลาย
+ * ที่มีอยู่แล้วในเล่ม และไม่มีทางซ้ำกันเอง เพราะแต่ละตอนเล่าคนละเรื่อง
+ *
+ * ตัดตามตำแหน่งที่ภาพจะไปแทรก ไม่ใช่ตัดจากต้นตอนเสมอ เพราะตอนหนึ่งเล่าหลายเรื่อง
+ * ภาพที่วางท้ายตอนต้องวาดสิ่งที่ท้ายตอนพูดถึง ไม่ใช่สิ่งที่ย่อหน้าแรกพูดถึง
+ */
+export function figureNearbyText(md, placement = 'middle', max = 900) {
+  const clean = String(md || '')
+    .replace(/^#{1,6}\s.*$/gm, '')            // หัวข้อไม่ใช่สิ่งที่ตาเห็น
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')      // ภาพที่แทรกไว้แล้ว
+    .replace(/^:::[\s\S]*?^:::$/gm, '')        // กล่องสรุป
+    .replace(/[*_`>]/g, '')
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/\s+/g, ' ').trim())
+    .filter((p) => p.length > 40);
+  if (!clean.length) return '';
+  const third = Math.max(1, Math.ceil(clean.length / 3));
+  const picked =
+    placement === 'after_intro'
+      ? clean.slice(0, third)
+      : placement === 'before_conclusion'
+        ? clean.slice(-third)
+        : clean.slice(third - 1, third * 2);
+  const out = (picked.length ? picked : clean).join(' ');
+  return out.length > max ? `${out.slice(0, max)}…` : out;
+}
+
 export function interiorFigurePrompt(styleKey, subject, widthMm, heightMm = 45, aspect = '4:3', opts = {}) {
   /**
    * ภาพแต่ละรูปในเล่มต้องเป็นคนละภาพจริง ไม่ใช่แค่คนละไฟล์
@@ -1553,8 +1588,20 @@ export function interiorFigurePrompt(styleKey, subject, widthMm, heightMm = 45, 
   const idx = Number(opts.figureIndex ?? (opts.otherSubjects || []).length) || 0;
   const shot = FIGURE_SHOTS[idx % FIGURE_SHOTS.length];
   const moment = FIGURE_MOMENTS[Math.floor(idx / FIGURE_SHOTS.length) % FIGURE_MOMENTS.length];
+  const nearby = String(opts.nearby || '').trim();
+  /**
+   * เนื้อหาจริงมาก่อนชุดมุมกล้องสำเร็จรูปเสมอ
+   * ชุดมุมกล้องมีไว้กันไม่ให้ทุกรูปถูกจัดวางเหมือนกันเมื่อเนื้อหาไม่ได้บอกอะไรไว้
+   * แต่ถ้าเนื้อหาบอกไว้ชัดว่าเห็นอะไรจากมุมไหน ต้องเชื่อเนื้อหา ไม่ใช่เชื่อรายการของเรา
+   */
+  const fromBook = nearby
+    ? `\nWHAT THIS PART OF THE BOOK ACTUALLY DESCRIBES — draw from this passage, not from stock imagery for the topic:\n"${nearby}"\n` +
+      'Every place, object, action and detail in the picture must be something this passage names or clearly implies. ' +
+      'If it names specific things, those specific things are what the reader must see. Never swap them for a generic stand-in scene. ' +
+      'The passage is written in the book\'s own language; draw what it describes, and put no text in the image.'
+    : '';
   const variety =
-    `\nHOW THIS ONE IS FRAMED (this is what makes it a different picture from the rest of the book): ${shot}. ` +
+    `\nHOW THIS ONE IS FRAMED${nearby ? ' (use this unless the passage above implies a better vantage — the passage wins)' : ''}: ${shot}. ` +
     `Moment shown: ${moment}. ` +
     'Do not reuse the vantage point, camera distance or arrangement of any other figure in this book. ' +
     'A book where every figure is framed the same way reads as one picture repeated, no matter how different the objects in it are.';
@@ -1573,7 +1620,7 @@ ${opts.color
         .join(', ') || 'The cover colours'} are colours sampled from the cover, given here so this figure sits beside it without clashing: echo that colour world, do not paste those hex values in as flat brand fills. No candy-bright unrelated hues, no corporate gradient, no rainbow of icon colours. Meaning must still read if the colour is removed.`
     : 'Must remain legible when printed in grayscale at 300 dpi on uncoated paper — rely on shape and contrast, not colour.'}
 Line weight heavy enough to survive printing at ${Math.round(widthMm)} mm wide.
-Negative: no text, no letters, no numbers, no labels, no captions, no watermark, no thin hairlines.${variety}${coverEcho}${distinct}`;
+Negative: no text, no letters, no numbers, no labels, no captions, no watermark, no thin hairlines.${fromBook}${variety}${coverEcho}${distinct}`;
 }
 
 // ---------- 8. prompt ภาพ ----------
