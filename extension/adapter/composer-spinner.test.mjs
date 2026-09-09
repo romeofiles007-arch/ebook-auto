@@ -64,5 +64,55 @@ test('clickSend รอวงกลมหมุน แล้วรายงาน
   const send = source.slice(source.indexOf('async function clickSend'), source.indexOf('// ---------- รู้ได้อย่างไรว่าตอบจบ'));
   assert.match(send, /composerBusy = \(\) => sendCandidates[\s\S]*composerSpinner/);
   assert.match(send, /if \(!btn && composerBusy\(\)\)/);
-  assert.match(send, /if \(how !== 'done'\) throw new Error\('composer_busy_stuck'\)/);
+  // นิ่งครบเกณฑ์หรือหมุนยาวจนครบสามนาที ล้วนเข้าเส้นทางปลดเองแล้วค่อยยอมแพ้เป็น composer_busy_stuck
+  assert.match(send, /if \(how !== 'done'\) \{[\s\S]*composer_busy_stuck/);
+});
+
+/**
+ * สิ่งที่คนทำเมื่อเจอวงกลมค้างคือกดที่ปุ่มนั้นหนึ่งครั้ง แล้วช่องพิมพ์ก็กลับมา
+ * ระบบเราไม่เคยลองท่านั้นในเส้นทางนี้เลย ได้แต่รอครบเกณฑ์แล้วโยนความล้มขึ้นไป
+ * ให้ชั้นบนไปตามผู้คุมกระบวนการมาสั่งโหลดหน้าใหม่ ซึ่งช้ากว่าและแพงกว่ามาก
+ */
+const releaseBlock = source.slice(
+  source.indexOf('function releaseStuckComposer'),
+  source.indexOf('\n  }', source.indexOf('function releaseStuckComposer')) + 4,
+);
+
+function release({ spinnerButton = null, stopButton = null } = {}) {
+  const clicked = [];
+  const spinner = spinnerButton
+    ? { closest: (sel) => (sel.includes('not([disabled])') ? { click: () => clicked.push('spinner') } : null) }
+    : null;
+  const scope = {
+    composerSpinner: () => spinner,
+    visibleStopButton: () => (stopButton ? { click: () => clicked.push('stop') } : null),
+  };
+  vm.createContext(scope);
+  vm.runInContext(`${releaseBlock}\nglobalThis.release = releaseStuckComposer;`, scope);
+  return { ok: scope.release({}), clicked };
+}
+
+test('กดปลดวงกลมที่ค้างเองหนึ่งครั้ง แทนที่จะรอให้ใครมาสั่ง', () => {
+  const r = release({ spinnerButton: true });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.clicked, ['spinner']);
+});
+
+test('ไม่มีวงกลมให้กด ก็ใช้ปุ่มหยุดที่เห็นอยู่แทน', () => {
+  const r = release({ stopButton: true });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.clicked, ['stop']);
+});
+
+test('ไม่มีอะไรให้กดเลย = บอกตรง ๆ ว่าปลดไม่ได้ ไม่ใช่แกล้งว่าสำเร็จ', () => {
+  const r = release({});
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.clicked, []);
+});
+
+test('ปลดเองก่อน แล้วค่อยยอมแพ้เป็น composer_busy_stuck', () => {
+  const send = source.slice(source.indexOf('async function clickSend'), source.indexOf('// ---------- รู้ได้อย่างไรว่าตอบจบ'));
+  assert.match(send, /if \(releaseStuckComposer\(\$\(S\.composer\)\)\) \{/);
+  assert.match(send, /btn = await waitForDom\(usableButton, \{ timeoutMs: 8000 \}\)/);
+  assert.match(send, /if \(!btn\) throw new Error\('composer_busy_stuck'\)/);
 });

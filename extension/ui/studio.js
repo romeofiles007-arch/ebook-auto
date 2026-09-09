@@ -4934,6 +4934,31 @@ function stopRun(from = 'ผู้ใช้สั่งหยุดงาน') {
   $('create').disabled = false;
 }
 $('stop').onclick = () => stopRun();
+/**
+ * ปุ่มปลดค้างของผู้ใช้เอง — เมื่อหน้า ChatGPT ค้าง ต้องมีคันโยกให้กดได้ทันที
+ *
+ * ที่ผ่านมาการโหลดหน้าใหม่เป็นท่าที่มีอยู่แล้ว แต่สั่งได้เฉพาะผู้คุมกระบวนการเท่านั้น
+ * ผู้ใช้ที่เห็นวงกลมหมุนค้างอยู่ตรงหน้าจึงทำอะไรไม่ได้เลยนอกจากรอ หรือไปจัดการเองในแท็บนั้น
+ * งานทั้งหมดถูกบันทึกไว้แล้ว การโหลดหน้าใหม่จึงไม่ทิ้งอะไร แค่ล้างสถานะค้างของหน้าเว็บ
+ */
+$('unstickChat').onclick = async (ev) => {
+  const button = ev.currentTarget;
+  button.disabled = true;
+  status('กำลังโหลดหน้า ChatGPT ใหม่เพื่อล้างสถานะค้าง');
+  try {
+    const done = await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch((e) => ({ ok: false, error: e?.message }));
+    addEvent(
+      'system',
+      done?.ok ? 'ปลดหน้า ChatGPT ที่ค้างแล้ว' : 'ปลดหน้า ChatGPT ไม่สำเร็จ',
+      done?.ok
+        ? 'โหลดหน้าใหม่เรียบร้อย งานที่บันทึกไว้ยังอยู่ครบ — กด "ทำต่อ" ได้เลย'
+        : done?.error || 'ไม่ทราบสาเหตุ · เปิดแท็บ ChatGPT แล้วโหลดใหม่เองได้',
+    );
+    status(done?.ok ? 'โหลดหน้า ChatGPT ใหม่แล้ว — กดทำต่อได้' : 'โหลดหน้า ChatGPT ใหม่ไม่สำเร็จ');
+  } finally {
+    button.disabled = false;
+  }
+};
 $('newBook').onclick = startNewBook;
 $('secSave').onclick = saveSection;
 $('secRegen').onclick = regenerateSection;

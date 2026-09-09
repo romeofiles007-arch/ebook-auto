@@ -783,6 +783,25 @@
     'svg[class*="spin" i]',
   ];
 
+  /**
+   * ปลดวงกลมที่ค้างด้วยตัวเองก่อน แทนที่จะส่งต่อให้คนอื่นตัดสินใจ
+   *
+   * สิ่งที่คนทำเมื่อเจอหน้าจอแบบนี้คือกดที่ปุ่มนั้นหนึ่งครั้งแล้วมันก็คืนช่องพิมพ์ให้
+   * ระบบเรากลับไม่เคยลองท่านั้นเลยในเส้นทางนี้ ได้แต่รอจนครบเกณฑ์แล้วโยนรหัสความล้ม
+   * ขึ้นไปให้ชั้นบนไปเรียกผู้คุมกระบวนการมาสั่งโหลดหน้าใหม่ ซึ่งช้ากว่าและแพงกว่ามาก
+   *
+   * ปลอดภัยเพราะกดหลังจากหน้าไม่ขยับเลย 30 วินาทีแล้วเท่านั้น (เกณฑ์เดียวกับที่
+   * waitUntilIdle ใช้กดปุ่มหยุดอยู่ก่อนแล้ว) งานที่เดินอยู่จริงจะขยับอะไรสักอย่างเสมอ
+   * และการกดปุ่มนี้ไม่ส่งอะไรใหม่ ไม่ทำให้เกิดงานซ้อน
+   */
+  function releaseStuckComposer(box) {
+    const spin = composerSpinner(box);
+    const btn = spin?.closest?.('button:not([disabled])') || visibleStopButton();
+    if (!btn) return false;
+    btn.click();
+    return true;
+  }
+
   function composerSpinner(box) {
     const form = box?.isConnected ? box.closest('form') : null;
     if (!form) return null;
@@ -869,9 +888,17 @@
        * ทั้งคู่ยังไม่ได้ส่งอะไรออกไป จึงส่งต่อให้ CEO ตัดสินได้ทั้งคู่ — เดิม timeout ตกไปเป็น
        * send_action_not_accepted ซึ่งพา CEO ออกนอกเส้นทางโหลดหน้าใหม่
        */
-      if (how !== 'done') throw new Error('composer_busy_stuck');
-      // วงกลมหายแล้วแต่ปุ่มจริงเพิ่งถูกวาดกลับเข้ามา ให้เวลา DOM ตั้งหลักก่อนตัดสินว่ากดไม่ได้
-      btn = usableButton() || (await waitForDom(usableButton, { timeoutMs: 4000 }));
+      if (how !== 'done') {
+        // ลองปลดเองหนึ่งครั้งก่อนยอมแพ้ — ถ้าคืนช่องพิมพ์ได้ก็ส่งงานต่อได้เลยในเทิร์นนี้
+        if (releaseStuckComposer($(S.composer))) {
+          report(turnId, 'sending', 'กดปลดวงกลมที่ค้างหนึ่งครั้ง — รอช่องพิมพ์กลับมา');
+          btn = await waitForDom(usableButton, { timeoutMs: 8000 });
+        }
+        if (!btn) throw new Error('composer_busy_stuck');
+      } else {
+        // วงกลมหายแล้วแต่ปุ่มจริงเพิ่งถูกวาดกลับเข้ามา ให้เวลา DOM ตั้งหลักก่อนตัดสินว่ากดไม่ได้
+        btn = usableButton() || (await waitForDom(usableButton, { timeoutMs: 4000 }));
+      }
     }
     if (!btn) throw new Error('send_action_not_accepted');
     if (received()) return received();
