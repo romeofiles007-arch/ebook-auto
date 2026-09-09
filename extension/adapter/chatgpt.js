@@ -701,14 +701,27 @@
       key:userMessageKey(node), text:normalizeMessage(node.innerText || node.textContent),
     }));
   }
+  /**
+   * ใบเสร็จของข้อความที่เราส่ง — เทียบทั้งก้อนไม่ได้ เพราะหน้าเว็บพับข้อความยาว
+   *
+   * ChatGPT ย่อข้อความผู้ใช้ที่ยาวมากให้เหลือบางส่วนพร้อมปุ่มขยาย ซึ่ง Prompt ของระบบนี้
+   * ยาวหลายพันตัวอักษรแทบทุกอัน การเทียบว่า "เท่ากันเป๊ะ" จึงไม่เจอใบเสร็จของตัวเอง
+   * ทั้งที่ข้อความถูกส่งไปแล้วจริง แล้วจบเป็น outcome_unknown → หยุดทั้งงานโดยไม่มีเหตุ
+   * (เห็นจริง: งานค้างอยู่ 40 นาทีที่ขั้นคิดชื่อ ทั้งที่ ChatGPT ตอบไปแล้ว)
+   *
+   * การพับตัดท้ายเสมอ หัวข้อความจึงเป็นลายเซ็นที่รอด และยังเข้มพอ:
+   * ต้องขึ้นต้นตรงกัน 120 ตัวอักษรแรก และต้องเป็นข้อความที่เพิ่งโผล่ใหม่เท่านั้น
+   */
   function findUserReceipt(prompt, before) {
     const expected = normalizeMessage(prompt);
+    const head = expected.slice(0, 120);
+    const sameMessage = (text) => text === expected || (!!head && text.startsWith(head));
     const matches = $$('[data-message-author-role="user"]').filter(node =>
-      normalizeMessage(node.innerText || node.textContent) === expected);
+      sameMessage(normalizeMessage(node.innerText || node.textContent)));
     const oldKeys = new Set(before.map(row=>row.key).filter(Boolean));
     const identified = matches.find(node => userMessageKey(node) && !oldKeys.has(userMessageKey(node)));
     if (identified) return identified;
-    const oldCount = before.filter(row=>row.text===expected).length;
+    const oldCount = before.filter(row=>sameMessage(row.text)).length;
     return matches.length > oldCount ? matches.at(-1) : null;
   }
 
