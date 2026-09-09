@@ -107,13 +107,37 @@ export class Machine {
    * เล่มที่เขียนด้วย API จะส่งเทิร์นสร้างภาพไปทาง API ด้วย ซึ่งวาดภาพไม่ได้
    * แล้วภาพทั้งเล่มจะไม่มาโดยที่คำสั่งภาพไม่มีอะไรผิดเลยสักบรรทัด
    */
-  constructor({ book, transport, imageTransport = null, onEvent = () => {} }) {
+  /**
+   * @param {object} o
+   * @param {Function|null} o.supervisor ผู้คุมกระบวนการผ่าน API — เลือกท่าเมื่องานติดเท่านั้น
+   *   ห้ามใช้เขียนหรือแก้เนื้อหา เนื้อหาทุกตัวอักษรมาจากหน้าเว็บเสมอ
+   *   ไม่ส่งมาก็ได้ ระบบจะเดินด้วยตัวกู้อัตโนมัติเดิมทุกอย่างเหมือนเคย
+   */
+  constructor({ book, transport, imageTransport = null, onEvent = () => {}, supervisor = null }) {
     this.book = book;
     this.tr = transport;
     this.imgTr = imageTransport || transport;
     this.emit = onEvent;
+    this.supervisor = supervisor;
     this.stopRequested = false;
     this.turnNo = book.job?.turnNo || 0;
+  }
+
+  /**
+   * ถามผู้คุมว่าจะเดินท่าไหนต่อ — เรียกเฉพาะตอนที่ตัวกู้อัตโนมัติแพ้หมดแล้ว
+   * ไม่มีผู้คุมหรือถามไม่สำเร็จ = คืน null แล้วให้ผู้เรียกทำตามเจตนาเดิม (ปกติคือหยุด)
+   */
+  async askSupervisor(context) {
+    if (!this.supervisor) return null;
+    try {
+      const decision = await this.supervisor(context);
+      if (!decision?.action) return null;
+      this.log('ok', `ผู้คุมกระบวนการเลือก: ${decision.action}${decision.reason ? ` — ${decision.reason}` : ''}`);
+      return decision;
+    } catch (e) {
+      this.log('warn', `ถามผู้คุมกระบวนการไม่สำเร็จ (${e?.message || e}) — ใช้ทางเดิม`);
+      return null;
+    }
   }
 
   // ---------- utility ----------
@@ -1334,6 +1358,7 @@ export class Machine {
      * ทั้งที่ขอใหม่อีกรอบเดียวมักได้ JSON ที่อ่านได้ · และต้องบันทึกของที่ได้มาจริงไว้ด้วย
      * ไม่งั้นเวลาพลาดจะไม่มีใครรู้ว่าโมเดลตอบอะไรกลับมา
      */
+    let lastReviewText = '';
     const run = async (batch, label) => {
       for (let attempt = 1; attempt <= 2; attempt++) {
         const remind =
@@ -1344,6 +1369,7 @@ export class Machine {
           P.consistencyPrompt(ch, batch, this.book.bible, this.book, remind),
           { label: `ตรวจบทที่ ${ch.n}${label ? ` · ${label}` : ''}${attempt > 1 ? ' · ขอผลตรวจใหม่' : ''}` },
         );
+        lastReviewText = res.text || lastReviewText; // เก็บของดิบไว้ให้ผู้คุมซ่อมรูปแบบได้โดยไม่ต้องสั่งเว็บใหม่
         const parsed = X.parseJson(res.text);
         if (parsed) {
           collect(parsed);
@@ -1374,7 +1400,38 @@ export class Machine {
       const label = batches.length > 1 ? `ส่วนที่ ${b + 1} จาก ${batches.length} ของบทนี้` : '';
       if (await run(batches[b], label)) any = true;
     }
-    if (!any) throw new Halt(`บรรณาธิการบทที่ ${ch.n} ยังไม่ส่งผลตรวจที่อ่านได้ — กดทำต่อเพื่อตรวจใหม่`);
+    if (!any) {
+      /**
+       * ถึงตรงนี้แปลว่าขอผลตรวจไปสองรอบแล้วยังอ่านไม่ได้ทั้งคู่ — เดิมหยุดทั้งเล่มตรงนี้
+       * ผู้คุมกระบวนการเลือกได้ว่าจะซ่อมรูปแบบของคำตอบที่มีอยู่แล้ว (ไม่เปลืองโควตาเว็บ)
+       * ลองใหม่ในห้องเดิม เปิดห้องใหม่ ข้ามการตรวจบทนี้ หรือหยุดตามเดิม
+       * ทุกท่าเป็นท่าที่ระบบทำได้อยู่แล้ว มันแค่เลือก ไม่ได้คิดขึ้นเอง
+       */
+      const decision = await this.askSupervisor({
+        step: 'consistency',
+        status: this.job.status,
+        attempts: 2,
+        lastError: `ผลตรวจบทที่ ${ch.n} อ่านเป็น JSON ไม่ได้สองรอบติด`,
+        sample: String(lastReviewText || '').replace(/\s+/g, ' ').slice(0, 400),
+        raw: lastReviewText || '',
+        wantKeys: Object.keys(merged),
+      });
+      const act = decision?.action;
+      if (act === 'repair_json' && decision.repaired) {
+        collect(decision.repaired);
+        any = true;
+        this.log('ok', `บทที่ ${ch.n}: ผู้คุมกระบวนการซ่อมรูปแบบผลตรวจให้แล้ว โดยไม่ต้องสั่งเว็บใหม่`);
+      } else if (act === 'retry' || act === 'new_thread') {
+        for (const batch of batches) {
+          if (this.stopRequested) break;
+          if (await run(batch, act === 'new_thread' ? 'ตรวจใหม่ในห้องแชตใหม่' : 'ตรวจใหม่อีกรอบ')) any = true;
+        }
+      } else if (act === 'skip_step') {
+        this.log('warn', `บทที่ ${ch.n}: ข้ามการตรวจตามที่ผู้คุมกระบวนการสั่ง — บันทึกไว้ว่าบทนี้ยังไม่ได้ตรวจ`);
+        return { ...merged, coverage: { sections: recs.length, reviewed: 0, missed: recs.map((r) => String(r.id)), skipped: true } };
+      }
+      if (!any) throw new Halt(`บรรณาธิการบทที่ ${ch.n} ยังไม่ส่งผลตรวจที่อ่านได้ — กดทำต่อเพื่อตรวจใหม่`);
+    }
 
     /**
      * ตอนที่ไม่มีคำตัดสินกลับมา = ตอนที่ยังไม่ถูกอ่าน ห้ามนับว่าผ่าน

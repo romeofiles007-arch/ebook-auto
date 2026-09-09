@@ -52,6 +52,7 @@ import {
   sectionPrompt,
 } from '../core/prompts.js';
 import { parseJson, extractSection } from '../core/extract.js';
+import { supervisorPrompt, parseSupervisorDecision, repairPrompt } from '../core/supervisor.js';
 import * as B from '../core/bible.js';
 import { ITEM_KINDS, planItems, suggestItemSize } from '../core/items.js';
 import { countUnits } from '../core/thai.js';
@@ -1782,6 +1783,45 @@ function showRunningCost() {
     (u.charsPerToken ? ` · ไทย ${u.charsPerToken} ตัวอักษรต่อ token` : '');
 }
 
+/**
+ * ผู้คุมกระบวนการผ่าน API — เปิดใช้เองเมื่อมี API key เท่านั้น
+ *
+ * ใช้คีย์เดียวกับงานเขียน แต่คนละหน้าที่โดยสิ้นเชิง: ตัวนี้ไม่เขียนเนื้อหาสักตัวอักษร
+ * มันอ่านสถานะกับบันทึกแล้วเลือกท่าจากรายการที่ระบบมีอยู่จริง
+ *
+ * ใช้โมเดลถูกที่สุดโดยตั้งใจ เพราะงานนี้คือการเลือกหนึ่งคำ ไม่ใช่งานเขียน
+ * (ตอบสั้นมาก ~80 token ขาออก ซึ่งเป็นฝั่งที่แพงกว่าขาเข้าหกเท่า)
+ * ยกเว้นตอนซ่อมรูปแบบคำตอบ ที่ต้องพ่น JSON ทั้งก้อนออกมา จึงคิดราคาต่างกันมาก
+ */
+const SUPERVISOR_MODEL = 'gpt-5.6-luna';
+
+function makeSupervisor() {
+  if (!apiKeyValue) return null; // ไม่มีคีย์ = เดินด้วยตัวกู้อัตโนมัติเดิมทุกอย่าง ไม่มีอะไรเปลี่ยน
+  const ask = async (prompt, label) => {
+    const tr = makeTransport('openai_api', {
+      apiKey: apiKeyValue,
+      model: SUPERVISOR_MODEL,
+      timeoutMs: 60000,
+      onProgress: () => {},
+    });
+    const res = await tr.send(prompt, { label });
+    if (res?.status !== 'ok') throw new Error(turnErrorMessage(res));
+    return res;
+  };
+  return async (ctx) => {
+    const res = await ask(supervisorPrompt(ctx), 'ผู้คุมกระบวนการ: เลือกท่าต่อไป');
+    const decision = parseSupervisorDecision(res.text);
+    if (!decision) throw new Error('ผู้คุมกระบวนการตอบมาไม่ตรงรูปแบบ');
+    addEvent('system', `ผู้คุมกระบวนการ: ${decision.action}`, decision.reason || '');
+    if (decision.action !== 'repair_json' || !ctx.raw) return decision;
+    // ซ่อมรูปแบบจากของที่เว็บตอบมาแล้ว — ไม่สั่งเว็บใหม่ จึงไม่กินโควตาข้อความ
+    const fixed = await ask(repairPrompt(ctx.raw, ctx.wantKeys || []), 'ผู้คุมกระบวนการ: ซ่อมรูปแบบคำตอบ');
+    const repaired = parseJson(fixed.text);
+    if (!repaired) throw new Error('ซ่อมรูปแบบคำตอบไม่สำเร็จ');
+    return { ...decision, repaired };
+  };
+}
+
 function makeMachine() {
   const transport = makeTransport(transportKind(book), transportOpts({}, book));
   /**
@@ -1791,7 +1831,7 @@ function makeMachine() {
    * (โหมดภาพแบบ API ไม่ผ่านสายนี้เลย มันเรียก Images API ตรงจาก core/imageApi.js)
    */
   const imageTransport = makeTransport('chatgpt_tab', { timeoutMs: 300000, onProgress: handleGptMessage, latencyMs: 60 });
-  machine = new Machine({ book, transport, imageTransport, onEvent: logMachine });
+  machine = new Machine({ book, transport, imageTransport, onEvent: logMachine, supervisor: makeSupervisor() });
 }
 
 /**
