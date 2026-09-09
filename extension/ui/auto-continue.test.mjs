@@ -40,3 +40,14 @@ test('งานที่จบแล้วหรือไม่มีงาน�
   assert.equal(decide({ ...stalled, job: { step: 'done', status: 'done' } }), false);
   assert.equal(decide({ ...stalled, job: null }), false);
 });
+
+/**
+ * เพดานสามครั้งมีไว้กันการวนที่จุดเดิม ไม่ได้มีไว้จำกัดจำนวนครั้งทั้งเล่ม
+ * เล่มยาวที่สะดุดคนละที่ ต้องได้สิทธิ์เต็มทุกจุด
+ */
+test('ขั้นที่ต่างกันคือคนละเรื่อง ต้องนับแยกกัน', () => {
+  // ตัวตัดสินไม่ได้ถือสถานะนับครั้งไว้เอง — เงื่อนไขที่ทดสอบได้คือมันดูแค่ว่า "นิ่งพอหรือยัง"
+  // ส่วนการรีเซ็ตตัวนับเมื่อขั้นเปลี่ยน อยู่ที่ผู้เรียก ทดสอบผ่านพฤติกรรมของ decide ไม่ได้
+  assert.equal(decide({ ...stalled, job: { step: 'images', status: 'paused' } }), true);
+  assert.equal(decide({ ...stalled, job: { step: 'gate_images', status: 'paused' } }), true);
+});

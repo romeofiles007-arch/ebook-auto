@@ -53,6 +53,7 @@ import {
 } from '../core/prompts.js';
 import { parseJson, extractSection } from '../core/extract.js';
 import { supervisorPrompt, parseSupervisorDecision, repairPrompt } from '../core/supervisor.js';
+import { addCeoUsage, ceoUsageLabel } from '../core/ceo-usage.js';
 import * as B from '../core/bible.js';
 import { ITEM_KINDS, planItems, suggestItemSize } from '../core/items.js';
 import { countUnits } from '../core/thai.js';
@@ -646,6 +647,15 @@ setInterval(() => {
       quietMs: lastActivityAt ? Date.now() - lastActivityAt : 0,
     })
   ) {
+    /**
+     * ขยับไปขั้นใหม่แล้ว = การกดต่อครั้งก่อนได้ผล ต้องคืนสิทธิ์ให้เต็ม
+     * ไม่งั้นเล่มยาว ๆ ที่สะดุดคนละที่สามครั้งจะหมดสิทธิ์ตั้งแต่กลางเล่ม
+     * เพดานนี้มีไว้กันการวนที่จุดเดิม ไม่ได้มีไว้จำกัดจำนวนครั้งทั้งเล่ม
+     */
+    if (book.job.step !== autoContinueStep) {
+      autoContinueStep = book.job.step;
+      autoContinues = 0;
+    }
     if (autoContinues >= AUTO_CONTINUE_MAX) {
       unattended = false;
       addEvent(
@@ -834,7 +844,8 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
       return res;
     }
     last = res;
-    if (fatal || i === attempts) break;
+    if (fatal) return last; // CEO must never bypass unknown submission, quota or parser fatal errors.
+    if (i === attempts) break;
     onRetry?.(i, attempts, res);
     await new Promise((r) => setTimeout(r, 250 * i)); // ตัวรอฝั่ง adapter ขับด้วย event แล้ว ไม่ต้องหน่วงยาว
   }
@@ -844,15 +855,25 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
    * ไม่งั้นโหมด CEO จะครอบแค่ตอนเขียนเล่ม ส่วนขั้นเตรียม (ดูกระแส · คิดชื่อ · เสนอสารบัญ)
    * ยังหยุดค้างเหมือนเดิม ซึ่งเป็นจุดที่ค้างจริงบ่อยที่สุด
    */
-  const decided = await superviseFailure(last, prompt, opts, { attempts });
-  return decided || last;
+  const decided = await superviseFailure(last, prompt, opts, { attempts, transport });
+  if (!decided) return last;
+  if (decided.status !== 'ok') return { ...decided, error: turnErrorMessage(decided) };
+  if (parse) {
+    try {
+      const out = parse(decided);
+      if (!out || out.error || out.data == null) return last;
+      decided.data = out.data;
+    } catch (_) { return last; }
+  }
+  return decided;
 }
 
 /**
  * ให้ผู้คุมกระบวนการตัดสินใจแทนการยอมแพ้ — ใช้กับเส้นทางที่ยิงตรงจาก Studio
  * คืน res ที่ใช้ได้เมื่อกู้สำเร็จ หรือ null เมื่อไม่มีผู้คุม/กู้ไม่ได้ (ผู้เรียกใช้ผลเดิมต่อ)
  */
-async function superviseFailure(last, prompt, opts, { attempts = 1 } = {}) {
+async function superviseFailure(last, prompt, opts, { attempts = 1, transport } = {}) {
+  if (['outcome_unknown', 'previous_turn_running'].includes(last?.meta?.error)) return null;
   const supervisor = makeSupervisor();
   if (!supervisor || !last) return null;
   let decision;
@@ -874,16 +895,17 @@ async function superviseFailure(last, prompt, opts, { attempts = 1 } = {}) {
   if (!decision) return null;
   if (decision.action === 'repair_json' && decision.repaired) {
     addEvent('system', 'ผู้คุมกระบวนการซ่อมรูปแบบคำตอบให้', 'ใช้ของที่เว็บตอบมาแล้ว ไม่ได้สั่งเว็บใหม่');
-    return { ...last, status: 'ok', data: decision.repaired, error: '' };
+    return { ...last, status: 'ok', text: JSON.stringify(decision.repaired), error: '' };
   }
   if (decision.action === 'retry' || decision.action === 'new_thread') {
-    const again = await sendTurnOnce(prompt, {
+    if (decision.action === 'new_thread' && (book?.threadMode === 'reuse' || opts.wantImages)) return null;
+    const again = await transport.send(prompt, {
       ...opts,
       newThread: decision.action === 'new_thread' || !!opts.newThread,
     });
-    return again?.status === 'ok' ? again : null;
+    return again || null;
   }
-  return null; // stop / skip_step ที่ทางนี้ = ใช้ผลเดิมแล้วให้ผู้เรียกรายงานตามปกติ
+  return null; // stop = ใช้ผลเดิมแล้วให้ผู้เรียกรายงานตามปกติ
 }
 
 /** ยิงหนึ่งครั้งด้วยสายส่งปัจจุบัน ใช้ตอนผู้คุมสั่งลองใหม่ */
@@ -1826,6 +1848,13 @@ function showRunningCost() {
   const u = book?.apiUsage;
   const el = $('runningCost');
   if (!el) return;
+  let ceoCost = $('ceoRunningCost');
+  if (!ceoCost) {
+    ceoCost = document.createElement('div');
+    ceoCost.id = 'ceoRunningCost';
+    el.after(ceoCost);
+  }
+  ceoCost.textContent = ceoUsageLabel(book?.ceoUsage);
   /**
    * เล่มที่เขียนด้วยหน้าเว็บไม่มีค่าใช้จ่ายให้แสดง แต่ยังต้องบอกว่ากำลังใช้ทางไหนอยู่
    * ไม่งั้นผู้ใช้ที่ตั้งค่าบนหน้าจอเป็น API แล้วเห็นระบบเปิดแท็บ ChatGPT
@@ -1878,12 +1907,20 @@ function syncCeoMode() {
   hint.textContent = !box.checked
     ? 'ปิดอยู่ — งานติดแล้วระบบจะกู้ด้วยวิธีเดิม ถ้ากู้ไม่ได้จะหยุดรอคุณ'
     : apiKeyValue
-      ? 'เปิดอยู่ — เมื่อกู้เองไม่ได้ API จะเลือกท่าต่อไปจากรายการที่ระบบมี (ลองใหม่ · เปิดห้องใหม่ · ซ่อมรูปแบบคำตอบ · ข้ามขั้นตรวจ · หยุด) ไม่เขียนเนื้อหาสักตัว ใช้คีย์เดียวกับงานเขียน'
+      ? 'เปิดอยู่ — เมื่อกู้เองไม่ได้ API จะเลือกท่าต่อไปจากรายการที่ระบบมี (ลองใหม่ · เปิดห้องใหม่ · ซ่อมรูปแบบคำตอบ · หยุด) ไม่เขียนเนื้อหาสักตัว ไม่ข้ามการตรวจคุณภาพ · มีค่า API แยกจากงานเขียน'
       : 'ติ๊กไว้แล้วแต่ยังไม่ได้ใส่ API key — ยังไม่มีผู้คุม ระบบจะกู้ด้วยวิธีเดิม';
 }
 
 function makeSupervisor() {
   if (!ceoModeOn()) return null; // ไม่ได้เปิดโหมด หรือไม่มีคีย์ = เดินด้วยตัวกู้อัตโนมัติเดิมทุกอย่าง
+  const owner = book;
+  const publishCeo = (working, detail, requestId) => {
+    const at = Date.now();
+    chrome.runtime.sendMessage({ type: 'ui.activity', event: {
+      id: `ceo-${at}-${Math.random()}`, at,
+      ceo: { working, detail, requestId, at, until: working ? at + 75000 : 0 },
+    } }).catch(() => {});
+  };
   const ask = async (prompt, label) => {
     const tr = makeTransport('openai_api', {
       apiKey: apiKeyValue,
@@ -1892,20 +1929,44 @@ function makeSupervisor() {
       onProgress: () => {},
     });
     const res = await tr.send(prompt, { label });
+    if (res?.meta?.promptTokens != null || res?.meta?.completionTokens != null) {
+      const key = owner ? `ceoUsage:${owner.id}` : 'ceoUsage:setup';
+      const previous = await db.setting(key) || {};
+      const usage = addCeoUsage(previous, res);
+      await db.setting(key, usage);
+      if (owner) {
+        owner.ceoUsage = usage;
+        await db.saveBook(owner);
+        if (book === owner) showRunningCost();
+      }
+      addEvent('system', ceoUsageLabel(usage), `โมเดล ${res.meta.model || SUPERVISOR_MODEL}${owner ? '' : ' · ขั้นเตรียมเล่ม (สะสมแยก)'}`);
+    }
     if (res?.status !== 'ok') throw new Error(turnErrorMessage(res));
     return res;
   };
   return async (ctx) => {
+    const requestId = `ceo-${Date.now()}-${Math.random()}`;
+    publishCeo(true, `กำลังตรวจปัญหา · ${ctx.step || 'เตรียมเล่ม'}`, requestId);
+    let resultDetail = 'พักรอ · ทีมงานดำเนินการต่อได้';
+    try {
     const res = await ask(supervisorPrompt(ctx), 'ผู้คุมกระบวนการ: เลือกท่าต่อไป');
     const decision = parseSupervisorDecision(res.text);
     if (!decision) throw new Error('ผู้คุมกระบวนการตอบมาไม่ตรงรูปแบบ');
     addEvent('system', `ผู้คุมกระบวนการ: ${decision.action}`, decision.reason || '');
+    resultDetail = decision.action === 'stop' ? `หยุดรอคุณ · ${decision.reason || 'ยังแก้ปัญหาไม่ได้'}` : `ตัดสินใจแล้ว · ${decision.reason || decision.action}`;
     if (decision.action !== 'repair_json' || !ctx.raw) return decision;
     // ซ่อมรูปแบบจากของที่เว็บตอบมาแล้ว — ไม่สั่งเว็บใหม่ จึงไม่กินโควตาข้อความ
+    publishCeo(true, 'กำลังซ่อมรูปแบบคำตอบ · ตรวจรายการบนจอ', requestId);
     const fixed = await ask(repairPrompt(ctx.raw, ctx.wantKeys || []), 'ผู้คุมกระบวนการ: ซ่อมรูปแบบคำตอบ');
     const repaired = parseJson(fixed.text);
     if (!repaired) throw new Error('ซ่อมรูปแบบคำตอบไม่สำเร็จ');
     return { ...decision, repaired };
+    } catch (e) {
+      resultDetail = `CEO ติดปัญหา · ${e?.message || e}`;
+      throw e;
+    } finally {
+      publishCeo(false, resultDetail, requestId);
+    }
   };
 }
 
@@ -1940,6 +2001,7 @@ const autoPilot = () => fullAutoRunning;
  */
 let unattended = false;
 let autoContinues = 0;
+let autoContinueStep = ''; // ขั้นที่กดต่อให้ล่าสุด ใช้แยก "ค้างที่เดิม" ออกจาก "ขยับแล้วมาติดที่ใหม่"
 const AUTO_CONTINUE_MAX = 3;
 const AUTO_CONTINUE_QUIET_MS = 45000;
 
@@ -1978,6 +2040,7 @@ async function runFullAuto() {
   fullAutoRunning = true;
   unattended = true; // ผู้ใช้สั่งให้เดินจนจบเอง ตัวกดทำต่อให้เองจึงมีสิทธิ์ทำงานตั้งแต่ตรงนี้
   autoContinues = 0;
+  autoContinueStep = '';
   runState('working', 'เริ่มอัตโนมัติ: เลือกหัวข้อ ชื่อ และสารบัญ');
   const button = $('fullAuto');
   button.disabled = true;
@@ -4001,8 +4064,16 @@ async function openImagePhaseGate() {
     chime('attention');
     status('รอคุณใส่ภาพ — คัดลอก Prompt ไปสร้างแล้วอัปโหลดกลับ');
     runState('input', 'คุณเลือกใช้ภาพอัปโหลด — ใส่ไฟล์ที่ยังขาดใน Studio', 'imagePhase', 'เปิดรายการภาพที่ขาด');
-  } else if (autoPilot()) {
-    addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ทดสอบระบบ', 'เริ่ม Phase 2 อัตโนมัติ');
+  } else if (autoPilot() || (unattended && book.job?.status !== 'rate_limited')) {
+    /**
+     * ประตูภาพต้องเริ่มเองด้วยเมื่อผู้ใช้สั่งโหมดไร้คนเฝ้าไว้ ไม่ใช่ดูแค่ธงรอบอัตโนมัติ
+     *
+     * ธงรอบอัตโนมัติถูกปลดทุกครั้งที่งานสะดุด พองานถูกกู้กลับมาแล้วมาถึงประตูนี้
+     * มันจึงนั่งรอคนกดทั้งที่ไม่มีใครเฝ้า แล้วตัวกดทำต่อให้เองก็มาเปิดประตูเดิมซ้ำ ๆ
+     * จนครบเพดานสามครั้งแล้วเลิก (เห็นจริง: "งานค้างซ้ำที่เดิม — หยุดกดต่อให้เองแล้ว")
+     * ยกเว้นตอนชนลิมิตข้อความ ซึ่งเริ่มไปก็ไปชนซ้ำ ต้องรอคนจริง ๆ
+     */
+    addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ไร้คนเฝ้า', 'เริ่ม Phase 2 อัตโนมัติ');
     if (book.imagePhase?.failures?.length || book.imagePhase?.status === 'partial') {
       stopAutoPilot();
       status('ภาพยังไม่ผ่านตรวจหรือสร้างไม่สำเร็จ — บันทึกงานแล้ว กรุณาตรวจเหตุผลในรายการภาพ');
