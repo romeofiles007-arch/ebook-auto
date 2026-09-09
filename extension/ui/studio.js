@@ -3592,6 +3592,12 @@ function sinceText(ts) {
  * เขียนใหม่เป็น "หน้าจอเดียวจบ": รายการรูปทีละแถวพร้อมสถานะจริงและปุ่มของแถวนั้น
  * กล่องแจ้งเหตุแยกออกมาชัด ๆ และตอนรันก็อัปเดตในหน้าเดิม ไม่กระโดดไปไหน
  */
+/**
+ * ลองภาพที่ยังไม่ผ่านซ้ำได้กี่รอบก่อนจะเรียกคน — นับต่อเล่ม และรีเซ็ตเมื่อรอบนั้นผ่านหมด
+ * ตั้งไว้เท่านี้เพราะรอบหนึ่งลองทุกภาพที่ยังขาดอยู่แล้ว สามรอบที่ได้ผลเดิมคือปัญหาที่คนต้องดู
+ */
+const AUTO_PHASE2_ROUNDS = 2;
+
 let phase2Running = false;
 let phase2Stage = null; // { name, text } ของรูปที่กำลังทำอยู่
 let phase2Rendering = false;
@@ -4321,12 +4327,37 @@ async function openImagePhaseGate() {
      * ยกเว้นตอนชนลิมิตข้อความ ซึ่งเริ่มไปก็ไปชนซ้ำ ต้องรอคนจริง ๆ
      */
     addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ไร้คนเฝ้า', 'เริ่ม Phase 2 อัตโนมัติ');
-    if (book.imagePhase?.failures?.length || book.imagePhase?.status === 'partial') {
+    /**
+     * ภาพที่เคยพลาด ไม่ใช่เหตุให้เลิกทั้งเล่มตั้งแต่ยังไม่ได้ลอง
+     *
+     * ของเดิมเห็นรอยพลาดของรอบก่อนแล้วหยุดทันทีโดยไม่เริ่มอะไรเลย ซึ่งกลายเป็นกับดัก:
+     * รอยพลาดถูกเก็บไว้กับเล่ม ทุกครั้งที่กลับมาถึงประตูนี้จึงเจอเงื่อนไขเดิมแล้วหยุดซ้ำ
+     * เล่มที่สะดุดหนึ่งรูปจึงไม่มีวันเดินจบเองอีกเลย ต้องมีคนมากดทุกครั้ง
+     *
+     * การลองใหม่ตรงนี้ถูกและตรงจุด เพราะภาพที่ผ่านตรวจแล้วถูกข้าม ไม่สร้างซ้ำ
+     * แต่ต้องมีที่สิ้นสุด รอบที่กี่ครั้งก็ได้ผลเดิมคือเรื่องที่คนต้องมาดูเอง ไม่ใช่วนทั้งคืน
+     */
+    const stuck = book.imagePhase?.failures?.length || book.imagePhase?.status === 'partial';
+    const rounds = Number(book.imagePhase?.autoRounds) || 0;
+    if (stuck && rounds >= AUTO_PHASE2_ROUNDS) {
       stopAutoPilot();
       status('ภาพยังไม่ผ่านตรวจหรือสร้างไม่สำเร็จ — บันทึกงานแล้ว กรุณาตรวจเหตุผลในรายการภาพ');
-      runState('stopped', 'สร้างภาพบางรูปไม่สำเร็จหลังลองอัตโนมัติแล้ว', 'imagePhase', 'ดูเหตุผลและลองภาพที่ขาด');
+      runState(
+        'stopped',
+        `สร้างภาพบางรูปไม่สำเร็จหลังลองอัตโนมัติแล้ว ${rounds} รอบ`,
+        'imagePhase',
+        'ดูเหตุผลและลองภาพที่ขาด',
+      );
       return;
     }
+    book.imagePhase = { ...(book.imagePhase || {}), autoRounds: stuck ? rounds + 1 : 0 };
+    await db.saveBook(book);
+    if (stuck)
+      addEvent(
+        'system',
+        `อัตโนมัติ: ลองภาพที่ยังไม่ผ่านอีกครั้ง ${rounds + 1}/${AUTO_PHASE2_ROUNDS}`,
+        'ภาพที่ผ่านตรวจแล้วถูกข้าม ไม่สร้างซ้ำและไม่เสียโควตาเพิ่ม',
+      );
     return await startPhase2();
   }
   $('imagePhase').scrollIntoView({ behavior: 'smooth' });
@@ -4567,7 +4598,14 @@ async function autoExportFinished() {
 
 // ---------- เสร็จ ----------
 async function finish() {
-  const wasFullAuto = fullAutoRunning;
+  /**
+   * ตอนจบต้องได้ไฟล์ ไม่ใช่ค้างรอให้กดส่งออกเอง
+   *
+   * ธงรอบอัตโนมัติหลุดได้ทุกครั้งที่งานสะดุดระหว่างทาง ถ้าอ่านแต่ธง เล่มที่สะดุดมาก่อน
+   * จะเดินมาจนสุดแล้วจอดเฉย ๆ ตรงหน้าสรุป ทั้งที่ผู้ใช้สั่งไว้ว่าให้ทำจนได้เล่ม
+   * เจตนาที่แท้จริงอยู่ที่ automation.mode ของเล่ม คู่กับธง unattended ที่ปลดได้ด้วยคนเท่านั้น
+   */
+  const wasFullAuto = fullAutoRunning || (unattended && book?.automation?.mode === 'full');
   fullAutoRunning = false;
   phase2Running = false;
   phase2Stage = null;

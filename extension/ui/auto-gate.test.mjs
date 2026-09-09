@@ -59,3 +59,58 @@ test('กล่องยืนยันไม่ค้างรอคนที�
   const ask = source.slice(source.indexOf('function ask(message'), source.indexOf('function ask(message') + 400);
   assert.match(ask, /if \(auto && \(autoPilot\(\) \|\| unattended\)\)/);
 });
+
+/**
+ * ประตูภาพเคยเห็นรอยพลาดของรอบก่อนแล้วหยุดทันทีโดยไม่เริ่มอะไรเลย
+ * รอยพลาดถูกเก็บไว้กับเล่ม ทุกครั้งที่กลับมาถึงประตูนี้จึงเจอเงื่อนไขเดิมแล้วหยุดซ้ำ
+ * เล่มที่สะดุดหนึ่งรูปจึงไม่มีวันเดินจบเองอีกเลย
+ */
+const gateBlock = source.slice(
+  source.indexOf("    const stuck = book.imagePhase?.failures?.length"),
+  source.indexOf('    return await startPhase2();') + 32,
+);
+
+async function gate(imagePhase) {
+  const calls = [];
+  const book = { id: 'b', imagePhase, job: {} };
+  const scope = {
+    book,
+    AUTO_PHASE2_ROUNDS: 2,
+    Number,
+    Date,
+    db: { saveBook: async () => calls.push('save') },
+    stopAutoPilot: () => calls.push('stop'),
+    status() {},
+    runState: (s, why) => calls.push(`runState:${s}:${why}`),
+    addEvent: (kind, title) => calls.push(title),
+    startPhase2: async () => calls.push('startPhase2'),
+  };
+  vm.createContext(scope);
+  await vm.runInContext(`(async () => {\n${gateBlock}\n})()`, scope);
+  return { calls, rounds: book.imagePhase?.autoRounds };
+}
+
+test('ภาพเคยพลาด = ลองใหม่ให้ ไม่ใช่เลิกทั้งเล่มตั้งแต่ยังไม่ได้ลอง', async () => {
+  const r = await gate({ failures: [{ name: 'cover' }], status: 'partial' });
+  assert.ok(r.calls.includes('startPhase2'));
+  assert.equal(r.calls.includes('stop'), false);
+  assert.equal(r.rounds, 1);
+  assert.match(r.calls.join(), /ลองภาพที่ยังไม่ผ่านอีกครั้ง 1\/2/);
+});
+
+test('ลองจนครบเพดานแล้วยังเหมือนเดิม = เรียกคนมาดู', async () => {
+  const r = await gate({ failures: [{ name: 'cover' }], status: 'partial', autoRounds: 2 });
+  assert.ok(r.calls.includes('stop'));
+  assert.equal(r.calls.includes('startPhase2'), false);
+  assert.match(r.calls.join(), /สร้างภาพบางรูปไม่สำเร็จหลังลองอัตโนมัติแล้ว 2 รอบ/);
+});
+
+test('รอบที่ผ่านหมดรีเซ็ตตัวนับ ไม่สะสมข้ามรอบ', async () => {
+  const r = await gate({ status: 'complete', autoRounds: 2 });
+  assert.ok(r.calls.includes('startPhase2'));
+  assert.equal(r.rounds, 0);
+});
+
+test('ตอนจบยึดเจตนาของเล่ม ไม่ใช่ธงที่หลุดไปแล้ว', () => {
+  assert.match(source, /const wasFullAuto = fullAutoRunning \|\| \(unattended && book\?\.automation\?\.mode === 'full'\)/);
+});
