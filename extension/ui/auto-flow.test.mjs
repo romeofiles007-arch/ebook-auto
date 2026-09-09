@@ -9,6 +9,7 @@ for (const mode of ['fast','standard','detailed',undefined]) test(`awaits outlin
  const book={id:'b',productionMode:mode,job:{step:'outline'},outline:{chapters:[]}};
  let gate=0;
  const ctx={book,Date,machineBusy:false,lastActivityAt:0,runState(){},addEvent(){},makeMachine(){},
+  fullAutoRunning:false,unattended:false,
   db:{loadBook:async()=>book,saveBook:async()=>{}},machine:{runUntilGate:async()=>{
     const next=['gate_outline','gate_edit','gate_images','done'][gate++];
     events.push(next);book.job.step=next;return next==='done'?{done:true}:{gate:next};}},
@@ -20,7 +21,7 @@ for (const mode of ['fast','standard','detailed',undefined]) test(`awaits outlin
  assert.equal(ctx.machineBusy,false);
 });
 test('stopped machine does not export and always releases busy flag',async()=>{
- const ctx={book:{id:'b'},Date,runState(){},machineBusy:false,db:{loadBook:async()=>({id:'b'})},machine:{runUntilGate:async()=>({stopped:'paused'})},halted:()=>true,finish:()=>assert.fail('exported stopped job')};
+ const ctx={book:{id:'b'},Date,runState(){},machineBusy:false,fullAutoRunning:false,unattended:false,addEvent(){},db:{loadBook:async()=>({id:'b'})},machine:{runUntilGate:async()=>({stopped:'paused'})},halted:()=>true,finish:()=>assert.fail('exported stopped job')};
  vm.createContext(ctx);vm.runInContext(fn('runMachine'),ctx);await ctx.runMachine();assert.equal(ctx.machineBusy,false);
  ctx.machine.runUntilGate=async()=>{throw Error('storage failed')};
  await assert.rejects(ctx.runMachine(),/storage failed/);assert.equal(ctx.machineBusy,false);
