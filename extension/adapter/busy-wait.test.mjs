@@ -63,3 +63,16 @@ test('ปุ่มหยุดหายไประหว่างรอ = จ�
   const how = await waitForBusyToClear(() => busy, { timeoutMs: 5000, staleMs: 4000 });
   assert.equal(how, 'done');
 });
+
+/**
+ * เกณฑ์ "ต้องไม่ขยับเลยแม้แต่ครั้งเดียว" พังในทางปฏิบัติ เพราะหน้าเว็บที่ค้าง
+ * ยังกะพริบได้หนึ่งครั้งจากการ re-render แล้วธงติดค้างว่ากำลังทำงานตลอดกาล
+ * ตัวรอจึงกินเวลาเต็มเพดานทุกครั้ง (เห็นจริง: รอ 239 วินาทีแล้วล้มด้วย previous_turn_running)
+ */
+test('ขยับครั้งเดียวตอนต้น แล้วเงียบยาว ต้องยังนับว่าค้าง', async () => {
+  let n = 0;
+  // ขยับหนึ่งครั้งในวินาทีแรก จากนั้นนิ่งสนิท
+  const { waitForBusyToClear } = await fixture({ text: () => (n++ < 2 ? n * 10 : 20) });
+  const how = await waitForBusyToClear(() => true, { timeoutMs: 6000, staleMs: 1500 });
+  assert.equal(how, 'stale');
+});

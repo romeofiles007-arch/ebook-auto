@@ -607,38 +607,61 @@
     const sig = () => `${(lastAssistantTurn()?.innerText || '').length}|${$$('img').length}`;
     const t0 = Date.now();
     let last = sig();
-    let changed = false;
+    let lastChangeAt = t0;
     while (Date.now() - t0 < timeoutMs) {
       if (!isBusy()) return 'done';
       const now = sig();
       if (now !== last) {
         last = now;
-        changed = true; // ขยับแม้ครั้งเดียวก็แปลว่ากำลังทำงานอยู่จริง ห้ามไปกดหยุดใส่
+        lastChangeAt = Date.now();
       }
       /**
-       * "ค้าง" ที่ปลอดภัยพอจะกดหยุดได้ ต้องแปลว่าไม่ขยับเลยแม้แต่ครั้งเดียวตั้งแต่เริ่มรอ
+       * "ค้าง" = ไม่ขยับมานานเท่า staleMs นับจากการขยับครั้งล่าสุด
        *
-       * ถ้าใช้เกณฑ์ "นิ่งมา 25 วินาทีล่าสุด" จะไปกดหยุดใส่โมเดลสายคิดก่อนตอบที่เงียบเป็นช่วง ๆ
-       * ซึ่งคือความผิดพลาดที่คอมเมนต์ข้างล่างเตือนไว้ (เห็นเป็น "Stopped thinking" ติดกันหลายเทิร์น)
+       * เกณฑ์เดิมคือ "ต้องไม่ขยับเลยแม้แต่ครั้งเดียวตั้งแต่เริ่มรอ" ซึ่งพังในทางปฏิบัติ:
+       * หน้าเว็บที่ค้างยังกะพริบได้หนึ่งครั้งจากการ re-render แล้วธงก็ติดค้างว่า "กำลังทำงาน"
+       * ตลอดกาล ตัวรอจึงกินเวลาเต็มเพดานทุกครั้ง (เห็นจริงใน log: รอเทิร์นก่อนหน้าจบ 239 วินาที
+       * แล้วจบด้วย previous_turn_running ทั้งที่ภาพวาดเสร็จไปหลายชั่วโมงแล้ว)
+       *
+       * เกณฑ์ใหม่ให้เวลาความเงียบต่อเนื่องเป็นตัวตัดสิน ซึ่งยังกันการกดหยุดใส่งานที่ทำอยู่จริงได้
+       * เพราะงานที่เดินอยู่จะขยับอะไรสักอย่างภายในช่วงเวลานั้นเสมอ
        */
-      if (!changed && Date.now() - t0 >= staleMs) return 'stale';
+      if (Date.now() - lastChangeAt >= staleMs) return 'stale';
       if (turnId) report(turnId, 'waiting_idle', `${label}${Math.round((Date.now() - t0) / 1000)} วินาที`);
       await napMs(1000);
     }
     return isBusy() ? 'timeout' : 'done';
   }
 
+  /** หน้าเว็บที่นิ่งสนิทนานเท่านี้ทั้งที่ปุ่มหยุดยังอยู่ = ค้างจริง ไม่ใช่กำลังคิด */
+  const STUCK_SILENCE_MS = 120000;
+
   async function waitUntilIdle(timeoutMs = 25000, turnId = null) {
-    // ว่างแล้วไปต่อทันที ไม่ต้องนับว่าว่างต่อเนื่องกี่มิลลิวินาทีอีก
-    // เพราะ clickSend ยืนยันผลจริงหลังคลิกอยู่แล้ว (ข้อความของเราต้องเพิ่มขึ้นจริง)
-    // ปุ่มที่ค้างแต่หน้านิ่ง ('stale') ไม่ใช่เหตุให้ล้มทั้งเทิร์น — ปล่อยให้ clickSend จัดการต่อ
     const how = await waitForBusyToClear(stopButtonVisible, {
       timeoutMs,
-      staleMs: Infinity, // Silence alone cannot establish that another turn has finished.
+      staleMs: STUCK_SILENCE_MS,
       turnId,
       label: 'รอเทิร์นก่อนหน้าจบ ',
     });
-    return how !== 'timeout';
+    if (how !== 'stale') return how !== 'timeout';
+
+    /**
+     * ความเงียบอย่างเดียวไม่ได้แปลว่าเทิร์นก่อนหน้าจบ — ถูกต้อง จึงไม่ส่งงานทับทันที
+     * แต่หน้าเว็บที่นิ่งสนิทสองนาทีทั้งที่ปุ่มหยุดยังอยู่ คือสถานะค้างที่ไม่หายเอง
+     * ปล่อยไว้แปลว่าทุกเทิร์นถัดจากนี้จะเสียเวลาเต็มเพดานแล้วล้มด้วยเหตุผลเดิมตลอดไป
+     * (เห็นจริงใน log: รอ 239 วินาที แล้วจบด้วย previous_turn_running ทั้งที่ภาพเสร็จไปนานแล้ว)
+     *
+     * กดปุ่มหยุดหนึ่งครั้งคือทางเดียวที่ปลดสถานะนี้ได้ และปลอดภัย:
+     * มันไม่ส่งอะไรใหม่ ไม่ทำให้เกิดงานซ้อน ส่วนภาพที่วาดเสร็จแล้วยังอยู่ในหน้าให้คว้าได้เหมือนเดิม
+     */
+    report(turnId, 'waiting_idle', 'หน้าเว็บค้างสถานะ “กำลังตอบ” โดยไม่ขยับสองนาที — กดปุ่มหยุดหนึ่งครั้งเพื่อปลดสถานะ');
+    const btn = $$('[data-testid="stop-button"]').find((b) => {
+      const r = b.getBoundingClientRect();
+      return !b.disabled && r.width > 0 && r.height > 0;
+    });
+    btn?.click();
+    for (let i = 0; i < 20 && stopButtonVisible(); i++) await napMs(150);
+    return !stopButtonVisible();
   }
 
   /** ล้างช่องพิมพ์ให้สุดความสามารถ — ผลลัพธ์ต้องไปพิสูจน์ด้วยการเทียบข้อความอีกที */
