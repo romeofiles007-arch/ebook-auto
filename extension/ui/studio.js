@@ -641,7 +641,8 @@ setInterval(() => {
    */
   if (
     shouldAutoContinue({
-      unattended,
+      // เปิดโหมด CEO ไว้ = ผู้ใช้สั่งให้ API คุมกระบวนการ ซึ่งรวมถึงการกดทำต่อให้ด้วย
+      unattended: unattended || ceoModeOn(),
       busy: machineBusy || hasPendingTurn(),
       job: book?.job,
       quietMs: lastActivityAt ? Date.now() - lastActivityAt : 0,
@@ -657,13 +658,12 @@ setInterval(() => {
       autoContinues = 0;
     }
     if (autoContinues >= AUTO_CONTINUE_MAX) {
-      unattended = false;
-      addEvent(
-        'system',
-        'เลิกกดทำต่อให้เอง',
-        `กดต่อให้แล้ว ${AUTO_CONTINUE_MAX} ครั้งแต่ยังกลับมาค้างที่เดิม — ต้องให้คนดูว่าติดอะไร งานถูกบันทึกไว้ครบ`,
-      );
-      status('งานค้างซ้ำที่เดิม — หยุดกดต่อให้เองแล้ว รอให้คุณมาดู');
+      /**
+       * ครบเพดานที่จุดเดิม — เดิมเลิกทันที ซึ่งถูกเมื่อไม่มีใครตัดสินใจแทนได้
+       * แต่ถ้าเปิดโหมด CEO ไว้ ให้มันเป็นคนตัดสินว่าควรกดต่ออีกหรือหยุดจริง
+       * ยังมีเพดานรวมทั้งเล่มกันไว้อีกชั้น เพราะการวนทั้งคืนไม่ใช่การแก้ปัญหา
+       */
+      askResumeDecision();
       return;
     }
     autoContinues++;
@@ -2033,6 +2033,56 @@ const AUTO_CONTINUE_QUIET_MS = 45000;
  * เงื่อนไขของการกดทำต่อให้เอง แยกออกมาเป็นฟังก์ชันล้วนเพื่อให้ทดสอบได้จริง
  * ทุกข้อในนี้คือ "ถ้าขาดไปข้อเดียวแล้วการกดต่อจะทำให้แย่ลง"
  */
+/** เพดานรวมทั้งเล่ม — ต่อให้ผู้คุมสั่งกดต่อได้เรื่อย ๆ ก็ต้องมีที่สิ้นสุด */
+const AUTO_CONTINUE_TOTAL_MAX = 12;
+let autoContinueTotal = 0;
+let askingResume = false;
+
+/**
+ * ครบเพดานที่จุดเดิมแล้ว — ให้ผู้คุมกระบวนการตัดสินว่าจะกดต่ออีกหรือหยุดจริง
+ * ไม่มีผู้คุม (ไม่ได้เปิดโหมด CEO) = หยุดตามเดิม เพราะไม่มีใครรับผิดชอบการตัดสินใจนั้น
+ */
+async function askResumeDecision() {
+  if (askingResume) return;
+  const stopHere = (why) => {
+    unattended = false;
+    addEvent('system', 'เลิกกดทำต่อให้เอง', why);
+    status('งานค้างซ้ำที่เดิม — หยุดกดต่อให้เองแล้ว รอให้คุณมาดู');
+  };
+  const supervisor = makeSupervisor();
+  if (!supervisor) {
+    stopHere(`กดต่อให้แล้ว ${AUTO_CONTINUE_MAX} ครั้งแต่ยังกลับมาค้างที่เดิม · โหมด CEO ปิดอยู่ จึงไม่มีใครตัดสินใจแทนได้ — งานถูกบันทึกไว้ครบ`);
+    return;
+  }
+  if (autoContinueTotal >= AUTO_CONTINUE_TOTAL_MAX) {
+    stopHere(`กดต่อให้เองรวมแล้ว ${autoContinueTotal} ครั้งในเล่มนี้ — เกินเพดานที่ตั้งไว้ ต้องให้คนดูว่าติดอะไรจริง ๆ`);
+    return;
+  }
+  askingResume = true;
+  try {
+    const decision = await supervisor({
+      step: book?.job?.step || '-',
+      status: book?.job?.status || '-',
+      attempts: autoContinues,
+      lastError: `งานค้างที่ขั้นเดิมและกดทำต่อให้แล้ว ${autoContinues} ครั้ง ยังกลับมาค้างที่เดิม`,
+      log: recentLogLines(),
+    });
+    if (decision?.action === 'retry' || decision?.action === 'new_thread') {
+      autoContinues = 0;
+      autoContinueTotal++;
+      lastActivityAt = Date.now();
+      addEvent('system', 'ผู้คุมกระบวนการสั่งให้ทำต่อ', `${decision.reason || ''} · รวมแล้ว ${autoContinueTotal}/${AUTO_CONTINUE_TOTAL_MAX} ครั้งในเล่มนี้`);
+      resumeGo();
+      return;
+    }
+    stopHere(`ผู้คุมกระบวนการสั่งหยุด${decision?.reason ? ` — ${decision.reason}` : ''}`);
+  } catch (e) {
+    stopHere(`ถามผู้คุมกระบวนการไม่สำเร็จ (${e?.message || e}) — หยุดไว้ก่อน`);
+  } finally {
+    askingResume = false;
+  }
+}
+
 function shouldAutoContinue({ unattended: on, busy, job, quietMs }) {
   if (!on || busy || !job) return false;
   if (job.step === 'done') return false;
@@ -2065,6 +2115,7 @@ async function runFullAuto() {
   unattended = true; // ผู้ใช้สั่งให้เดินจนจบเอง ตัวกดทำต่อให้เองจึงมีสิทธิ์ทำงานตั้งแต่ตรงนี้
   autoContinues = 0;
   autoContinueStep = '';
+  autoContinueTotal = 0;
   runState('working', 'เริ่มอัตโนมัติ: เลือกหัวข้อ ชื่อ และสารบัญ');
   const button = $('fullAuto');
   button.disabled = true;
