@@ -207,11 +207,15 @@ export async function compileBook({ book, outline, sections, assets = [], withBl
       book,
       outline,
       items,
-      opts: { withBleed, padPages: book.padPages || 0 },
+      // ลายพื้นหลังต้องมาถึงเอกสารรายชิ้นด้วย เดิมไม่ได้ส่งรายชื่อไฟล์เข้าไป
+      // pageBackground() จึงคืนค่าว่างเสมอ และเล่มรายชิ้นไม่เคยมีพื้นหลังเลยสักเล่ม
+      opts: { withBleed, padPages: book.padPages || 0, assetNames: usable.map((a) => a.name) },
     });
+    // ต้องแพ็กไฟล์ไปด้วย ไม่ใช่แค่บอกชื่อ ไม่งั้นคอมไพเลอร์หาไฟล์ลายไม่เจอแล้วล้มทั้งเล่ม
+    const ifiles = await packAssets(usable);
     const t1 = performance.now();
-    const p = await withSource(isrc, [], () => pageCount(isrc));
-    return { src: isrc, pages: p, files: [], items: items.length, ms: Math.round(performance.now() - t1) };
+    const p = await withSource(isrc, ifiles, () => pageCount(isrc, ifiles));
+    return { src: isrc, pages: p, files: ifiles, items: items.length, ms: Math.round(performance.now() - t1) };
   }
 
   const src = buildDocument({
