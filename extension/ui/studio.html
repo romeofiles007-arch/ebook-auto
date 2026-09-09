@@ -7,6 +7,7 @@
 <link rel="icon" type="image/png" href="../icons/icon-32.png">
 <link rel="stylesheet" href="studio.css">
 <link rel="stylesheet" href="crew.css">
+<link rel="stylesheet" href="run-status.css">
 </head>
 <body><main class="app">
 
@@ -112,6 +113,12 @@
       <span>กดครั้งเดียวแล้วปล่อยยาว — คิดชื่อเรื่อง วางสารบัญ เขียนทั้งเล่ม สร้างภาพ แล้วส่งออกไฟล์ให้เอง โดยใช้ค่าที่ตั้งไว้ด้านล่างทั้งหมด ไม่ถามอะไรระหว่างทาง</span>
     </div>
     <button id="fullAuto" type="button" class="primary"><svg class="i" aria-hidden="true"><use href="#i-rocket"/></svg>เริ่มอัตโนมัติทั้งเล่ม</button>
+  </div>
+
+  <!-- ตัวเลือกที่ใช้เงินของผู้ใช้ ต้องเป็นการติ๊กเอง ไม่ใช่เปิดให้เองเพราะบังเอิญมีคีย์อยู่ -->
+  <div class="ceoBar" data-step="go">
+    <label for="ceoMode"><input type="checkbox" id="ceoMode"> 🧭 โหมด CEO — ให้ API คุมกระบวนการเมื่องานติด</label>
+    <div id="ceoModeHint" class="muted"></div>
   </div>
 
   <!--

@@ -1490,6 +1490,7 @@ async function saveCreatorDefaults() {
     // สารบัญที่ผู้ใช้พิมพ์เองคืองานที่ลงแรงจริง ห้ามหายเพราะปิดแท็บหรือรีโหลด
     db.setting('draftUserOutline', $('inspireOutline')?.value || ''),
     db.setting('soundOn', !!$('soundOn')?.checked),
+    db.setting('ceoMode', !!$('ceoMode')?.checked),
   ]);
 }
 
@@ -1507,6 +1508,15 @@ async function loadCreatorDefaults() {
       db.setting('textApiModel'),
       db.setting('priceOverride'),
     ]);
+  // โหมด CEO ใช้เงินของผู้ใช้ จึงปิดไว้เป็นค่าตั้งต้น ต้องติ๊กเอง และจำค่าที่ติ๊กไว้ข้ามรอบ
+  const ceoMode = await db.setting('ceoMode');
+  if ($('ceoMode') && ceoMode !== undefined) $('ceoMode').checked = !!ceoMode;
+  $('ceoMode')?.addEventListener('change', () => {
+    db.setting('ceoMode', !!$('ceoMode').checked);
+    syncCeoMode();
+  });
+  syncCeoMode();
+
   // เสียงแจ้งเตือนเป็นค่าที่คนตั้งครั้งเดียวแล้วคาดว่าจะอยู่อย่างนั้น เปิดไว้เป็นค่าตั้งต้น
   const soundOn = await db.setting('soundOn');
   if ($('soundOn') && soundOn !== undefined) $('soundOn').checked = !!soundOn;
@@ -1795,8 +1805,24 @@ function showRunningCost() {
  */
 const SUPERVISOR_MODEL = 'gpt-5.6-luna';
 
+function ceoModeOn() {
+  return !!$('ceoMode')?.checked && !!apiKeyValue;
+}
+
+/** บอกสถานะให้ตรงความจริงเสมอ — ติ๊กไว้แต่ไม่มีคีย์ = ไม่มีผู้คุม ต้องไม่ปล่อยให้เข้าใจผิด */
+function syncCeoMode() {
+  const box = $('ceoMode');
+  const hint = $('ceoModeHint');
+  if (!box || !hint) return;
+  hint.textContent = !box.checked
+    ? 'ปิดอยู่ — งานติดแล้วระบบจะกู้ด้วยวิธีเดิม ถ้ากู้ไม่ได้จะหยุดรอคุณ'
+    : apiKeyValue
+      ? 'เปิดอยู่ — เมื่อกู้เองไม่ได้ API จะเลือกท่าต่อไปจากรายการที่ระบบมี (ลองใหม่ · เปิดห้องใหม่ · ซ่อมรูปแบบคำตอบ · ข้ามขั้นตรวจ · หยุด) ไม่เขียนเนื้อหาสักตัว ใช้คีย์เดียวกับงานเขียน'
+      : 'ติ๊กไว้แล้วแต่ยังไม่ได้ใส่ API key — ยังไม่มีผู้คุม ระบบจะกู้ด้วยวิธีเดิม';
+}
+
 function makeSupervisor() {
-  if (!apiKeyValue) return null; // ไม่มีคีย์ = เดินด้วยตัวกู้อัตโนมัติเดิมทุกอย่าง ไม่มีอะไรเปลี่ยน
+  if (!ceoModeOn()) return null; // ไม่ได้เปิดโหมด หรือไม่มีคีย์ = เดินด้วยตัวกู้อัตโนมัติเดิมทุกอย่าง
   const ask = async (prompt, label) => {
     const tr = makeTransport('openai_api', {
       apiKey: apiKeyValue,
@@ -4853,6 +4879,7 @@ $('testTextApi').onclick = async () => {
   note.textContent = 'กำลังตรวจคีย์และรายชื่อโมเดล...';
   try {
     apiKeyValue = key;
+    syncCeoMode(); // มีคีย์แล้ว คำอธิบายของโหมด CEO ต้องเปลี่ยนตาม ไม่ใช่ค้างว่ายังไม่มีคีย์
     await db.setting('openaiApiKey', key);
     await db.setting('textApiModel', textApiModel());
     const r = await makeTransport('openai_api', { apiKey: key, model: textApiModel() }).health();

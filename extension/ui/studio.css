@@ -347,3 +347,7 @@ button.reviewIssue:hover{border-color:#6f8cff}
 #productionMode.speed-slow,.speedBadge.speed-slow{border-color:#ff8a6a;color:#ffc0ad;background:#2c1712}
 #productionMode.speed-custom,.speedBadge.speed-custom{border-color:#5c6c8f;color:#b9c6e2;background:#141d31}
 #productionMode.speed-fast,#productionMode.speed-standard,#productionMode.speed-slow,#productionMode.speed-custom{background:#0b1222}
+.ceoBar{margin-top:10px;padding:11px 14px;border:1px solid #2c3a5c;border-radius:12px;background:#101a30}
+.ceoBar label{display:flex;align-items:center;gap:9px;font-weight:750;font-size:14px;cursor:pointer}
+.ceoBar input{width:auto;margin:0}
+.ceoBar .muted{margin-top:6px;font-size:12px;line-height:1.5}
