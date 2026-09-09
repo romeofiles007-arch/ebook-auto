@@ -122,3 +122,41 @@ test('บรีฟทิศทางปกยังสร้างได้ค�
   assert.match(p, /ภาษาภาพของปกเลือกได้ทุกแบบ/);
   assert.match(p, /"palette"/);
 });
+
+/**
+ * ทิ้งทั้งแนวปกเพราะนับสีได้ไม่ครบสาม เป็นกติกาที่ตกยุคไปแล้ว
+ * ตอนที่ palette ยังเป็นคำสั่งระบายสี ครบสามคือเงื่อนไขจำเป็นจริง
+ * ตอนนี้มันเหลือหน้าที่เดียวคือบอกสีตัวหนังสือ แนวที่ดีจึงไม่ควรถูกโยนทิ้งเพราะนับสีไม่ครบ
+ */
+test('แนวปกไม่ถูกทิ้งเพราะบรีฟสีมาไม่ครบสามสี', async () => {
+  const vm = await import('node:vm');
+  const machine = await readFile(new URL('./machine.js', import.meta.url), 'utf8');
+  const block = machine.slice(machine.indexOf('const HEX = /^#'), machine.indexOf('const dropped = directions.length'));
+  const scope = {
+    directions: [
+      { id: 'A', typography: {}, palette: [{ hex: '#112233' }, { hex: '#445566' }] },
+      { id: 'B', typography: {}, palette: [{ hex: '#a1b2c3' }, { hex: '#d4e5f6' }, { hex: '#010203' }, { hex: '#ffffff' }] },
+      { id: 'C', typography: {}, palette: [{ hex: 'ไม่ใช่สี' }] },
+      { id: 'D', palette: [{ hex: '#123456' }] },
+    ],
+  };
+  vm.createContext(scope);
+  vm.runInContext(`${block}
+globalThis.usable = usable;`, scope);
+  const ids = scope.usable.map((d) => d.id);
+
+  // สองสีก็ใช้ได้ เติมช่องที่ขาดด้วยสีจริงที่มีอยู่ ไม่ใช่สีที่คิดขึ้นเอง
+  assert.deepEqual(ids, ['A', 'B']);
+  assert.deepEqual(scope.usable[0].palette.map((c) => c.hex), ['#112233', '#445566', '#445566']);
+  // สี่สีถูกตัดเหลือสามช่องตามที่ระบบอ้างถึง palette_1..3
+  assert.equal(scope.usable[1].palette.length, 3);
+  // ไม่มีสีที่อ่านค่าได้เลย หรือไม่มีตำแหน่งตัวหนังสือ = ใช้ไม่ได้จริง
+  assert.equal(ids.includes('C'), false);
+  assert.equal(ids.includes('D'), false);
+});
+
+test('หน้าจอบอกว่าสีชุดนี้มีไว้วางตัวหนังสือ ไม่ใช่ชุดสีของภาพ', async () => {
+  const studio = await readFile(new URL('../ui/studio.js', import.meta.url), 'utf8');
+  assert.match(studio, /สีสำหรับวางตัวหนังสือ/);
+  assert.match(studio, /ไม่ใช่สีที่ใช้ย้อมภาพ/);
+});

@@ -4100,7 +4100,7 @@ function renderCoverDirections() {
         return (
           `<div class="p2Dir${on ? ' on' : ''}">` +
           `<h4>${esc(id)}. ${esc(d.name || 'ไม่มีชื่อแนว')}${sc?.total != null ? ` <em>· ${esc(String(sc.total))} คะแนน</em>` : ''}${on ? ' <em>· กำลังใช้อยู่</em>' : ''}</h4>` +
-          `<div class="sw">${swatches}</div>` +
+          (swatches ? `<div class="sw" title="สีที่มีอยู่ในภาพนี้ ใช้เลือกสีตัวหนังสือให้อ่านออก ไม่ใช่สีที่ใช้ย้อมภาพ">${swatches}<span class="swNote">สีสำหรับวางตัวหนังสือ</span></div>` : '') +
           (d.sales_angle ? `<p><b>มุมขาย:</b> ${esc(d.sales_angle)}</p>` : '') +
           (d.visual_metaphor ? `<p><b>ภาพที่จะได้:</b> ${esc(d.visual_metaphor)}</p>` : '') +
           (d.human_render_style ? `<p><b>คนบนปก:</b> ${esc(d.human_render_style)}</p>` : '') +

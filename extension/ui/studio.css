@@ -163,8 +163,10 @@ textarea:focus{border-color:#6f8cff}
 .p2Dir.on{border-color:#6f8cff;box-shadow:0 0 0 3px #6f8cff22}
 .p2Dir h4{margin:0 0 8px;font-size:14px}
 .p2Dir h4 em{font-style:normal;color:#9db4ff;font-weight:700;font-size:12px}
-.p2Dir .sw{display:flex;gap:5px;margin-bottom:9px}
+.p2Dir .sw{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-bottom:9px}
 .p2Dir .sw i{width:26px;height:16px;border-radius:4px;border:1px solid #ffffff22}
+/* สีชุดนี้ไม่ใช่ชุดสีของภาพอีกต่อไป มันคือสีที่หยิบมาจากภาพเพื่อวางตัวหนังสือ ต้องเขียนไว้ให้เห็น */
+.p2Dir .sw .swNote{font-size:11px;opacity:.6}
 .p2Dir p{margin:0 0 6px;font-size:12.5px;color:#c2cee6;line-height:1.5}
 .p2Dir p.muted{color:#8f9db8}
 .p2Dir button{width:100%;margin-top:6px;font-size:13px}

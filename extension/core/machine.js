@@ -2190,7 +2190,29 @@ export class Machine {
     });
     const consult = X.parseJson(res.text);
     const directions = Array.isArray(consult?.directions) ? consult.directions : [];
-    const usable = directions.filter((d) => d?.palette?.length === 3 && d?.typography);
+    /**
+     * ทิ้งทั้งแนวปกเพราะนับสีได้ไม่ครบสาม — เป็นกติกาที่ตกยุคไปแล้วและกินของดีทิ้ง
+     *
+     * ตอนที่ palette ยังเป็นคำสั่งระบายสีทั้งปก การมีครบสามสีคือเงื่อนไขที่จำเป็นจริง
+     * แต่ตอนนี้ palette เหลือหน้าที่เดียวคือบอกว่าจะวางตัวหนังสือด้วยสีอะไรให้อ่านออก
+     * แนวปกที่ดีทั้งแนวจึงถูกโยนทิ้งเพียงเพราะบรีฟมาสองสีหรือสี่สี
+     * (อาการที่เห็น: ขอมาสามทาง แต่หน้าจอขึ้นว่า "เลือกได้ 2 ทาง" โดยไม่มีใครบอกว่าหายไปไหน)
+     *
+     * สิ่งที่ขาดไม่ได้จริงมีสองอย่าง: ตำแหน่งตัวหนังสือ และสีอย่างน้อยหนึ่งสีที่ใช้ได้
+     * ที่เหลือเติมให้ครบสามช่องเองได้ เพราะระบบอ้างถึงสีด้วยตำแหน่ง palette_1..3
+     */
+    const HEX = /^#[0-9a-f]{3,8}$/i;
+    const withPalette = (d) => {
+      const colours = (d.palette || []).filter((c) => HEX.test(c?.hex || ''));
+      if (!colours.length) return null;
+      // เติมด้วยสีสุดท้ายที่มี — ช่องที่ขาดจึงยังชี้ไปที่สีจริงของภาพนี้ ไม่ใช่สีที่เราคิดขึ้นเอง
+      while (colours.length < 3) colours.push(colours[colours.length - 1]);
+      return { ...d, palette: colours.slice(0, 3) };
+    };
+    const usable = directions.filter((d) => d?.typography).map(withPalette).filter(Boolean);
+    const dropped = directions.length - usable.length;
+    if (dropped > 0)
+      this.log('warn', `แนวปก ${dropped} ทางใช้ไม่ได้เพราะไม่มีตำแหน่งตัวหนังสือหรือไม่มีสีที่อ่านค่าได้เลย — เหลือ ${usable.length} ทางให้เลือก`);
 
     if (!usable.length) {
       this.log('warn', 'GPT Art Director ตอบโครงสร้างปกไม่ครบ — ยังไม่ใช้ Prompt ปกเก่าต่อ เพื่อป้องกันได้ปกโล่ง/เชยแบบเดิม');
