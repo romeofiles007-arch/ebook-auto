@@ -56,5 +56,20 @@ test('คำสั่งบอกกติกาการเลือกท่�
   assert.match(p, /repair_json[\s\S]*ไม่ต้องสั่งเว็บใหม่ให้เปลืองโควตา/);
   assert.match(p, /ห้องแชตเสีย[\s\S]*new_thread/);
   assert.match(p, /ลองมามากแล้วอาการเดิมซ้ำ[\s\S]*stop/);
-  assert.match(p, /skip_step[\s\S]*ห้ามใช้กับขั้นที่ผลิตเนื้อหา/);
+  assert.match(p, /ห้ามข้ามการตรวจคุณภาพ/);
+  assert.equal(parseSupervisorDecision('{"action":"skip_step"}'), null);
+});
+
+/**
+ * หน้าเว็บค้างเอง (ปุ่มส่งเป็นวงกลมหมุนไม่ยอมหาย) ต่างจากห้องแชตเสีย —
+ * เปิดห้องใหม่ในหน้าที่ค้างอยู่ก็ยังค้างเหมือนเดิม ต้องล้างทั้งหน้า
+ */
+test('reload_tab เป็นท่าที่สั่งได้ และคำสั่งบอกว่าใช้ตอนไหน', () => {
+  assert.equal(typeof SUPERVISOR_ACTIONS.reload_tab, 'string');
+  assert.deepEqual(parseSupervisorDecision('{"action":"reload_tab","reason":"ปุ่มส่งค้างเป็นวงกลมหมุน"}'), {
+    action: 'reload_tab',
+    reason: 'ปุ่มส่งค้างเป็นวงกลมหมุน',
+  });
+  const p = supervisorPrompt({ step: 'images', status: 'error', lastError: 'composer_busy_stuck' });
+  assert.match(p, /composer_busy_stuck[\s\S]*reload_tab|reload_tab[\s\S]*composer_busy_stuck/);
 });

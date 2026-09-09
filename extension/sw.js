@@ -208,6 +208,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         activityWrite = activityWrite.catch(() => {}).then(async () => {
           const snapshot = await S.get('activitySnapshot', { events: [], crew: null });
           if (event.crew) snapshot.crew = event.crew;
+          if (event.run) snapshot.run = event.run;
+          if (event.ceo) snapshot.ceo = event.ceo;
           if (event.message) snapshot.events = [...snapshot.events, event].slice(-200);
           snapshot.at = event.at;
           await S.set('activitySnapshot', snapshot);
@@ -233,13 +235,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (chat.windowId != null) await chrome.windows.update(chat.windowId, { focused: true });
         const ok = await ensureAdapter(chat.id);
         if (!ok) return sendResponse({ ok: false, error: 'adapter_unavailable' });
-        await chrome.tabs.sendMessage(chat.id, {
+        const accepted = await chrome.tabs.sendMessage(chat.id, {
           type: 'gpt.run',
           turnId: msg.turnId,
           prompt: msg.prompt,
           opts: msg.opts || {},
         });
-        return sendResponse({ ok: true });
+        return sendResponse(accepted?.ok ? {ok:true} : {ok:false,error:accepted?.error || 'adapter_unavailable'});
       }
 
       // Content script ส่งผลกลับ → กระจายให้ extension pages
@@ -280,6 +282,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         chrome.runtime.sendMessage({ ...msg, _relayed: true }).catch(() => {});
         return sendResponse({ ok: true });
+      }
+
+      /**
+       * รีเฟรชแท็บ ChatGPT — ทางออกสุดท้ายของสถานะค้างที่ปลดด้วยวิธีอื่นไม่ได้
+       *
+       * หลังเทิร์นสร้างภาพ ปุ่มส่งกลายเป็นวงกลมหมุนค้างได้เป็นชั่วโมง ไม่มีปุ่มหยุดให้กด
+       * และไม่มีอะไรในหน้าที่สั่งให้มันคืนสภาพได้ การโหลดหน้าใหม่ล้างสถานะนั้นทิ้งทั้งหมด
+       * ปลอดภัยเมื่อ "ยังไม่ได้ส่งอะไรออกไป" เท่านั้น — ผู้เรียกต้องรับผิดชอบเงื่อนไขนั้นเอง
+       * บทสนทนาเดิมไม่หาย เพราะมันอยู่ที่ฝั่งเซิร์ฟเวอร์ ไม่ใช่ในหน้า
+       */
+      case 'sw.reloadChat': {
+        const chat = await ensureChatTab();
+        await chrome.tabs.reload(chat.id);
+        const ready = await waitForComplete(chat.id, 60000).catch(() => null);
+        if (!ready) return sendResponse({ ok: false, error: 'โหลดแท็บ ChatGPT ใหม่ไม่สำเร็จ' });
+        const ok = await ensureAdapter(chat.id);
+        return sendResponse(ok ? { ok: true, tabId: chat.id } : { ok: false, error: 'adapter_unavailable' });
       }
 
       case 'sw.openStudio': {
@@ -335,14 +354,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           const [focused] = await chrome.scripting.executeScript({
             target,
-            func: () => {
+            args: [text, !!msg.requireDraft],
+            func: (expected, requireDraft) => {
               const box = document.querySelector('#prompt-textarea');
               if (!box) return false;
+              if (requireDraft) {
+                const norm = s => String(s || '').replace(/\s+/g,' ').trim();
+                if (norm(box.innerText) !== norm(expected)) return false;
+                const busy = [...document.querySelectorAll('[data-testid="stop-button"]')].some(b => {
+                  const r=b.getBoundingClientRect(); return r.width>0 && r.height>0;
+                });
+                if (busy) return false;
+              }
               box.focus();
               return document.activeElement === box;
             },
           });
-          if (!focused?.result) throw new Error('composer_not_found');
+          if (!focused?.result) throw new Error(msg.requireDraft ? 'composer_changed_or_busy' : 'composer_not_found');
           // Select through browser input so the editor's document, not only
           // its rendered DOM, is replaced. insertText alone appends a second copy.
           await cmd('Input.dispatchKeyEvent', {

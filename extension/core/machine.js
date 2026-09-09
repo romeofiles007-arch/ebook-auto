@@ -414,6 +414,14 @@ export class Machine {
       sample: String(last?.text || '').replace(/\s+/g, ' ').slice(0, 400),
       log: this.recentLog(),
     });
+    if (decision?.action === 'reload_tab') {
+      // หน้าเว็บค้างเอง เปิดห้องใหม่ในหน้าที่ค้างอยู่ก็ยังค้างเหมือนเดิม ต้องล้างทั้งหน้า
+      // มาถึงตรงนี้ได้เฉพาะความล้มที่คำสั่งไม่เคยออกจากเครื่องเรา จึงส่งซ้ำได้ไม่มีงานซ้อน
+      const done = await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch(() => null);
+      this.log(done?.ok ? 'ok' : 'warn', done?.ok ? 'โหลดหน้า ChatGPT ใหม่แล้ว — สั่งขั้นเดิมอีกครั้ง' : 'โหลดหน้า ChatGPT ใหม่ไม่สำเร็จ');
+      if (done?.ok) return await this.turn(prompt, opts);
+      return last;
+    }
     if (decision?.action === 'retry' || decision?.action === 'new_thread') {
       if (decision.action === 'new_thread' && (this.book.threadMode === 'reuse' || opts.wantImages)) return last;
       const again = await this.turn(prompt, {

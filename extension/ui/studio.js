@@ -921,6 +921,20 @@ async function superviseFailure(last, prompt, opts, { attempts = 1, transport } 
     addEvent('system', 'ผู้คุมกระบวนการซ่อมรูปแบบคำตอบให้', 'ใช้ของที่เว็บตอบมาแล้ว ไม่ได้สั่งเว็บใหม่');
     return { ...last, status: 'ok', text: JSON.stringify(decision.repaired), error: '' };
   }
+  if (decision.action === 'reload_tab') {
+    /**
+     * ปลอดภัยเฉพาะตอนที่ยังไม่ได้ส่งอะไรออกไป — ตัวกรองด้านบนกัน outcome_unknown ไว้แล้ว
+     * จึงมาถึงตรงนี้ได้เฉพาะความล้มที่คำสั่งไม่เคยออกจากเครื่องเรา
+     */
+    addEvent('system', 'ผู้คุมกระบวนการสั่งโหลดหน้า ChatGPT ใหม่', decision.reason || 'ล้างสถานะค้างของหน้าเว็บ');
+    const done = await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch((e) => ({ ok: false, error: e?.message }));
+    if (!done?.ok) {
+      addEvent('system', 'โหลดหน้า ChatGPT ใหม่ไม่สำเร็จ', done?.error || 'ไม่ทราบสาเหตุ');
+      return null;
+    }
+    const again = await sendTurnOnce(prompt, opts);
+    return again?.status === 'ok' ? again : null;
+  }
   if (decision.action === 'retry' || decision.action === 'new_thread') {
     if (decision.action === 'new_thread' && (book?.threadMode === 'reuse' || opts.wantImages)) return null;
     const again = await transport.send(prompt, {

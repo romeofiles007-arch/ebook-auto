@@ -755,11 +755,31 @@
     before ||= snapshotUserMessages();
     const received = () => findUserReceipt(expectedPrompt, before);
     if (received()) return received();
-    // One scoped click only. The native fallback belongs to runTurn, not another loop.
-    const btn = await waitForDom(() => {
-      const live = $(S.composer);
-      return sendCandidates(live).find(sendUsable) || null;
-    }, {timeoutMs:4000});
+
+    /**
+     * หลังเทิร์นสร้างภาพ ปุ่มส่งกลายเป็นวงกลมหมุน (ไม่ใช่ปุ่มหยุด) และค้างแบบนั้นได้นานมาก
+     *
+     * สถานะนี้ไม่ถูกจับด้วยตัวไหนเลย: ไม่มี stop-button ให้เห็น ตัวรอ "เทิร์นก่อนหน้าจบ" จึงผ่านฉลุย
+     * แล้วมาตายตรงนี้ในสี่วินาทีด้วย send_action_not_accepted ทั้งที่หน้าเว็บแค่ยังไม่ว่าง
+     * ผลคือทุกเทิร์นหลังสร้างภาพล้มด้วยเหตุผลเดียวกันซ้ำ ๆ (อาการ "มันเกิดขึ้นตลอด")
+     *
+     * ปุ่มที่มีอยู่แต่กดไม่ได้ = หน้าเว็บยังไม่ว่าง ต้องรอด้วยเกณฑ์เดียวกับที่รอเทิร์นก่อนหน้าจบ
+     * ไม่ใช่ล้มทันที และไม่ใช่รอไม่มีที่สิ้นสุด
+     */
+    const anyButton = () => sendCandidates($(S.composer)).length > 0;
+    const usableButton = () => sendCandidates($(S.composer)).find(sendUsable) || null;
+    let btn = await waitForDom(usableButton, { timeoutMs: 4000 });
+    if (!btn && anyButton()) {
+      report(turnId, 'sending', 'ปุ่มส่งยังกดไม่ได้ (หน้าเว็บยังไม่ว่างหลังเทิร์นก่อนหน้า) — รอให้ว่างก่อน');
+      const how = await waitForBusyToClear(() => !usableButton(), {
+        timeoutMs: 180000,
+        staleMs: STUCK_SILENCE_MS,
+        turnId,
+        label: 'รอปุ่มส่งกลับมากดได้ ',
+      });
+      if (how === 'stale') throw new Error('composer_busy_stuck');
+      btn = usableButton();
+    }
     if (!btn) throw new Error('send_action_not_accepted');
     if (received()) return received();
     if (stopButtonVisible()) throw new Error('previous_turn_running');
