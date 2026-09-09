@@ -59,7 +59,7 @@ import {
   sectionPrompt,
 } from '../core/prompts.js';
 import { parseJson, extractSection } from '../core/extract.js';
-import { supervisorPrompt, parseSupervisorDecision, repairPrompt } from '../core/supervisor.js';
+import { supervisorPrompt, parseSupervisorDecision, repairPrompt, ALL_SUPERVISOR_ACTIONS } from '../core/supervisor.js';
 import { addCeoUsage, ceoUsageLabel } from '../core/ceo-usage.js';
 import * as B from '../core/bible.js';
 import { ITEM_KINDS, planItems, suggestItemSize } from '../core/items.js';
@@ -2191,6 +2191,16 @@ let ceoStopped = false;
  * ครบเพดานที่จุดเดิมแล้ว — ให้ผู้คุมกระบวนการตัดสินว่าจะกดต่ออีกหรือหยุดจริง
  * ไม่มีผู้คุม (ไม่ได้เปิดโหมด CEO) = หยุดตามเดิม เพราะไม่มีใครรับผิดชอบการตัดสินใจนั้น
  */
+/** ขั้นสร้างภาพยังเหลือรูปที่ระบบสร้างเองได้กี่รูป — ผู้คุมต้องรู้ ถึงจะเลือกกดปุ่มภาพได้ถูก */
+function imagesLeftForCeo() {
+  try {
+    if (!book || !['gate_images', 'images'].includes(book.job?.step)) return 0;
+    return plannedImageJobs(book).filter((j) => !j.manual && !assetNames.includes(j.name)).length;
+  } catch (_) {
+    return 0;
+  }
+}
+
 async function askResumeDecision() {
   if (askingResume) return;
   const stopHere = (why) => {
@@ -2210,19 +2220,47 @@ async function askResumeDecision() {
   }
   askingResume = true;
   try {
+    const step = book?.job?.step || '-';
+    const left = imagesLeftForCeo();
     const decision = await supervisor({
-      step: book?.job?.step || '-',
+      step,
       status: book?.job?.status || '-',
       attempts: autoContinues,
-      lastError: `งานค้างที่ขั้นเดิมและกดทำต่อให้แล้ว ${autoContinues} ครั้ง ยังกลับมาค้างที่เดิม`,
+      lastError:
+        `งานค้างที่ขั้นเดิมและกดทำต่อให้แล้ว ${autoContinues} ครั้ง ยังกลับมาค้างที่เดิม` +
+        (left ? ` · ขั้นสร้างภาพยังเหลืออีก ${left} รูปที่ระบบสร้างเองได้` : '') +
+        (hasPendingTurn() ? ' · ยังมีเทิร์นค้างอยู่กับหน้าเว็บ' : ' · ไม่มีอะไรเดินอยู่เลย'),
       log: recentLogLines(),
+      // หน้า Studio กดปุ่มพวกนี้ได้จริง จึงเสนอให้ผู้คุมเลือกได้ ต่างจากตอนที่เครื่องผลิตเรียกจากข้างใน
+      actions: ALL_SUPERVISOR_ACTIONS,
     });
-    if (decision?.action === 'retry' || decision?.action === 'new_thread') {
+    /**
+     * ท่ากดปุ่มคือท่าที่คนใช้กู้งานจริงมาตลอด และเป็นท่าที่ถูกที่สุด
+     * ไม่ส่งข้อความใหม่ ไม่กินโควตา แค่สั่งให้สิ่งที่ค้างอยู่เดินต่อ
+     */
+    const go = async (why, run) => {
       autoContinues = 0;
       autoContinueTotal++;
       lastActivityAt = Date.now();
-      addEvent('system', 'ผู้คุมกระบวนการสั่งให้ทำต่อ', `${decision.reason || ''} · รวมแล้ว ${autoContinueTotal}/${AUTO_CONTINUE_TOTAL_MAX} ครั้งในเล่มนี้`);
-      resumeGo();
+      addEvent('system', `ผู้คุมกระบวนการ: ${why}`, `${decision.reason || ''} · รวมแล้ว ${autoContinueTotal}/${AUTO_CONTINUE_TOTAL_MAX} ครั้งในเล่มนี้`);
+      await run();
+    };
+    if (decision?.action === 'press_images' || (decision?.action === 'retry' && left && ['gate_images', 'images'].includes(step))) {
+      await go('กดทำต่อขั้นสร้างภาพ', async () => {
+        if (phase2Running) return;
+        await (book?.job?.step === 'images' || book?.job?.step === 'gate_images' ? startPhase2() : resumeGo());
+      });
+      return;
+    }
+    if (decision?.action === 'open_chat') {
+      await go('เปิดหน้าต่าง ChatGPT ให้พร้อมก่อนแล้วสั่งเดินต่อ', async () => {
+        await focusChat();
+        await resumeGo();
+      });
+      return;
+    }
+    if (decision?.action === 'press_continue' || decision?.action === 'retry' || decision?.action === 'new_thread') {
+      await go('สั่งให้ทำต่อ', async () => resumeGo());
       return;
     }
     stopHere(`ผู้คุมกระบวนการสั่งหยุด${decision?.reason ? ` — ${decision.reason}` : ''}`);

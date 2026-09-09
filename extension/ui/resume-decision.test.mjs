@@ -21,6 +21,14 @@ function fixture({ supervisor = null, total = 0 } = {}) {
     addEvent: (kind, title, detail) => events.push(`${title} :: ${detail || ''}`),
     status: () => {},
     resumeGo: () => events.push('RESUME'),
+    // ท่ากดปุ่มบนหน้า Studio ที่ผู้คุมเลือกได้เมื่อถูกเรียกจากหน้านี้
+    ALL_SUPERVISOR_ACTIONS: { retry: '', new_thread: '', stop: '', press_continue: '', press_images: '', open_chat: '' },
+    hasPendingTurn: () => false,
+    plannedImageJobs: () => [],
+    assetNames: [],
+    phase2Running: false,
+    startPhase2: async () => events.push('PHASE2'),
+    focusChat: async () => events.push('FOCUS'),
     unattended: true,
     ceoModeOn: () => !!supervisor,
     autoContinues: 3,
@@ -43,7 +51,7 @@ test('ผู้คุมสั่งให้ทำต่อ = กดต่อ�
   const f = fixture({ supervisor: async () => ({ action: 'retry', reason: 'ห้องแชตน่าจะกลับมาปกติแล้ว' }) });
   await f.ask();
   assert.ok(f.events.includes('RESUME'));
-  assert.match(f.events.join('\n'), /ผู้คุมกระบวนการสั่งให้ทำต่อ/);
+  assert.match(f.events.join('\n'), /ผู้คุมกระบวนการ: สั่งให้ทำต่อ/);
 });
 
 test('ผู้คุมสั่งหยุด = หยุดจริง ไม่กดต่อ', async () => {
@@ -99,4 +107,36 @@ test('นาฬิกาเคารพธงหยุดของผู้ค�
   assert.match(src, /if \(autoContinues >= autoContinueMax\(\)\)/);
   // ล้างธงได้ด้วยการที่คนสั่งเริ่มหรือสั่งทำต่อเองเท่านั้น
   assert.equal((src.match(/^\s*ceoStopped = false;/gm) || []).length, 2);
+});
+
+/**
+ * ท่าที่คนใช้กู้งานจริงคือการกดปุ่มบนหน้าจอ ไม่ใช่ท่าในเครื่องผลิต
+ * ผู้คุมเคยสั่งได้แต่ท่าที่ใช้ได้ตอนเครื่องกำลังเดิน ซึ่งเป็นตอนที่ไม่ค่อยต้องการมันเท่าไร
+ */
+test('สั่งกดปุ่มขั้นสร้างภาพ = เดินขั้นภาพต่อ ไม่ใช่แค่ทำต่อเฉย ๆ', async () => {
+  const f = fixture({ supervisor: async () => ({ action: 'press_images', reason: 'ยังเหลือรูปที่สร้างเองได้' }) });
+  vm.runInContext("book.job.step = 'images';", f.scope);
+  await f.ask();
+  assert.ok(f.events.includes('PHASE2'));
+  assert.equal(f.events.includes('RESUME'), false);
+});
+
+test('สั่งเปิดหน้าต่าง ChatGPT = เปิดให้พร้อมก่อนแล้วค่อยสั่งเดินต่อ', async () => {
+  const f = fixture({ supervisor: async () => ({ action: 'open_chat', reason: 'หน้าเว็บยังไม่พร้อม' }) });
+  await f.ask();
+  assert.deepEqual(f.events.filter((e) => e === 'FOCUS' || e === 'RESUME'), ['FOCUS', 'RESUME']);
+});
+
+test('สั่งกดทำต่อ = เดินต่อจากขั้นที่บันทึกไว้', async () => {
+  const f = fixture({ supervisor: async () => ({ action: 'press_continue', reason: 'ไม่มีอะไรเดินอยู่' }) });
+  await f.ask();
+  assert.ok(f.events.includes('RESUME'));
+});
+
+test('ผู้คุมได้เห็นรายการท่ากดปุ่มเฉพาะตอนถูกเรียกจากหน้า Studio', async () => {
+  const src = await readFile(new URL('./studio.js', import.meta.url), 'utf8');
+  assert.match(src, /actions: ALL_SUPERVISOR_ACTIONS/);
+  const machine = await readFile(new URL('../core/machine.js', import.meta.url), 'utf8');
+  // เครื่องผลิตกดปุ่มของตัวเองไม่ได้ จึงต้องไม่ถูกเสนอท่าพวกนี้
+  assert.equal(/press_images|press_continue|open_chat/.test(machine), false);
 });
