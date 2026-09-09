@@ -5,6 +5,19 @@
  */
 
 import * as db from '../core/db.js';
+import { mountRunStatus } from './run-status.js';
+
+const paintRunStatus = mountRunStatus(document.querySelector('main'), async (state) => {
+  if (state.action === 'resume') return resumeGo();
+  const target = document.getElementById(state.action || 'start');
+  target?.scrollIntoView({behavior:'smooth', block:'start'});
+});
+function runState(kind, reason, action = '', actionLabel = '') {
+  const step = book?.job?.step;
+  const run = {kind, reason, action, actionLabel, at:Date.now(), step:STEP_NAMES[step] || step || 'เตรียมเล่ม'};
+  paintRunStatus(run);
+  chrome.runtime.sendMessage({type:'ui.activity', event:{id:`run:${run.at}:${Math.random()}`, at:run.at, run}}).catch(()=>{});
+}
 import { productionSettings } from '../core/production-mode.js';
 import { crewMarkup } from './crew-sprites.js';
 import { readReferenceSettings, validateBackMatterSetup, resetReferenceSources, selectReferencesAutomatically } from './references-ui.js';
@@ -460,6 +473,7 @@ function expectedPhysicalPages(b) {
 }
 
 function logMachine(e) {
+  if (e.type === 'step' || e.type === 'turn.end') runState('working', e.type === 'step' ? `กำลังทำขั้น ${e.step}` : 'ได้รับคำตอบแล้ว กำลังตรวจและบันทึก');
   /**
    * ทุกเหตุการณ์จากเครื่องคือหลักฐานว่ามันยังไม่ตาย ไม่ใช่แค่ตอนเริ่มเทิร์น
    *
@@ -479,6 +493,7 @@ function logMachine(e) {
      * ตัวเลข token มาจากเซิร์ฟเวอร์โดยตรง จึงเป็นค่าจริงไม่ใช่การประเมิน
      */
     const bits = [];
+    if (e.meta?.elapsedMs != null) bits.push(`ส่งถึงรับผลจริง ${(e.meta.elapsedMs/1000).toFixed(1)} วินาที`);
     if (e.meta?.ms) bits.push(`ตอบกลับใน ${e.meta.ms} ms`);
     if (e.meta?.promptTokens != null) {
       const price = priceFor(e.meta.model || textApiModel(), customPrice);
@@ -596,7 +611,48 @@ setInterval(() => {
     $('detail').textContent =
       `⏳ ไม่มีสัญญาณจากหน้า ChatGPT มา ${quiet} วินาที · ค้างอยู่ที่ขั้น “${where}”` +
       (quiet > 90 ? ' — ลองดูแท็บ ChatGPT ว่ามี Prompt ค้างในช่องพิมพ์หรือปุ่มหยุดค้างอยู่ไหม' : '');
-    status(`ค้างที่ขั้น ${where} มา ${quiet} วินาที`);
+    status(`ยังรอผลขั้น ${where} · ไม่ได้รับสัญญาณใหม่ ${quiet} วินาที`);
+    return;
+  }
+
+  /**
+   * ทางที่ 3: ไม่มีอะไรเดินอยู่เลย ทั้งที่งานยังไม่จบ — กดทำต่อให้เองในโหมดไร้คนเฝ้า
+   *
+   * สภาพนี้คืองานที่ถูก Halt แล้วนอนรออยู่เฉย ๆ ซึ่งไม่มีวันขยับจนกว่าจะมีคนมากด
+   * ผู้ใช้ที่กดอัตโนมัติไว้แล้วเดินออกไปจึงกลับมาเจอเล่มที่ค้างมาเป็นชั่วโมงโดยไม่มีใครทำอะไร
+   *
+   * สิ่งที่จงใจไม่แตะ เพราะการกดต่อเองจะทำให้แย่ลง ไม่ใช่ดีขึ้น:
+   *   rate_limited  — ชนลิมิตแล้ว กดต่อคือไปชนซ้ำและเผาโควตาที่เหลือ
+   *   ผู้ใช้กดหยุด   — unattended ถูกปลดไปแล้วตั้งแต่ตอนกดหยุด
+   *   งานที่เดินอยู่ — machineBusy หรือมีเทิร์นค้าง แปลว่าไม่ได้นิ่ง แค่ยังไม่เสร็จ
+   * และจำกัดจำนวนครั้ง เพราะสภาพที่กดกี่ทีก็กลับมาเหมือนเดิมต้องให้คนมาดู ไม่ใช่วนต่อทั้งคืน
+   */
+  if (
+    shouldAutoContinue({
+      unattended,
+      busy: machineBusy || hasPendingTurn(),
+      job: book?.job,
+      quietMs: lastActivityAt ? Date.now() - lastActivityAt : 0,
+    })
+  ) {
+    if (autoContinues >= AUTO_CONTINUE_MAX) {
+      unattended = false;
+      addEvent(
+        'system',
+        'เลิกกดทำต่อให้เอง',
+        `กดต่อให้แล้ว ${AUTO_CONTINUE_MAX} ครั้งแต่ยังกลับมาค้างที่เดิม — ต้องให้คนดูว่าติดอะไร งานถูกบันทึกไว้ครบ`,
+      );
+      status('งานค้างซ้ำที่เดิม — หยุดกดต่อให้เองแล้ว รอให้คุณมาดู');
+      return;
+    }
+    autoContinues++;
+    lastActivityAt = Date.now(); // กันไม่ให้รอบถัดไปยิงซ้อนระหว่างที่ resumeGo กำลังตั้งตัว
+    addEvent(
+      'system',
+      `กดทำต่อให้เอง ${autoContinues}/${AUTO_CONTINUE_MAX}`,
+      `งานนิ่งมาเกิน ${AUTO_CONTINUE_QUIET_MS / 1000} วินาทีที่ขั้น ${STEP_NAMES[book.job.step] || book.job.step} โดยไม่มีอะไรเดินอยู่`,
+    );
+    resumeGo();
     return;
   }
 
@@ -618,8 +674,8 @@ setInterval(() => {
   $('detail').textContent =
     `⏳ ไม่มีความคืบหน้ามา ${ago} · ขั้นล่าสุดคือ “${where}”` +
     (quiet > limit * 2
-      ? ' — นานผิดปกติแล้ว เปิด DevTools (F12) แท็บ Console ดูว่ามี error ค้างอยู่ไหม แล้วกดหยุดไว้ก่อนเพื่อบันทึกงาน จากนั้นกดทำต่อได้'
-      : ' — ยังไม่ถือว่าผิดปกติ แต่ถ้าเลยจากนี้ไปอีกจะแจ้งซ้ำ');
+      ? ' — ยังไม่มีหลักฐานว่างานหยุด ระบบจะแจ้งเมื่อได้รับผลหรือข้อผิดพลาด'
+      : ' — ยังรอผลจากขั้นนี้');
   status(`เงียบมา ${ago} ที่ขั้น ${where}`);
 }, 5000);
 
@@ -633,6 +689,7 @@ setInterval(() => {
  * และท้ายประโยคล่าสุดที่โมเดลเพิ่งเขียน
  */
 function showApiProgress(m) {
+  runState('waiting', `API · ${m.phase || 'รอคำตอบ'}${m.chars ? ` · ${m.chars} ตัวอักษร` : ''}`);
   const secs = m.ms ? (m.ms / 1000).toFixed(1) : '0.0';
   if (m.phase === 'sending') {
     status(`ส่งงานให้ ${m.model || 'API'} แล้ว รอคำตอบ`);
@@ -666,6 +723,7 @@ function handleGptMessage(m) {
 
   // ไม่มีเทิร์นไหนรอผลอยู่ = ข้อความนี้มาช้ากว่างานที่จบไปแล้ว ห้ามทับสถานะปัจจุบัน
   if (!hasPendingTurn()) return;
+  runState('waiting', [m.message || m.phase, m.detail, m.note].filter(Boolean).join(' · '));
   if (m.phase !== lastProgressLog || Date.now() - lastProgressLogAt > 5000) {
     lastProgressLog = m.phase;
     lastProgressLogAt = Date.now();
@@ -677,6 +735,7 @@ function handleGptMessage(m) {
     new_thread: 'กำลังเปิดบทสนทนาใหม่',
     typing: 'กำลังใส่ Prompt ลงใน ChatGPT',
     sending: 'กำลังกดส่ง Prompt',
+    submitted: 'ยืนยันแล้วว่าข้อความเข้าในบทสนทนา — กำลังรอคำตอบ',
     waiting: 'กำลังรอ ChatGPT ตอบ',
   };
   status(map[m.phase] || m.phase || 'ChatGPT กำลังทำงาน');
@@ -710,6 +769,8 @@ function handleGptMessage(m) {
 const RETRYABLE_TURN_STATUS = new Set(['error', 'empty', 'no_response']);
 
 function turnErrorMessage(res) {
+  if (res?.meta?.error === 'previous_turn_running') return 'ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — ระบบไม่กดหยุดหรือส่งงานทับ รอเทิร์นนั้นจบแล้วลองต่อใน Studio';
+  if (res?.meta?.error === 'outcome_unknown') return res.meta.detail;
   const why = res?.meta?.error ? ` (${res.meta.error})` : '';
   if (res?.meta?.error === 'chat_page_not_ready' || res?.meta?.error === 'adapter_unavailable')
     return 'หน้า ChatGPT ยังเปิดไม่พร้อม — เปิดแท็บ chatgpt.com ค้างไว้แล้วลองใหม่อีกครั้ง';
@@ -734,13 +795,17 @@ function retryNotice(box, n, max, what, res) {
  * fatal = ตอบมาชัดเจนแล้วว่าทำให้ไม่ได้ (เช่นค้นเว็บไม่ได้) ยิงซ้ำก็ได้ผลเดิม เปลืองโควตาเปล่า
  */
 async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, parse } = {}) {
+  // Only these setup prompts use the complete-JSON completion contract.
+  if (parse === parseTitleAnswer) opts = {...opts, expectedJsonKeys:['titles']};
+  else if (parse === parseTrendAnswer) opts = {...opts, expectedJsonKeys:['topics','trends']};
+  else if (opts.label === 'เสนอสารบัญหลายทาง') opts = {...opts, expectedJsonKeys:['directions']};
   let last = null;
   for (let i = 1; i <= attempts; i++) {
     const res = (await transport.send(prompt, opts)) || { status: 'error' };
     let fatal = false;
     if (res.status !== 'ok') {
       res.error = turnErrorMessage(res);
-      fatal = !RETRYABLE_TURN_STATUS.has(res.status);
+      fatal = ['outcome_unknown','previous_turn_running'].includes(res.meta?.error) || !RETRYABLE_TURN_STATUS.has(res.status);
     } else if (parse) {
       let out;
       try {
@@ -1038,9 +1103,11 @@ async function generateTrendIdeas() {
     renderTopicChoices();
     setMode(currentMode);
     status('เลือกหัวข้อที่สนใจได้เลย');
+    if (!autoPilot()) runState('input', 'เลือกหัวข้อบนหน้าจอ Studio', 'trendIdeas', 'เปิดตัวเลือกหัวข้อ');
   } catch (e) {
     box.innerHTML = `<b>ขอหัวข้อไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}<br>กดปุ่มเดิมอีกครั้งเพื่อลองใหม่</div>`;
     status('ขอหัวข้อไม่สำเร็จ');
+    if (!autoPilot()) runState('stopped', e?.message || String(e), 'start', 'ลองขอหัวข้อใหม่ใน Studio');
   } finally {
     button.disabled = false;
   }
@@ -1087,9 +1154,11 @@ async function generateOutlineDirections() {
     renderOutlineChoices(res.data, { title, origin: 'auto' });
     setMode(currentMode);
     status('รอเลือกทิศทางสารบัญ');
+    if (!autoPilot()) runState('input', 'เลือกทิศทางสารบัญใน Studio แล้วระบบจะเริ่มเขียน', 'outlineDirections', 'เปิดตัวเลือกสารบัญ');
   } catch (e) {
     box.innerHTML = `<b>สร้างตัวเลือกสารบัญไม่สำเร็จ</b><div class="muted">${esc(e?.message || e)}</div>`;
     status('สร้างตัวเลือกสารบัญไม่สำเร็จ');
+    if (!autoPilot()) runState('stopped', e?.message || String(e), 'start', 'ลองเสนอสารบัญใหม่ใน Studio');
   } finally {
     button.disabled = false;
   }
@@ -1338,9 +1407,12 @@ async function generateTitleIdeas() {
     });
     setMode(currentMode);
     status('รอเลือกชื่อหนังสือ');
+    if (!autoPilot()) runState('input', 'เลือกชื่อหนังสือใน Studio', 'titleIdeas', 'เปิดตัวเลือกชื่อ');
   } catch (e) {
     box.textContent = 'คิดชื่อไม่สำเร็จ: ' + (e?.message || e);
     status('คิดชื่อไม่สำเร็จ');
+    if (autoPilot()) throw e;
+    runState('stopped', e?.message || String(e), 'start', 'ลองคิดชื่ออีกครั้งใน Studio');
   } finally {
     button.disabled = false;
   }
@@ -1733,6 +1805,29 @@ let fullAutoRunning = false;
 const autoPilot = () => fullAutoRunning;
 
 /**
+ * โหมดไร้คนเฝ้า — ต่างจากธงอัตโนมัติตรงที่ไม่ถูกปลดเมื่องานสะดุด
+ *
+ * ธง fullAutoRunning ถูกปลดทุกครั้งที่งานหยุดกลางทาง (ตามเจตนาเดิมคือกันประตูผ่านเองซ้ำ)
+ * แต่ "ผู้ใช้ตั้งใจให้เดินจนจบโดยไม่ต้องมากด" เป็นคนละเรื่องกัน และต้องอยู่ต่อหลังสะดุด
+ * ไม่งั้นตัวกดทำต่อให้เองจะไม่มีวันทำงาน เพราะพอสะดุดปุ๊บธงก็หายไปแล้ว
+ */
+let unattended = false;
+let autoContinues = 0;
+const AUTO_CONTINUE_MAX = 3;
+const AUTO_CONTINUE_QUIET_MS = 45000;
+
+/**
+ * เงื่อนไขของการกดทำต่อให้เอง แยกออกมาเป็นฟังก์ชันล้วนเพื่อให้ทดสอบได้จริง
+ * ทุกข้อในนี้คือ "ถ้าขาดไปข้อเดียวแล้วการกดต่อจะทำให้แย่ลง"
+ */
+function shouldAutoContinue({ unattended: on, busy, job, quietMs }) {
+  if (!on || busy || !job) return false;
+  if (job.step === 'done') return false;
+  if (job.status === 'rate_limited') return false; // ชนลิมิตแล้ว กดต่อคือไปชนซ้ำ
+  return quietMs >= AUTO_CONTINUE_QUIET_MS;
+}
+
+/**
  * ปลดธงอัตโนมัติเมื่อรอบนั้นเลิกเดินแล้ว
  *
  * ธงนี้ทำสองหน้าที่พร้อมกัน คือกันการกดปุ่มซ้ำระหว่างเดิน และสั่งให้ประตูทุกบานผ่านไปเอง
@@ -1754,6 +1849,9 @@ async function runFullAuto() {
   if (machineBusy || hasPendingTurn()) return status('มีงานกำลังทำอยู่ กรุณารอให้งานนั้นจบก่อน');
 
   fullAutoRunning = true;
+  unattended = true; // ผู้ใช้สั่งให้เดินจนจบเอง ตัวกดทำต่อให้เองจึงมีสิทธิ์ทำงานตั้งแต่ตรงนี้
+  autoContinues = 0;
+  runState('working', 'เริ่มอัตโนมัติ: เลือกหัวข้อ ชื่อ และสารบัญ');
   const button = $('fullAuto');
   button.disabled = true;
   button.textContent = '🤖 กำลังทำทั้งเล่ม...';
@@ -1781,6 +1879,7 @@ async function runFullAuto() {
       status('อัตโนมัติ: กำลังถาม ChatGPT ว่าตอนนี้มีอะไรน่าสนใจ');
       try {
         await generateTrendIdeas();
+        if (!fullAutoRunning) return;
         if (trendPool.length) trendSeed = structuredClone(trendPool[0]);
       } catch (e) {
         addEvent('system', 'อัตโนมัติ: ขอหัวข้อไม่สำเร็จ', e?.message || String(e));
@@ -1794,6 +1893,7 @@ async function runFullAuto() {
 
       status('อัตโนมัติ: กำลังให้ ChatGPT คิดชื่อหนังสือ');
       await generateTitleIdeas();
+      if (!fullAutoRunning) return;
       // อ่านค่าจากตัวเลือกแรกตรง ๆ ไม่กดปุ่ม เพราะปุ่มนั้นสั่งวางสารบัญต่อทันที
       // ซึ่งจะซ้ำกับขั้นถัดไปของเราเอง แล้วเปลืองข้อความ ChatGPT ไปฟรีหนึ่งรอบ
       const first = $('titleIdeas')?.querySelector('[data-book-title]');
@@ -1810,6 +1910,7 @@ async function runFullAuto() {
     if (!outlineDirection || outlineDirection.titleBase !== $('title').value.trim()) {
       resetOutlineDirection();
       await generateOutlineDirections();
+      if (!fullAutoRunning) return;
       const pick = $('outlineDirections')?.querySelector('[data-outline-index="0"]');
       if (!pick) throw new Error('วางสารบัญไม่สำเร็จ — ยังไม่ได้เริ่มเขียนเล่ม');
       pick.click();
@@ -1821,12 +1922,14 @@ async function runFullAuto() {
     //    ต้องปลดธงตรงนี้ ไม่งั้นการกดปุ่มครั้งต่อไปจะถูก guard ตัดทิ้งเงียบ ๆ
     if (!(await create())) {
       stopAutoPilot();
+      runState('input', 'มีข้อมูลจำเป็นที่ยังไม่พร้อม ตรวจข้อความบนหน้าตั้งค่า', 'start', 'เปิดหน้าตั้งค่า');
       status('อัตโนมัติยังไม่เริ่ม — จัดการสิ่งที่ค้างบนหน้าตั้งค่าแล้วกดใหม่ได้เลย');
       addEvent('system', 'อัตโนมัติยังไม่เริ่ม', 'มีข้อมูลจำเป็นที่ยังไม่พร้อม ผลการคิดชื่อและสารบัญที่ได้ยังอยู่');
     }
   } catch (e) {
     stopAutoPilot();
     status('อัตโนมัติหยุด: ' + (e?.message || e));
+    runState('stopped', e?.message || String(e), 'start', 'ตรวจค่าและเริ่มใหม่ใน Studio');
     addEvent('system', 'อัตโนมัติหยุดกลางทาง', e?.message || String(e));
   } finally {
     button.disabled = false;
@@ -1840,6 +1943,7 @@ async function runFullAuto() {
  *   ผู้เรียกที่ถือธงอัตโนมัติต้องปลดธงเมื่อได้เท็จ ไม่งั้นธงจะค้างทั้งที่ไม่มีงานเดินอยู่เลย
  */
 async function create() {
+  const requestedAutomatic = autoPilot();
   const topic = $('title').value.trim();
   if (!topic) {
     // ช่องหัวข้ออยู่คนละขั้นกับปุ่มเริ่ม การ focus ของที่ซ่อนอยู่คือการไม่เกิดอะไรขึ้นเลย
@@ -1935,6 +2039,7 @@ async function create() {
   }
 
   const backMatterError = await validateBackMatterSetup();
+  if (requestedAutomatic && !autoPilot()) return false;
   if (backMatterError) {
     wizardGo('book');
     status(backMatterError);
@@ -1959,6 +2064,7 @@ async function create() {
   setMacroStage('write');
 
   book = readForm();
+  book.automation = {mode: autoPilot() ? 'full' : 'guided', version:1};
   await db.saveBook(book);
   // เล่มเพิ่งมี id — บันทึกรูปผู้เขียนที่อุ้มมาจากหน้าตั้งค่าเดี๋ยวนี้ ก่อนที่ขั้นสร้างภาพจะไปหามัน
   await saveSetupAuthorPhoto();
@@ -1979,6 +2085,7 @@ async function create() {
 
 async function runMachine() {
   machineBusy = true;
+  runState('working', 'กำลังดำเนินการตามขั้นของเล่ม');
   lastActivityAt = Date.now();
   let r;
   try {
@@ -2041,6 +2148,7 @@ async function runMachine() {
 
 /** หยุดแบบตั้งใจ ไม่ใช่พัง — งานอยู่ครบ กดทำต่อได้ */
 async function halted() {
+  runState('stopped', book.job?.error || (book.job?.status === 'rate_limited' ? 'โควตาหมด — ทำต่อเมื่อโควตากลับมา' : 'งานหยุดและบันทึกไว้แล้ว'), 'resume', 'ทำต่อจากขั้นที่บันทึกไว้');
   /**
    * จุดนี้คือ "ต้องให้คนมาจัดการก่อน" เสมอ (ชนลิมิต · สุขภาพไม่ผ่าน · ห้องแชตหาย)
    * ถ้ายังถือธงอัตโนมัติไว้ ประตูภาพข้างล่างจะสั่งเริ่ม Phase 2 ใหม่ทันทีที่เปิด
@@ -2096,12 +2204,13 @@ function explainJobError(raw) {
 
 // ---------- ทำต่อจากที่ค้าง ----------
 function showResume(b) {
-  const done = b.job?.status === 'done';
+  const done = b?.job?.status === 'done' && !(b.automation?.mode === 'full' && !b.autoBookExportedAt && !b.imagePhase?.autoBookExportedAt);
   if (!b || done) {
     setMacroStage('start');
     return $('resume').classList.add('hidden');
   }
   $('resume').classList.remove('hidden');
+  runState('stopped', b.job?.error || 'มีเล่มที่ยังไม่เสร็จบันทึกไว้ เลือกทำต่อจากขั้นเดิมได้', 'resume', 'ทำต่อจากงานที่บันทึก');
   /**
    * การ์ดงานค้าง = ยืนอยู่หน้าเริ่มต้น ไม่ได้อยู่ในงานนั้น
    *
@@ -2171,7 +2280,10 @@ async function resumeGo() {
 
   $('resume').classList.add('hidden');
   $('start').classList.add('hidden');
+  fullAutoRunning = book.automation?.mode === 'full';
+  if (book.job.step === 'done') return finish();
   if (['gate_images', 'images'].includes(book?.job?.step)) {
+    if (fullAutoRunning && !hasManualImages(book)) return startPhase2();
     if (book.job.step === 'images') {
       book.job.step = 'gate_images';
       book.job.status = 'paused';
@@ -2282,7 +2394,7 @@ async function loadUnfinished() {
       const latest = useShared ? shared : local;
       return { id, latest, useShared };
     })
-    .filter(({ latest }) => latest?.job && latest.job.status !== 'done' && latest.job.step !== 'done')
+    .filter(({ latest }) => latest?.job && ((latest.job.status !== 'done' && latest.job.step !== 'done') || (latest.automation?.mode === 'full' && !latest.autoBookExportedAt && !latest.imagePhase?.autoBookExportedAt)))
     .sort((a, b) => (b.latest.updatedAt || 0) - (a.latest.updatedAt || 0));
 
   const pick = candidates[0];
@@ -2538,6 +2650,7 @@ async function openSavedProject(id) {
 }
 
 const fail = (e) => {
+  runState('stopped', e?.message || String(e), book?.job ? 'resume' : 'start', book?.job ? 'ลองทำต่อจากงานที่บันทึก' : 'ตรวจค่าใน Studio');
   chime('attention'); // งานหยุดกลางทาง ยิ่งรู้เร็วยิ่งเสียเวลารอเปล่าน้อย
   stopAutoPilot(); // รอบอัตโนมัติจบลงตรงนี้แล้ว ห้ามทิ้งธงไว้ให้ประตูรอบหน้าผ่านไปเอง
   setMode(currentMode); // คงชื่อโหมดไว้ให้รู้ว่าพลาดตอนทำอะไร แต่เลิกแสดงว่ากำลังทำงาน
@@ -2550,6 +2663,7 @@ const fail = (e) => {
 
 // ---------- ประตูที่ 2: แก้ก่อนส่งออก ----------
 async function openEditor() {
+  if (!autoPilot()) runState('input', 'ตรวจต้นฉบับ แล้วกดไปต่อใน Studio', 'editor', 'เปิดขั้นตรวจต้นฉบับ');
   // ประตูตรวจงานรอคนจริง ๆ เฉพาะตอนไม่ได้เดินอัตโนมัติ — โหมดอัตโนมัติผ่านเองอยู่แล้ว
   if (!autoPilot()) chime('attention');
   $('start').classList.add('hidden');
@@ -3718,6 +3832,7 @@ async function openImagePhaseGate() {
   phase2Running = false;
   phase2Stage = null;
   book = await db.loadBook(book.id);
+  assetNames = (await db.loadAssets(book.id)).map(a => a.name);
   sections = (await db.loadSections(book.id)).sort((a, b) => cmpId(a.id, b.id));
 
   $('start').classList.add('hidden');
@@ -3750,7 +3865,7 @@ async function openImagePhaseGate() {
    * ไม่มีอะไรให้เครื่องทำต่อ กดผ่านไปก็ได้แค่เล่มที่ไม่มีภาพ แล้วไปโผล่หน้าสรุปทันที
    * ซึ่งคือสิ่งที่เกิดขึ้นจริงและทำให้ต้องรันซ้ำหลายรอบโดยไม่รู้ว่าพลาดตรงไหน
    */
-  if (autoPilot() && hasManualImages(book)) {
+  if (autoPilot() && plannedImageJobs(book).some(j => j.manual && !assetNames.includes(j.name))) {
     addEvent(
       'system',
       'อัตโนมัติหยุดที่ประตูภาพ',
@@ -3758,16 +3873,19 @@ async function openImagePhaseGate() {
     );
     chime('attention');
     status('รอคุณใส่ภาพ — คัดลอก Prompt ไปสร้างแล้วอัปโหลดกลับ');
-  } else if (autoPilot() && book.imagePhase?.status !== 'complete') {
+    runState('input', 'คุณเลือกใช้ภาพอัปโหลด — ใส่ไฟล์ที่ยังขาดใน Studio', 'imagePhase', 'เปิดรายการภาพที่ขาด');
+  } else if (autoPilot()) {
     addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ทดสอบระบบ', 'เริ่ม Phase 2 อัตโนมัติ');
     if (book.imagePhase?.failures?.length || book.imagePhase?.status === 'partial') {
       stopAutoPilot();
       status('ภาพยังไม่ผ่านตรวจหรือสร้างไม่สำเร็จ — บันทึกงานแล้ว กรุณาตรวจเหตุผลในรายการภาพ');
+      runState('stopped', 'สร้างภาพบางรูปไม่สำเร็จหลังลองอัตโนมัติแล้ว', 'imagePhase', 'ดูเหตุผลและลองภาพที่ขาด');
       return;
     }
     return await startPhase2();
   }
   $('imagePhase').scrollIntoView({ behavior: 'smooth' });
+  if (!autoPilot()) runState('input', 'เลือกเริ่มสร้างภาพใน Studio ระบบจะส่งให้เอง', 'imagePhase', 'เปิดขั้นสร้างภาพ');
   // Phase 1 พร้อมแล้ว: เขียน snapshot ทั้งเล่มลง Shared Workspace ให้ Chrome profile อื่นเปิด Phase 2 ต่อได้
   await syncSharedProject(book.id);
   // อัปเดตประวัติโครงการทันที ไม่ต้องให้ผู้ใช้กดรีเฟรชเอง
@@ -4126,22 +4244,27 @@ async function finish() {
   chime('done');
   $('doneText').textContent = `“${book.outline?.title || book.topic}” · ${pages} หน้า · ติดขัด ${pf.blocking} ข้อ, เตือน ${pf.warnings} ข้อ`;
   $('doneCoverRedo').classList.toggle('hidden', ['none', 'upload'].includes(book.coverMode || 'prompt'));
-  status('เสร็จแล้ว');
+  status(wasFullAuto ? 'กำลังตรวจและส่งออกไฟล์สุดท้าย' : 'ต้นฉบับพร้อมส่งออก');
   $('create').disabled = false;
   await syncSharedProject(book.id);
   await loadProjectHistory();
 
   // โหมดอัตโนมัติต้องได้ไฟล์ตอนจบเสมอ ไม่ใช่จบแล้วค้างรอให้กดส่งออกเอง
   // เล่มที่ผ่าน Phase 2 ครบถูกส่งออกไปแล้วข้างบน ตรงนี้จึงเก็บเฉพาะเล่มที่ไม่ได้ผ่านทางนั้น
-  if (wasFullAuto && !book.imagePhase?.autoBookExportedAt) await autoExportFinished();
+  if (wasFullAuto && !book.autoBookExportedAt && !book.imagePhase?.autoBookExportedAt) await autoExportFinished();
   if (wasFullAuto) {
     const exported=book.autoBookExportedAt || book.imagePhase?.autoBookExportedAt;
-    if (exported) addEvent('system', 'อัตโนมัติ: จบงานทั้งเล่ม', `${pages} หน้า · บันทึก PDF แล้ว · ติดขัด ${pf.blocking} ข้อ`);
+    if (exported) {
+      status('เสร็จสมบูรณ์ — ส่งออก PDF แล้ว');
+      runState('done', `${pages} หน้า · ส่งออก PDF แล้ว`);
+      addEvent('system', 'อัตโนมัติ: จบงานทั้งเล่ม', `${pages} หน้า · บันทึก PDF แล้ว · ติดขัด ${pf.blocking} ข้อ`);
+    }
     else {
+      runState('stopped', 'ต้นฉบับเสร็จ แต่ยังส่งออก PDF ไม่สำเร็จ', 'resume', 'ลองส่งออกอีกครั้ง');
       status('เนื้อหาเสร็จ แต่ส่งออก PDF ยังไม่สำเร็จ — ดูเหตุผลในบันทึก');
       addEvent('system','อัตโนมัติ: ยังไม่จบงาน','ยังไม่มีไฟล์ PDF ที่ส่งออกสำเร็จ');
     }
-  }
+  } else runState('input', 'ต้นฉบับพร้อม — เลือกส่งออกใน Studio', 'done', 'เปิดตัวเลือกส่งออก');
 }
 
 // ---------- ส่งออก ----------
@@ -4320,8 +4443,10 @@ $('create').onclick = create;
 $('chat').onclick = () => chrome.runtime.sendMessage({ type: 'sw.focusChat' });
 function stopRun(from = 'ผู้ใช้สั่งหยุดงาน') {
   machine?.stop();
-  status('หยุดแล้ว');
+  status(machineBusy || hasPendingTurn() ? 'รับคำสั่งหยุดแล้ว — รอบปัจจุบันจะบันทึกก่อนหยุด' : 'หยุดแล้ว');
+  runState(machineBusy || hasPendingTurn() ? 'waiting' : 'stopped', from + (machineBusy || hasPendingTurn() ? ' · รอบปัจจุบันยังไม่จบ ห้ามเริ่มซ้อน' : ''), machineBusy || hasPendingTurn() ? '' : 'resume', 'ทำต่อ');
   stopAutoPilot(); // ผู้ใช้สั่งหยุดเอง = เลิกโหมดอัตโนมัติด้วย ไม่ใช่หยุดแค่เครื่องแต่ธงยังค้าง
+  unattended = false; // และเลิกกดทำต่อให้เองด้วย คนสั่งหยุดแปลว่าอยากให้หยุดจริง ๆ
   addEvent('system', 'หยุด', from);
   $('create').disabled = false;
 }
@@ -5503,9 +5628,14 @@ chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
       return true;
     }
     // "ทำต่อ" ตอบกลับตามผลจริง ไม่ใช่ตอบ ok ทุกครั้ง — งานที่ยังวิ่งอยู่ต้องไม่ถูกสั่งซ้อน
-    resumeGo().then((started) =>
-      sendResponse(started === false ? { ok: false, error: 'มีงานกำลังทำอยู่ หรือไม่มีงานค้างให้ทำต่อ' } : { ok: true }),
-    );
+    if (machineBusy || hasPendingTurn() || (!book?.job && !$('resume').dataset.bookId)) {
+      sendResponse({ok:false,error:'มีงานกำลังทำอยู่ หรือไม่มีงานค้างให้ทำต่อ'});
+      return true;
+    }
+    // Acknowledge acceptance now; completion is reported by the persistent status card.
+    // Holding this response open for the entire book made the side panel appear frozen.
+    resumeGo().catch(fail);
+    sendResponse({ok:true});
     return true;
   }
   handleUiCommand(m);

@@ -488,28 +488,51 @@
      */
     let ok = false;
     /**
-     * โฟกัสต้องมาก่อนคลิปบอร์ดเสมอ ไม่งั้นทางหลักแพ้ตั้งแต่ยังไม่เริ่ม
+     * ทางหลักคือให้เบราว์เซอร์พิมพ์ให้ เพราะไม่ต้องพึ่งโฟกัสเลย
      *
-     * เดิมยิง writeText ทันทีแล้วกลืน error ทิ้งใน catch เปล่า ๆ เวลาแท็บไม่ได้โฟกัส
-     * (จอดับ · ล็อกหน้าจอ · ต่อผ่าน Remote Desktop · หน้าต่างอื่นครองโฟกัส)
-     * มันจึงเงียบ ๆ ตกไปใช้ทางสำรองที่คอมเมนต์ข้างบนบอกเองว่าใช้กับข้อความยาวไม่ได้
-     * แล้วจบที่ "ข้อความเต็มช่องแต่ปุ่มส่งเทา" โดยไม่มีบรรทัดไหนบอกว่าเพราะโฟกัส
+     * ทางคลิปบอร์ดใช้ได้เฉพาะตอนเอกสารโฟกัสอยู่ ซึ่งเป็นเงื่อนไขที่ระบบนี้คุมไม่ได้จริง —
+     * งานเดินตอนไม่มีคนนั่งเฝ้า จอดับ ล็อกหน้าจอ หรือต่อผ่าน Remote Desktop
+     * โฟกัสจึงกลายเป็นตัวแปรสุ่ม แล้วการวางข้อความก็ดีบ้างพังบ้างตามนั้น
+     * (เดิมทางนี้ถูกใช้เป็นทางสุดท้ายเท่านั้น จึงไม่เคยได้แก้ปัญหาที่ต้นเหตุ)
+     *
+     * ราคาที่จ่ายคือแถบ "กำลังดีบัก" ของ Chrome ที่โผล่ระหว่างพิมพ์แล้วหายไปเอง
+     * และถ้า DevTools เปิดค้างบนแท็บนั้นอยู่ ช่องทางนี้จะแนบไม่ได้ — ตกไปใช้คลิปบอร์ดตามเดิม
      */
-    const hasFocus = await waitFocus(1500);
-    let clipboardError = hasFocus ? '' : 'แท็บ ChatGPT ไม่ได้โฟกัส';
+    let typeError = '';
     try {
-      await navigator.clipboard.writeText(text);
-      box.focus();
-      ok = document.execCommand('paste');
-      await frame();
-      ok = ok && !!box.innerText.trim();
-      if (ok) clipboardError = '';
+      const typed = await chrome.runtime.sendMessage({ type: 'sw.forceSend', text, send: false });
+      if (typed?.ok) {
+        await frame();
+        ok = !!box.innerText.trim();
+      } else {
+        typeError = typed?.error || 'ไม่ทราบสาเหตุ';
+      }
     } catch (e) {
-      ok = false;
-      clipboardError = e?.message || String(e);
+      typeError = e?.message || String(e);
     }
-    if (clipboardError && turnId) {
-      report(turnId, 'typing', `วางผ่านคลิปบอร์ดไม่ได้ (${clipboardError}) — ใช้ทางสำรองแทน ซึ่งพลาดง่ายกับ Prompt ยาว`);
+    if (typeError && turnId) {
+      report(turnId, 'typing', `ให้เบราว์เซอร์พิมพ์ให้ไม่ได้ (${typeError}) — ลองทางคลิปบอร์ดแทน`);
+    }
+
+    // ทางสำรองที่ 1: คลิปบอร์ดจริง ใช้ได้เมื่อแท็บโฟกัสอยู่เท่านั้น
+    let clipboardError = '';
+    if (!ok) {
+      const hasFocus = await waitFocus(1500);
+      clipboardError = hasFocus ? '' : 'แท็บ ChatGPT ไม่ได้โฟกัส';
+      try {
+        await navigator.clipboard.writeText(text);
+        box.focus();
+        ok = document.execCommand('paste');
+        await frame();
+        ok = ok && !!box.innerText.trim();
+        if (ok) clipboardError = '';
+      } catch (e) {
+        ok = false;
+        clipboardError = e?.message || String(e);
+      }
+      if (clipboardError && turnId) {
+        report(turnId, 'typing', `วางผ่านคลิปบอร์ดไม่ได้ (${clipboardError}) — ใช้ทางสำรองสุดท้าย ซึ่งพลาดง่ายกับ Prompt ยาว`);
+      }
     }
 
     // ทางสำรองที่ 1: คำสั่งแทรกข้อความของเบราว์เซอร์
@@ -634,38 +657,6 @@
     throw new Error('composer_write_failed');
   }
 
-  /**
-   * กระตุ้นให้ตัวแก้ไขข้อความของ ChatGPT รับรู้ว่ามีข้อความอยู่จริง
-   *
-   * ปุ่มส่งของ ChatGPT จะ disabled อยู่จนกว่า state ภายในของตัวแก้ไข (ProseMirror)
-   * จะบันทึกว่ามีเนื้อหา การยัดข้อความด้วย execCommand บางครั้งขึ้นจอแล้วแต่ state ยังไม่ขยับ
-   * — เห็นข้อความเต็มช่องแต่ปุ่มส่งยังกดไม่ได้ ซึ่งคืออาการที่เจอ
-   * เติมช่องว่างแล้วลบออกหนึ่งจังหวะ บังคับให้มัน commit transaction ใหม่
-   */
-  async function nudgeComposer(box) {
-    if (!box?.isConnected) return;
-    box.focus();
-    try {
-      document.execCommand('insertText', false, ' ');
-      await frame();
-      document.execCommand('delete', false, null);
-      await frame();
-    } catch (_) {
-      /* ตัวแก้ไขบางรุ่นไม่รับ execCommand ไม่เป็นไร ยังมีทาง Enter */
-    }
-    box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ' ' }));
-    await frame();
-
-    /**
-     * ห้ามวางข้อความซ้ำในนี้เด็ดขาด
-     *
-     * เคยใส่ท่า "เลือกทั้งหมดแล้ว paste ทับ" ไว้ตรงนี้ ด้วยความหวังว่าจะปลุกสถานะภายในได้
-     * แต่ selectAll ไม่ได้เลือกจริงเสมอไปในตัวแก้ไขแบบนี้ paste จึงกลายเป็นการต่อท้าย
-     * ผลคือคำสั่งถูกส่งไปเป็นข้อความเดียวกันสองรอบติดกัน
-     * (เห็นกับตา: "วาดรูปแมวสีส้มนั่งบนกล่องกระดาษ 1 ภาพวาดรูปแมวสีส้มนั่งบนกล่องกระดาษ 1 ภาพ")
-     * งานกระตุ้นคือกระตุ้น ไม่ใช่แก้ไขเนื้อหา ถ้าปุ่มยังไม่เปิดยังมีทาง Enter และทางให้คนกดเอง
-     */
-  }
 
   function sendCandidates(box) {
     // ต้องหาใหม่ทุกครั้ง หน้า ChatGPT สร้างปุ่มชุดใหม่ทุกครั้งที่ re-render
@@ -699,22 +690,6 @@
     return !/stop|หยุด|attach|แนบ|upload|อัปโหลด|voice|microphone|ไมโครโฟน/i.test(label);
   };
 
-  function pressEnter(box) {
-    if (!box?.isConnected) return;
-    box.focus();
-    for (const type of ['keydown', 'keypress', 'keyup']) {
-      box.dispatchEvent(
-        new KeyboardEvent(type, {
-          key: 'Enter',
-          code: 'Enter',
-          keyCode: 13,
-          which: 13,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-    }
-  }
 
   const normalizeMessage = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   function userMessageKey(node) {
@@ -1493,9 +1468,7 @@
         return { turnId, status: 'error', text: '', meta: { error: 'previous_turn_running' } };
       }
 
-      const userBefore = $$('[data-message-author-role="user"]').length;
       const userMessagesBefore = snapshotUserMessages();
-      const assistantBefore = $$(S.assistantTurn).length;
 
       /**
        * แนบไฟล์ก่อนพิมพ์ข้อความเสมอ
@@ -1608,6 +1581,8 @@
         sendMs:Date.now()-sendStartedAt,
       }};
       report(turnId,'submitted',`ยืนยันข้อความตรงกับ Prompt แล้ว · ${((Date.now()-sendStartedAt)/1000).toFixed(1)} วินาที`);
+      const submittedAt = Date.now();
+      const sendMs = submittedAt - sendStartedAt;
 
       const anchor = fresh;
       if (opts.wantImages) {
@@ -1648,6 +1623,7 @@
             model: modelBefore,
             blocks: imgBlocks,
             ms: Date.now() - t0,
+            sendMs, answerMs:Date.now()-submittedAt,
             imageCapture: {
               src: captured.src || images[0] || '',
               bytes: captured.bytes || 0,
@@ -1675,7 +1651,8 @@
 
       if (status !== 'ok') return { turnId, status, text: '', meta: {
         model: modelBefore,
-        ...(status === 'timeout' ? {error:'outcome_unknown', detail:'หมดเวลารอ แต่ยังยืนยันไม่ได้ว่า ChatGPT หยุดแล้ว จึงไม่ส่งข้อความซ้ำ'} : {}),
+        sendMs, answerMs:Date.now()-submittedAt,
+        ...(['timeout','no_response'].includes(status) ? {error:'outcome_unknown', detail:'ข้อความส่งถึงบทสนทนาแล้ว แต่ยังไม่ได้คำตอบที่ยืนยันได้ จึงไม่ส่งข้อความซ้ำ'} : {}),
       } };
 
       const { text, blocks } = readAnswer(anchor);
@@ -1719,6 +1696,7 @@
           model: currentModel(),
           blocks,
           ms: Date.now() - t0,
+          sendMs, answerMs:Date.now()-submittedAt,
           // ฝั่ง Studio ต้องรู้ว่ารูปอ้างอิงเข้าไปถึง ChatGPT จริงไหม ไม่ใช่เดาเอาจากที่สั่งไป
           attachment,
           imageCapture: opts.wantImages
