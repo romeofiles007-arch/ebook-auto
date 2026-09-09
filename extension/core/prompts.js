@@ -1392,6 +1392,9 @@ ${chapters
   ถ้าภาพจะเข้าใจได้ต่อเมื่อมีคำกำกับ เช่น ป้ายชื่อ หัวคอลัมน์ เลขลำดับ หรือคำบนวัตถุ แปลว่าอันนั้นต้องเป็น box ไม่ใช่ image
 - ห้าม subject แบบแบ่งช่องเทียบหลายเวอร์ชัน (สองช่อง สี่ช่อง ก่อน/หลัง ถูก/ผิด) เพราะผู้อ่านแยกแต่ละช่องไม่ออกถ้าไม่มีคำกำกับ ให้ใช้ box แทน
 - subject ยาวไม่เกินสองประโยค บอกสิ่งที่ตาเห็นจริง ไม่ใช่อธิบายตรรกะหรือเงื่อนไขของเนื้อหา
+- ภาพทุกรูปในเล่มต้องต่างกันที่ "สิ่งที่ตาเห็น" จริง ๆ ไม่ใช่ต่างแค่คำบรรยาย — กระจายทั้งสถานที่ ตัวแบบ ระยะ และชนิดของของที่อยู่ในภาพ
+  ห้ามให้ทั้งเล่มวนอยู่กับฉากเดิมซ้ำ ๆ (คนนั่งหน้าแล็ปท็อป · มือถือในมือ · ของวางบนโต๊ะทำงานมองจากด้านบน · กราฟลอยข้างคน)
+  ทดสอบก่อนตอบ: ถ้าสรุปสองรูปด้วยประโยคเดียวกันได้ แปลว่ามันคือรูปเดียวกัน ให้เปลี่ยนรูปหนึ่งเป็นฉากอื่นหรือทิ้งไป
 - เลือก placement ตามหน้าที่ของภาพ: "after_intro" สำหรับปูความเข้าใจ, "middle" สำหรับอธิบายสาระที่กำลังเล่า, หรือ "before_conclusion" สำหรับรวบยอดก่อนนำไปใช้
 - ถ้าเนื้อหาตอนไหนเป็นขั้นตอน ตารางเปรียบเทียบ หรือข้อควรระวัง ให้เลือกชนิด "box"
   เพราะจัดเป็นกล่องสรุปอ่านง่ายกว่าและคมกว่าภาพวาด
@@ -1480,6 +1483,35 @@ ${style === 'box' ? '- ผู้ใช้เลือกสไตล์ box ซ�
  */
 export const figureColorOn = (book) => (book?.figureColor || 'color') === 'color';
 
+/**
+ * ภาพในเล่มไปทางเดียวกันหมด เพราะไม่มีอะไรสั่งให้มันต่างกัน
+ *
+ * ทุกรูปได้คำสั่งชุดเดียวกันเป๊ะ ต่างกันแค่ประโยค Subject ที่บอกว่าวาดอะไร
+ * ที่เหลือ — สไตล์ของเล่ม กติกาการจัดองค์ประกอบ โลกของปก — เหมือนกันหมดทุกบรรทัด
+ * โมเดลภาพที่ได้คำสั่งเหมือนกันจึงคืนภาพที่จัดวางเหมือนกัน ต่างแค่ของที่อยู่ในภาพ
+ * เปิดเล่มดูแล้วเหมือนภาพเดียวถูกวาดซ้ำสิบครั้ง
+ *
+ * รายการห้ามซ้ำ (otherSubjects) ไม่พอ เพราะมันบอกได้แค่ว่า "อย่าวาดของเดิม"
+ * ไม่ได้บอกว่า "รูปนี้ต้องมองจากมุมไหน ระยะไหน จังหวะไหน" ซึ่งเป็นตัวที่ทำให้ภาพต่างกันจริง
+ *
+ * หมุนตามลำดับรูปในเล่มแทนการสุ่ม เพื่อให้ผลลัพธ์ซ้ำได้และรูปที่อยู่ติดกันไม่ซ้ำมุมกัน
+ */
+const FIGURE_SHOTS = [
+  'extreme close-up of one small detail that fills the frame — the viewer is right up against it',
+  'medium view of a pair of hands mid-action together with the thing they are working on',
+  'wide view that shows the whole place and how the subject sits inside it',
+  'high angle looking straight down onto a surface and what is arranged on it',
+  'low angle looking up, so the subject rises above the viewer',
+  'two things placed in clear relation across the frame, one near and one further away',
+  'over-the-shoulder view from behind a person, showing what they are looking at',
+  'a single object isolated against a plain field, with generous space around it',
+];
+const FIGURE_MOMENTS = [
+  'the instant before it happens',
+  'the middle of the action, caught while it is still moving',
+  'the moment just after, showing the trace it left behind',
+];
+
 export function interiorFigurePrompt(styleKey, subject, widthMm, heightMm = 45, aspect = '4:3', opts = {}) {
   /**
    * ภาพแต่ละรูปในเล่มต้องเป็นคนละภาพจริง ไม่ใช่แค่คนละไฟล์
@@ -1505,7 +1537,7 @@ export function interiorFigurePrompt(styleKey, subject, widthMm, heightMm = 45, 
    */
   const cover = opts.cover || null;
   const coverEcho = cover?.style
-    ? `\nSAME BOOK AS THE COVER — this figure must sit in the same visual world as this book's cover artwork: ${cover.style}.${cover.lighting ? ` The cover light is ${cover.lighting}; use light of the same kind and direction.` : ''}${cover.texture ? ` Materials and surfaces seen on the cover: ${cover.texture}.` : ''} Match its medium, its level of realism, its light and its colour temperature so the cover and the interior read as one designed book. Do not invent a different look for the inside.`
+    ? `\nSAME BOOK AS THE COVER — this figure must sit in the same visual world as this book's cover artwork: ${cover.style}.${cover.lighting ? ` The cover light is ${cover.lighting}; use light of the same kind and direction.` : ''}${cover.texture ? ` Materials and surfaces seen on the cover: ${cover.texture}.` : ''} Match its medium, its level of realism, its light and its colour temperature so the cover and the interior read as one designed book. But this is a DIFFERENT moment inside that world, never a restatement of the cover: same world and same materials, different vantage, different distance, different arrangement. Do not invent a different look for the inside, and do not redraw the cover either.`
     : '';
   // สไตล์บางตัวเขียนล็อกไว้ว่าขาวดำ ถ้าเล่มนี้เอาภาพสีต้องถอดคำพวกนั้นออก
   // ไม่งั้นคำสั่งจะขัดกันเอง ("black line art on white" ปะทะ "full colour")
@@ -1514,6 +1546,18 @@ export function interiorFigurePrompt(styleKey, subject, widthMm, heightMm = 45, 
         .replace(/clean black line art on white/i, 'clean line art')
         .replace(/two-tone risograph/i, 'risograph')
     : st.brief;
+  /**
+   * ลำดับของรูปนี้ในเล่ม ใช้เลือกมุมกล้องและจังหวะให้ไม่ซ้ำรูปข้างเคียง
+   * นับจากจำนวนรูปที่ถูกวางแผนไปแล้วก่อนหน้า ซึ่งผู้เรียกส่งมาให้อยู่แล้ว
+   */
+  const idx = Number(opts.figureIndex ?? (opts.otherSubjects || []).length) || 0;
+  const shot = FIGURE_SHOTS[idx % FIGURE_SHOTS.length];
+  const moment = FIGURE_MOMENTS[Math.floor(idx / FIGURE_SHOTS.length) % FIGURE_MOMENTS.length];
+  const variety =
+    `\nHOW THIS ONE IS FRAMED (this is what makes it a different picture from the rest of the book): ${shot}. ` +
+    `Moment shown: ${moment}. ` +
+    'Do not reuse the vantage point, camera distance or arrangement of any other figure in this book. ' +
+    'A book where every figure is framed the same way reads as one picture repeated, no matter how different the objects in it are.';
   const pxW = Math.round((widthMm / 25.4) * 300);
   const pxH = Math.round((heightMm / 25.4) * 300);
   const orientation = pxW > pxH * 1.15 ? 'LANDSCAPE / horizontal' : pxH > pxW * 1.15 ? 'PORTRAIT / vertical' : 'near-square';
@@ -1529,7 +1573,7 @@ ${opts.color
         .join(', ') || 'The cover colours'} are colours sampled from the cover, given here so this figure sits beside it without clashing: echo that colour world, do not paste those hex values in as flat brand fills. No candy-bright unrelated hues, no corporate gradient, no rainbow of icon colours. Meaning must still read if the colour is removed.`
     : 'Must remain legible when printed in grayscale at 300 dpi on uncoated paper — rely on shape and contrast, not colour.'}
 Line weight heavy enough to survive printing at ${Math.round(widthMm)} mm wide.
-Negative: no text, no letters, no numbers, no labels, no captions, no watermark, no thin hairlines.${coverEcho}${distinct}`;
+Negative: no text, no letters, no numbers, no labels, no captions, no watermark, no thin hairlines.${variety}${coverEcho}${distinct}`;
 }
 
 // ---------- 8. prompt ภาพ ----------

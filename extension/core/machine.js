@@ -1071,6 +1071,8 @@ export class Machine {
               cover: this.book.style || null,
               // บอกให้รู้ว่ารูปอื่นในเล่มวาดอะไรไปแล้ว จะได้ไม่วาดซ้ำแนวเดิม
               otherSubjects: figures.filter((x) => x.kind === 'image').map((x) => x.subject || x.caption),
+              // ลำดับจริงของรูปนี้ในเล่ม ใช้หมุนมุมกล้องและจังหวะให้รูปที่อยู่ติดกันไม่ซ้ำแบบกัน
+              figureIndex: figures.filter((x) => x.kind === 'image').length,
             },
           ),
         });
