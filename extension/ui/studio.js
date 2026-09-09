@@ -73,6 +73,12 @@ let assetNames = [];
 let selected = null;
 let eventCount = 0;
 /**
+ * บันทึกสั้น ๆ ล่าสุดไว้ในหน่วยความจำ สำหรับส่งให้ผู้คุมกระบวนการอ่านตอนงานติด
+ * เก็บแค่ 30 บรรทัดเพราะทุก token ที่ส่งไปมีราคา และเก่ากว่านั้นไม่ช่วยตัดสินใจแล้ว
+ */
+const recentLog = [];
+const recentLogLines = () => recentLog.slice(-20);
+/**
  * คีย์ OpenAI ที่โหลดไว้ในหน่วยความจำ
  *
  * transport ถูกสร้างแบบ synchronous ในหลายจุด จะไปอ่าน IndexedDB ตอนนั้นไม่ได้
@@ -134,6 +140,10 @@ const REPEAT_WINDOW_MS = 20000;
 let lastPublished = { message: '', at: 0 };
 function publishActivity(message, level = 'info', crew = null) {
   const text = String(message || '').slice(0, 1600);
+  if (text) {
+    recentLog.push(`[${level}] ${text}`);
+    if (recentLog.length > 30) recentLog.shift();
+  }
   // เหตุการณ์ที่พาสถานะทีมงานมาด้วยต้องผ่านเสมอ เพราะมันอัปเดตรูปคนทำงานบนแผง ไม่ใช่แค่ข้อความ
   if (!crew && text === lastPublished.message && Date.now() - lastPublished.at < REPEAT_WINDOW_MS) return;
   lastPublished = { message: text, at: Date.now() };
@@ -828,7 +838,58 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
     onRetry?.(i, attempts, res);
     await new Promise((r) => setTimeout(r, 250 * i)); // ตัวรอฝั่ง adapter ขับด้วย event แล้ว ไม่ต้องหน่วงยาว
   }
-  return last;
+
+  /**
+   * ปุ่มตั้งค่าทุกปุ่มยิงตรงผ่านทางนี้ ไม่ได้ผ่าน Machine — ผู้คุมกระบวนการจึงต้องมาถึงตรงนี้ด้วย
+   * ไม่งั้นโหมด CEO จะครอบแค่ตอนเขียนเล่ม ส่วนขั้นเตรียม (ดูกระแส · คิดชื่อ · เสนอสารบัญ)
+   * ยังหยุดค้างเหมือนเดิม ซึ่งเป็นจุดที่ค้างจริงบ่อยที่สุด
+   */
+  const decided = await superviseFailure(last, prompt, opts, { attempts });
+  return decided || last;
+}
+
+/**
+ * ให้ผู้คุมกระบวนการตัดสินใจแทนการยอมแพ้ — ใช้กับเส้นทางที่ยิงตรงจาก Studio
+ * คืน res ที่ใช้ได้เมื่อกู้สำเร็จ หรือ null เมื่อไม่มีผู้คุม/กู้ไม่ได้ (ผู้เรียกใช้ผลเดิมต่อ)
+ */
+async function superviseFailure(last, prompt, opts, { attempts = 1 } = {}) {
+  const supervisor = makeSupervisor();
+  if (!supervisor || !last) return null;
+  let decision;
+  try {
+    decision = await supervisor({
+      step: opts.label || 'ขั้นเตรียมเล่ม',
+      status: last.status,
+      attempts,
+      lastError: last.error || last.meta?.detail || last.meta?.error || '',
+      sample: String(last.text || '').replace(/\s+/g, ' ').slice(0, 400),
+      raw: last.text || '',
+      wantKeys: opts.expectedJsonKeys || [],
+      log: recentLogLines(),
+    });
+  } catch (e) {
+    addEvent('system', 'ผู้คุมกระบวนการตอบไม่ได้', e?.message || String(e));
+    return null;
+  }
+  if (!decision) return null;
+  if (decision.action === 'repair_json' && decision.repaired) {
+    addEvent('system', 'ผู้คุมกระบวนการซ่อมรูปแบบคำตอบให้', 'ใช้ของที่เว็บตอบมาแล้ว ไม่ได้สั่งเว็บใหม่');
+    return { ...last, status: 'ok', data: decision.repaired, error: '' };
+  }
+  if (decision.action === 'retry' || decision.action === 'new_thread') {
+    const again = await sendTurnOnce(prompt, {
+      ...opts,
+      newThread: decision.action === 'new_thread' || !!opts.newThread,
+    });
+    return again?.status === 'ok' ? again : null;
+  }
+  return null; // stop / skip_step ที่ทางนี้ = ใช้ผลเดิมแล้วให้ผู้เรียกรายงานตามปกติ
+}
+
+/** ยิงหนึ่งครั้งด้วยสายส่งปัจจุบัน ใช้ตอนผู้คุมสั่งลองใหม่ */
+async function sendTurnOnce(prompt, opts) {
+  const transport = makeTransport(transportKind(), transportOpts());
+  return (await transport.send(prompt, opts)) || null;
 }
 
 /** ข้อความวินิจฉัยที่ "เห็นแล้วรู้เลยว่าได้อะไรกลับมา" ไม่ใช่แค่บอกว่าไม่ผ่าน */

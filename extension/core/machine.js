@@ -152,6 +152,9 @@ export class Machine {
   }
 
   log(level, message, extra = {}) {
+    // เก็บสำเนาสั้น ๆ ไว้ให้ผู้คุมกระบวนการอ่านตอนตัดสินใจ — 30 บรรทัดพอ และไม่โตขึ้นเรื่อย ๆ
+    (this._log ||= []).push(`[${level}] ${message}`);
+    if (this._log.length > 30) this._log.shift();
     this.emit({ type: 'log', level, message, at: Date.now(), ...extra });
   }
 
@@ -247,10 +250,14 @@ export class Machine {
     this.recordUsage(res);
     this.emit({ type: 'turn.end', n, status: res.status, response: res.text || '', meta: res.meta || {} });
 
-    if (res.meta?.error === 'attachment_failed') throw new Halt(res.meta.detail || 'แนบรูปผู้เขียนไม่สำเร็จ — หยุดก่อนส่งคำสั่ง');
+    // สองอันนี้เกิดก่อนคำสั่งออกจากเครื่องเรา จึงลองใหม่ได้โดยไม่มีทางเกิดงานซ้อน
+    // ติดรหัสไว้ให้ turnWithRetry รู้ว่าถามผู้คุมกระบวนการได้ ต่างจาก outcome_unknown ที่ห้ามลองซ้ำ
+    if (res.meta?.error === 'attachment_failed')
+      throw new Halt(res.meta.detail || 'แนบรูปผู้เขียนไม่สำเร็จ — หยุดก่อนส่งคำสั่ง', 'not_sent');
     if (res.meta?.error === 'outcome_unknown')
       throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
-    if (res.meta?.error === 'previous_turn_running') throw new Halt('ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — ไม่กดหยุดหรือส่งงานทับ รอเทิร์นนั้นจบแล้วทำต่อ');
+    if (res.meta?.error === 'previous_turn_running')
+      throw new Halt('ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — ไม่กดหยุดหรือส่งงานทับ รอเทิร์นนั้นจบแล้วทำต่อ', 'not_sent');
     if (res.status === 'rate_limited') throw new RateLimited();
     if (res.status === 'wrong_model')
       throw new Halt(
@@ -312,7 +319,28 @@ export class Machine {
     let last = null;
     let free = 0;
     for (let i = 0; i <= MAX_RETRIES; i++) {
-      const res = await this.turn(prompt, opts);
+      let res;
+      try {
+        res = await this.turn(prompt, opts);
+      } catch (e) {
+        /**
+         * หยุดเพราะคำสั่งยังไม่เคยออกจากเครื่องเรา (แนบไฟล์ไม่ติด · หน้าเว็บยังทำเทิร์นก่อนหน้าอยู่)
+         * ลองใหม่ได้โดยไม่มีทางเกิดงานซ้อน ผู้คุมกระบวนการจึงมีสิทธิ์สั่งลองต่อได้
+         * ส่วน outcome_unknown ไม่ติดรหัสนี้ เพราะอาจส่งไปแล้ว ห้ามลองซ้ำเด็ดขาด
+         */
+        if (!(e instanceof Halt) || e.code !== 'not_sent' || i >= MAX_RETRIES) throw e;
+        const d = await this.askSupervisor({
+          step: this.job.step,
+          status: 'halted',
+          attempts: i + 1,
+          lastError: e.message,
+          log: this.recentLog(),
+        });
+        if (d?.action !== 'retry' && d?.action !== 'new_thread') throw e;
+        opts = { ...opts, newThread: d.action === 'new_thread' || !!opts.newThread };
+        await sleep(2500);
+        continue;
+      }
       if (res.status === 'ok') return res;
       if (res.meta?.error === 'outcome_unknown')
         throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
@@ -368,7 +396,33 @@ export class Machine {
       }
       return res;
     }
+
+    /**
+     * ลองครบตามเพดานแล้วยังไม่ผ่าน — เดิมคืนผลล้มออกไปให้ขั้นบนหยุดงาน
+     * ผู้คุมกระบวนการเลือกได้อีกทางก่อนถึงตรงนั้น และทุกท่าที่เลือกได้เป็นท่าที่มีอยู่แล้ว
+     */
+    const decision = await this.askSupervisor({
+      step: this.job.step,
+      status: last?.status || 'error',
+      attempts: MAX_RETRIES + 1,
+      lastError: last?.meta?.detail || last?.meta?.error || last?.status || '',
+      sample: String(last?.text || '').replace(/\s+/g, ' ').slice(0, 400),
+      log: this.recentLog(),
+    });
+    if (decision?.action === 'retry' || decision?.action === 'new_thread') {
+      const again = await this.turn(prompt, {
+        ...opts,
+        newThread: decision.action === 'new_thread' || !!opts.newThread,
+      });
+      if (again.status === 'ok') return again;
+      return again;
+    }
     return last;
+  }
+
+  /** บันทึกล่าสุดของงานนี้ ไว้ให้ผู้คุมกระบวนการอ่านตอนตัดสินใจ */
+  recentLog() {
+    return (this._log ||= []).slice(-20);
   }
 
   // ---------- ขั้นตอน ----------
