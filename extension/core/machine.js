@@ -128,7 +128,12 @@ export class Machine {
    * ไม่มีผู้คุมหรือถามไม่สำเร็จ = คืน null แล้วให้ผู้เรียกทำตามเจตนาเดิม (ปกติคือหยุด)
    */
   async askSupervisor(context) {
-    if (!this.supervisor) return null;
+    if (!this.supervisor) {
+      // ต้องบอกว่าทำไมไม่มีใครมาช่วย ไม่งั้นดูเหมือนโหมด CEO เปิดแล้วแต่ไม่ทำอะไร
+      this.log('warn', `หยุดที่ขั้น ${context?.step || '-'} · โหมด CEO ปิดอยู่ จึงไม่มีตัวเลือกทางอื่นให้`);
+      return null;
+    }
+    this.log('ok', `ถามผู้คุมกระบวนการ: ขั้น ${context?.step || '-'} · ${context?.lastError || context?.status || ''}`);
     try {
       const decision = await this.supervisor(context);
       if (!decision?.action) return null;
@@ -250,14 +255,13 @@ export class Machine {
     this.recordUsage(res);
     this.emit({ type: 'turn.end', n, status: res.status, response: res.text || '', meta: res.meta || {} });
 
-    // สองอันนี้เกิดก่อนคำสั่งออกจากเครื่องเรา จึงลองใหม่ได้โดยไม่มีทางเกิดงานซ้อน
-    // ติดรหัสไว้ให้ turnWithRetry รู้ว่าถามผู้คุมกระบวนการได้ ต่างจาก outcome_unknown ที่ห้ามลองซ้ำ
+    // แนบไฟล์ไม่สำเร็จยังไม่ส่งคำสั่ง; งานก่อนหน้าที่ยังทำอยู่หรือผลไม่แน่นอนต้องหยุดก่อน CEO
     if (res.meta?.error === 'attachment_failed')
       throw new Halt(res.meta.detail || 'แนบรูปผู้เขียนไม่สำเร็จ — หยุดก่อนส่งคำสั่ง', 'not_sent');
     if (res.meta?.error === 'outcome_unknown')
       throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
     if (res.meta?.error === 'previous_turn_running')
-      throw new Halt('ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — ไม่กดหยุดหรือส่งงานทับ รอเทิร์นนั้นจบแล้วทำต่อ', 'not_sent');
+      throw new Halt('ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — ไม่กดหยุดหรือส่งงานทับ รอเทิร์นนั้นจบแล้วทำต่อ', 'previous_turn_running');
     if (res.status === 'rate_limited') throw new RateLimited();
     if (res.status === 'wrong_model')
       throw new Halt(
@@ -337,6 +341,7 @@ export class Machine {
           log: this.recentLog(),
         });
         if (d?.action !== 'retry' && d?.action !== 'new_thread') throw e;
+        if (d.action === 'new_thread' && (this.book.threadMode === 'reuse' || opts.wantImages)) throw e;
         opts = { ...opts, newThread: d.action === 'new_thread' || !!opts.newThread };
         await sleep(2500);
         continue;
@@ -410,6 +415,7 @@ export class Machine {
       log: this.recentLog(),
     });
     if (decision?.action === 'retry' || decision?.action === 'new_thread') {
+      if (decision.action === 'new_thread' && (this.book.threadMode === 'reuse' || opts.wantImages)) return last;
       const again = await this.turn(prompt, {
         ...opts,
         newThread: decision.action === 'new_thread' || !!opts.newThread,
@@ -1413,7 +1419,7 @@ export class Machine {
      * ไม่งั้นเวลาพลาดจะไม่มีใครรู้ว่าโมเดลตอบอะไรกลับมา
      */
     let lastReviewText = '';
-    const run = async (batch, label) => {
+    const run = async (batch, label, newThread = false) => {
       for (let attempt = 1; attempt <= 2; attempt++) {
         const remind =
           attempt === 1
@@ -1421,7 +1427,7 @@ export class Machine {
             : `${label ? `${label} · ` : ''}รอบก่อนหน้าอ่านเป็น JSON ไม่ได้ ตอบเป็น JSON ในบล็อกโค้ดเดียวเท่านั้น ห้ามมีข้อความนอกบล็อก`;
         const res = await this.turnWithRetry(
           P.consistencyPrompt(ch, batch, this.book.bible, this.book, remind),
-          { label: `ตรวจบทที่ ${ch.n}${label ? ` · ${label}` : ''}${attempt > 1 ? ' · ขอผลตรวจใหม่' : ''}` },
+          { newThread, label: `ตรวจบทที่ ${ch.n}${label ? ` · ${label}` : ''}${attempt > 1 ? ' · ขอผลตรวจใหม่' : ''}` },
         );
         lastReviewText = res.text || lastReviewText; // เก็บของดิบไว้ให้ผู้คุมซ่อมรูปแบบได้โดยไม่ต้องสั่งเว็บใหม่
         const parsed = X.parseJson(res.text);
@@ -1458,7 +1464,7 @@ export class Machine {
       /**
        * ถึงตรงนี้แปลว่าขอผลตรวจไปสองรอบแล้วยังอ่านไม่ได้ทั้งคู่ — เดิมหยุดทั้งเล่มตรงนี้
        * ผู้คุมกระบวนการเลือกได้ว่าจะซ่อมรูปแบบของคำตอบที่มีอยู่แล้ว (ไม่เปลืองโควตาเว็บ)
-       * ลองใหม่ในห้องเดิม เปิดห้องใหม่ ข้ามการตรวจบทนี้ หรือหยุดตามเดิม
+       * ลองใหม่ในห้องเดิม เปิดห้องใหม่ หรือหยุดตามเดิม โดยห้ามข้ามการตรวจ
        * ทุกท่าเป็นท่าที่ระบบทำได้อยู่แล้ว มันแค่เลือก ไม่ได้คิดขึ้นเอง
        */
       const decision = await this.askSupervisor({
@@ -1476,13 +1482,11 @@ export class Machine {
         any = true;
         this.log('ok', `บทที่ ${ch.n}: ผู้คุมกระบวนการซ่อมรูปแบบผลตรวจให้แล้ว โดยไม่ต้องสั่งเว็บใหม่`);
       } else if (act === 'retry' || act === 'new_thread') {
+        if (act === 'new_thread' && this.book.threadMode === 'reuse') throw new Halt('CEO ขอเปิดห้องใหม่ แต่เล่มนี้กำหนดให้ใช้ห้องเดิม — หยุดเพื่อรักษาการตั้งค่า');
         for (const batch of batches) {
           if (this.stopRequested) break;
-          if (await run(batch, act === 'new_thread' ? 'ตรวจใหม่ในห้องแชตใหม่' : 'ตรวจใหม่อีกรอบ')) any = true;
+          if (await run(batch, act === 'new_thread' ? 'ตรวจใหม่ในห้องแชตใหม่' : 'ตรวจใหม่อีกรอบ', act === 'new_thread')) any = true;
         }
-      } else if (act === 'skip_step') {
-        this.log('warn', `บทที่ ${ch.n}: ข้ามการตรวจตามที่ผู้คุมกระบวนการสั่ง — บันทึกไว้ว่าบทนี้ยังไม่ได้ตรวจ`);
-        return { ...merged, coverage: { sections: recs.length, reviewed: 0, missed: recs.map((r) => String(r.id)), skipped: true } };
       }
       if (!any) throw new Halt(`บรรณาธิการบทที่ ${ch.n} ยังไม่ส่งผลตรวจที่อ่านได้ — กดทำต่อเพื่อตรวจใหม่`);
     }

@@ -873,9 +873,33 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
  * คืน res ที่ใช้ได้เมื่อกู้สำเร็จ หรือ null เมื่อไม่มีผู้คุม/กู้ไม่ได้ (ผู้เรียกใช้ผลเดิมต่อ)
  */
 async function superviseFailure(last, prompt, opts, { attempts = 1, transport } = {}) {
-  if (['outcome_unknown', 'previous_turn_running'].includes(last?.meta?.error)) return null;
+  /**
+   * เงียบตรงนี้คือสิ่งที่ทำให้คนถามว่า "ไม่เห็น CEO ทำอะไรเลย"
+   *
+   * สองกรณีข้างล่างคือกรณีที่ผู้คุมถูกกันไม่ให้ทำงานโดยตั้งใจ (อาจส่งไปแล้ว ห้ามลองซ้ำ)
+   * และกรณีที่ยังไม่ได้เปิดโหมด ทั้งสองอย่างต้องบอกออกมา ไม่ใช่ปล่อยให้เข้าใจว่ามันพัง
+   */
+  if (['outcome_unknown', 'previous_turn_running'].includes(last?.meta?.error)) {
+    if (ceoModeOn())
+      addEvent(
+        'system',
+        'โหมด CEO ไม่เข้าแทรกที่จุดนี้',
+        'คำสั่งอาจถูกส่งไปแล้วแต่ยืนยันผลไม่ได้ — การสั่งลองใหม่ตรงนี้เสี่ยงได้งานซ้อน จึงหยุดตามกติกาเดิม',
+      );
+    return null;
+  }
   const supervisor = makeSupervisor();
-  if (!supervisor || !last) return null;
+  if (!supervisor || !last) {
+    if (last && !ceoModeOn()) {
+      addEvent(
+        'system',
+        'โหมด CEO ปิดอยู่',
+        `งานหยุดที่ขั้น ${opts.label || '-'} — เปิดโหมด CEO ที่หน้าเริ่มต้นถ้าอยากให้ API เลือกทางต่อให้เอง`,
+      );
+    }
+    return null;
+  }
+  addEvent('system', 'ถามผู้คุมกระบวนการ', `ขั้น ${opts.label || '-'} · ${last.error || last.status}`);
   let decision;
   try {
     decision = await supervisor({

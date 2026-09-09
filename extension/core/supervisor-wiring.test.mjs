@@ -18,10 +18,11 @@ function machineLike(supervisor) {
   return { obj: scope.make(supervisor, logs), logs };
 }
 
-test('ไม่มีผู้คุม = คืน null เงียบ ๆ ให้ผู้เรียกทำตามทางเดิม', async () => {
+test('ไม่มีผู้คุม = ทำตามทางเดิม แต่ต้องบอกว่าทำไมไม่มีใครมาช่วย', async () => {
   const { obj, logs } = machineLike(null);
   assert.equal(await obj.askSupervisor({ step: 'write' }), null);
-  assert.deepEqual(logs, [], 'ไม่มีผู้คุมไม่ใช่ความผิดปกติ ต้องไม่รกบันทึก');
+  // เงียบตรงนี้คือที่มาของคำถาม "ไม่เห็น CEO ทำอะไรเลย" — ต้องแยกให้ออกว่าปิดอยู่ ไม่ใช่พัง
+  assert.match(logs.join('\n'), /โหมด CEO ปิดอยู่/);
 });
 
 test('คำตัดสินที่ใช้ได้ถูกบันทึกพร้อมเหตุผล จะได้ตรวจย้อนได้ว่าตัดสินใจอะไรไป', async () => {
