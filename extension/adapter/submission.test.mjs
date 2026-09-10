@@ -4,11 +4,13 @@ import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 const source=await readFile(new URL('./chatgpt.js',import.meta.url),'utf8');
 function fn(name,async=false){const start=source.indexOf(`${async?'async ':''}function ${name}(`);return source.slice(start,source.indexOf('\n  }',start)+4);}
+// turnIndexOf เป็น const arrow ไม่ใช่ function declaration จึงต้องตัดคนละแบบ — แต่ต้องเป็นตัวจริง
+const constFn=(name)=>{const start=source.indexOf('const '+name+' = ');return source.slice(start,source.indexOf('\n  };',start)+5);};
 const node=(key,text)=>({innerText:text,getAttribute:()=>key,closest:()=>null});
 test('receipt matches prompt and new identity even when a long chat keeps the same DOM count',()=>{
  let rows=[node('old','prompt')];
  const ctx={$$:()=>rows,normalizeMessage:s=>String(s).replace(/\s+/g,' ').trim()};
- vm.createContext(ctx);vm.runInContext(['userMessageKey','snapshotUserMessages','findUserReceipt'].map(n=>fn(n)).join('\n'),ctx);
+ vm.createContext(ctx);vm.runInContext([constFn('turnIndexOf'),...['userMessageKey','snapshotUserMessages','findUserReceipt'].map(n=>fn(n))].join('\n'),ctx);
  const before=ctx.snapshotUserMessages();
  rows=[node('old','prompt')];assert.equal(ctx.findUserReceipt('prompt',before),null,'rerender is not a submission');
  rows=[node('new','unrelated')];assert.equal(ctx.findUserReceipt('prompt',before),null);

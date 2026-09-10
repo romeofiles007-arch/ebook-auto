@@ -418,7 +418,50 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       }
 
+      /**
+       * ถามแท็บว่าเทิร์นที่หายไปนั้นเกิดอะไรขึ้น — ใช้ตอนนาฬิกาของฝั่ง Studio หมดเวลา
+       * ห้ามสร้างแท็บใหม่ที่นี่ ถ้าแท็บเดิมไม่อยู่แล้วก็คือตอบไม่ได้ ไม่ใช่ตอบว่ายังไม่ส่ง
+       */
+      case 'sw.recoverTurn': {
+        const tabs = await chrome.tabs.query({ url: ['https://chatgpt.com/*', 'https://chat.openai.com/*'] });
+        for (const t of tabs) {
+          try {
+            const r = await chrome.tabs.sendMessage(t.id, { type: 'gpt.recoverTurn', turnId: msg.turnId, prompt: msg.prompt });
+            if (r?.state && r.state !== 'not_sent') return sendResponse(r);
+            if (r?.state) return sendResponse(r);
+          } catch {}
+        }
+        return sendResponse({ state: 'unreachable' });
+      }
+
       // ผู้ใช้กด "ภาพเสร็จแล้ว" ที่หน้า Studio — ไปคว้าภาพล่าสุดจากแท็บ ChatGPT มาเลย
+      /**
+       * ดึงไฟล์ภาพให้ด้วยสิทธิ์ของส่วนขยาย — ทางสำรองเมื่อหน้าเว็บดึงเองไม่ได้
+       *
+       * content script อยู่ใต้กฎของหน้า ChatGPT (CSP, CORS, blob ที่หมดอายุ)
+       * ส่วน service worker มี host_permissions ของตัวเอง จึงยิงตรงไปที่ที่เก็บไฟล์ได้
+       * นี่คือทางที่สามของการเอาไฟล์ออกมา ต่อจาก fetch ในหน้า และการวาดลงผ้าใบ
+       */
+      case 'sw.fetchImage': {
+        const url = String(msg.url || '');
+        if (!/^https?:\/\//i.test(url)) return sendResponse({ ok: false, error: 'ไม่ใช่ URL ที่ดึงได้' });
+        try {
+          const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+          if (!r.ok) return sendResponse({ ok: false, error: `HTTP ${r.status}` });
+          const blob = await r.blob();
+          if (!blob.size) return sendResponse({ ok: false, error: 'ไฟล์ว่าง' });
+          const dataUrl = await new Promise((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(fr.result);
+            fr.onerror = () => rej(fr.error || new Error('อ่านไฟล์ไม่สำเร็จ'));
+            fr.readAsDataURL(blob);
+          });
+          return sendResponse({ ok: true, dataUrl, bytes: blob.size, type: blob.type || '' });
+        } catch (e) {
+          return sendResponse({ ok: false, error: e?.message || String(e) });
+        }
+      }
+
       case 'sw.grabImage': {
         const pinnedId = msg.turnId ? (await S.get('imageTurnTabs', {}))[msg.turnId] : null;
         if (msg.turnId && pinnedId == null) {

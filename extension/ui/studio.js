@@ -47,6 +47,7 @@ import { TRIM_PRESETS, estimateTurns, targetPhysicalPages } from '../core/budget
 import { bookIssues, issuesBySection, issuesForSection } from '../core/review.js';
 import { authorRefSummary } from '../core/imageRef.js';
 import {
+  NO_CITATION_RULE,
   FIGURE_STYLES,
   polishAboutPrompt,
   titleIdeasPrompt,
@@ -58,8 +59,11 @@ import {
   coverTextBaked,
   sectionPrompt,
 } from '../core/prompts.js';
-import { parseJson, extractSection } from '../core/extract.js';
+import { parseJson, extractSection, citationGutted } from '../core/extract.js';
 import { supervisorPrompt, parseSupervisorDecision, repairPrompt, ALL_SUPERVISOR_ACTIONS } from '../core/supervisor.js';
+import { noteTrouble as recordTrouble, troubleSummary, startTrouble } from '../core/dispatch.js';
+/** จดแล้ววาดทันที — ฝ่ายธุรการต้องพูดออกมาตอนนั้น ไม่ใช่รอให้ใครมาถาม */
+const noteTrouble = (o) => { recordTrouble(o); renderDeskNote(); };
 import { addCeoUsage, ceoUsageLabel } from '../core/ceo-usage.js';
 import * as B from '../core/bible.js';
 import { ITEM_KINDS, planItems, suggestItemSize } from '../core/items.js';
@@ -533,6 +537,7 @@ function logMachine(e) {
    * ซึ่งเป็นช่วงที่เครื่องทำงานในเครื่องอยู่ (คอมไพล์ บันทึก วางแผน) และเป็นช่วงที่หยุดเงียบได้จริง
    */
   lastActivityAt = Date.now();
+  renderDeskNote(); // เครื่องผลิตจดของมันเองผ่าน dispatch หน้าจอจึงต้องตามอ่านเป็นระยะ
   if (e.type === 'turn.start') {
     lastProgressAt = Date.now();
     lastProgressPhase = 'เริ่มเทิร์น';
@@ -708,6 +713,7 @@ setInterval(() => {
       return;
     }
     autoContinues++;
+    noteTrouble({ step: book.job.step, symptom: 'quiet_stall', move: 'press_continue', by: 'นาฬิกาเฝ้าดู' });
     lastActivityAt = Date.now(); // กันไม่ให้รอบถัดไปยิงซ้อนระหว่างที่ resumeGo กำลังตั้งตัว
     addEvent(
       'system',
@@ -864,8 +870,45 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
   let last = null;
   let bestPartial = null;
   let bestPartialWhy = '';
+  /**
+   * ยิงซ้ำด้วยคำสั่งเดิมเป๊ะ ๆ แก้อาการ "เหลือแต่หมุดอ้างอิง" ไม่ได้เลย
+   *
+   * อาการนี้ไม่ได้เกิดจากจังหวะ แต่เกิดจาก ChatGPT เลือกค้นเว็บแล้วแทนเนื้อหาจริงด้วยหมุด
+   * คำสั่งเดิมพามันไปที่การตัดสินใจเดิมทุกรอบ สามรอบจึงได้ผลเหมือนกันทั้งสามรอบ
+   * แล้วโหมดอัตโนมัติก็หยุดตั้งแต่ขั้นคิดชื่อ — ต้องเปลี่ยนคำสั่ง ไม่ใช่เปลี่ยนจังหวะ
+   */
+  let askText = prompt;
+  /** โหลดหน้าใหม่เพราะวงกลมค้างได้ครั้งเดียวต่อคำสั่ง — วนโหลดไม่จบไม่ใช่การแก้ปัญหา */
+  let unstuck = false;
   for (let i = 1; i <= attempts; i++) {
-    const res = (await transport.send(prompt, opts)) || { status: 'error' };
+    const res = (await transport.send(askText, opts)) || { status: 'error' };
+    if (citationGutted(res.text) && askText === prompt) {
+      noteTrouble({ step: opts.label || '', symptom: 'citation_only', move: 'harden_prompt', by: 'หน้า Studio' });
+      askText = `${prompt}\n\n${NO_CITATION_RULE}\n\nรอบที่แล้วคุณตอบกลับมาเป็นหมุดอ้างอิงล้วน ๆ ซึ่งเราอ่านไม่ได้เลย\nรอบนี้ห้ามค้นเว็บ ห้ามอ้างอิง ให้ตอบจากที่รู้เป็นข้อความล้วนในบล็อกโค้ดเดียว`;
+      addEvent(
+        'system',
+        'คำตอบเหลือแต่หมุดอ้างอิง — สั่งใหม่แบบห้ามค้นเว็บ',
+        `ขั้น ${opts.label || '-'} · ChatGPT แทนเนื้อหาจริงด้วย contentReference/oaicite ยิงซ้ำคำสั่งเดิมจะได้ผลเดิม`,
+      );
+    }
+    /**
+     * วงกลมที่ปุ่มส่งค้าง — ปุ่มบนหน้านี้ต้องปลดเองได้ด้วย ไม่ใช่เฉพาะเครื่องผลิต
+     *
+     * ขั้นเตรียมเล่ม (ดูกระแส · คิดชื่อ · เสนอสารบัญ) ยิงตรงผ่านทางนี้ ไม่ได้ผ่าน Machine
+     * เดิมทางนี้ไปจบที่ผู้คุมกระบวนการอย่างเดียว ปิดโหมด CEO ไว้ก็ไม่มีใครโหลดหน้าใหม่ให้
+     * ทั้งที่รหัสนี้แปลว่าหน้าเว็บค้างแน่นอนและคำสั่งยังไม่เคยถูกส่ง — โหลดใหม่ปลอดภัยเสมอ
+     */
+    if (res.meta?.error === 'composer_busy_stuck' && !unstuck && transport.kind === 'chatgpt_tab') {
+      unstuck = true;
+      noteTrouble({ step: opts.label || '', symptom: 'composer_busy', move: 'reload_tab', by: 'หน้า Studio' });
+      addEvent('system', 'ปุ่มส่งเป็นวงกลมหมุนค้าง', `ขั้น ${opts.label || '-'} · กดปลดแล้วไม่หาย — โหลดหน้า ChatGPT ใหม่เองหนึ่งครั้ง คำสั่งยังไม่เคยถูกส่งจึงไม่มีงานซ้อน`);
+      const done = await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch(() => null);
+      if (done?.ok) {
+        i--;
+        continue;
+      }
+      addEvent('system', 'โหลดหน้า ChatGPT ใหม่ไม่สำเร็จ', 'กดปุ่ม “ปลดหน้า ChatGPT ที่ค้าง” เองได้ที่หน้านี้');
+    }
     let fatal = false;
     if (res.status !== 'ok') {
       res.error = turnErrorMessage(res);
@@ -894,6 +937,30 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
     last = res;
     if (fatal) return last; // CEO must never bypass unknown submission, quota or parser fatal errors.
     if (i === attempts) break;
+
+    /**
+     * บันไดกู้ของขั้นเตรียมเล่ม: ห้องเดิม → ห้องใหม่ → โหลดแท็บใหม่
+     *
+     * เดิมทั้งสามรอบยิงในห้องเดิมด้วยเงื่อนไขเดิมเป๊ะ ๆ ถ้าห้องนั้นเสียหรือหน้าเว็บค้าง
+     * ทั้งสามรอบก็ล้มด้วยเหตุผลเดียวกัน แล้วจบที่ผู้คุมกระบวนการ ซึ่งปิดอยู่เป็นส่วนใหญ่
+     * ทั้งที่ท่าที่ปลดได้จริงสองท่ายังไม่เคยถูกลองเลยสักท่า
+     *
+     * ห้องใหม่ล้างบทสนทนา · โหลดแท็บล้างสถานะของหน้าเว็บ สองอย่างนี้แก้คนละอาการ
+     * จึงต้องไล่ตามลำดับ ไม่ใช่เลือกอย่างใดอย่างหนึ่ง และไม่มีอันไหนกินโควตาข้อความ
+     */
+    if (transport.kind !== 'chatgpt_tab') {
+      // เล่มที่เขียนด้วย API ไม่มีห้องแชตและไม่มีแท็บให้โหลด บันไดนี้จึงไม่มีขั้นไหนใช้ได้เลย
+    } else if (!opts.wantImages && book?.threadMode !== 'reuse' && !opts.newThread) {
+      opts = { ...opts, newThread: true };
+      noteTrouble({ step: opts.label || '', symptom: 'prompt_not_sent', move: 'new_thread', detail: res.error || res.status || '', by: 'หน้า Studio' });
+      addEvent('system', 'ลองใหม่ในห้องแชตใหม่', `ขั้น ${opts.label || '-'} · ${res.error || res.status} — ห้องเดิมใช้ไม่ได้ ยังไม่เสียโควตา`);
+    } else if (!unstuck) {
+      unstuck = true;
+      noteTrouble({ step: opts.label || '', symptom: 'prompt_not_sent', move: 'reload_tab', detail: res.error || res.status || '', by: 'หน้า Studio' });
+      addEvent('system', 'ห้องใหม่แล้วยังไม่ผ่าน — โหลดแท็บ ChatGPT ใหม่', `ขั้น ${opts.label || '-'} · ${res.error || res.status} — ล้างสถานะค้างของหน้าเว็บทั้งใบ`);
+      await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch(() => null);
+    }
+
     onRetry?.(i, attempts, res);
     await new Promise((r) => setTimeout(r, 250 * i)); // ตัวรอฝั่ง adapter ขับด้วย event แล้ว ไม่ต้องหน่วงยาว
   }
@@ -903,7 +970,7 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
    * ไม่งั้นโหมด CEO จะครอบแค่ตอนเขียนเล่ม ส่วนขั้นเตรียม (ดูกระแส · คิดชื่อ · เสนอสารบัญ)
    * ยังหยุดค้างเหมือนเดิม ซึ่งเป็นจุดที่ค้างจริงบ่อยที่สุด
    */
-  const decided = await superviseFailure(last, prompt, opts, { attempts, transport });
+  const decided = await superviseFailure(last, askText, opts, { attempts, transport });
   if (!decided) return bestPartial ? { ...last, data: bestPartial, error: null, short: bestPartialWhy } : last;
   if (decided.status !== 'ok') return { ...decided, error: turnErrorMessage(decided) };
   if (parse) {
@@ -1014,7 +1081,18 @@ function answerEvidence(raw, parsed) {
   // คำตอบที่วงเล็บเปิดค้างไว้ = อ่านกลับมาไม่ครบ ไม่ใช่โมเดลตอบผิดฟอร์แมต
   // แยกสองกรณีนี้ให้ออก ไม่งั้นจะไปไล่แก้ prompt ทั้งที่ต้นเหตุอยู่ที่การอ่านหน้าเว็บ
   const opens = (flat.match(/[{[]/g) || []).length - (flat.match(/[}\]]/g) || []).length;
-  const cut = opens > 0 ? ' · คำตอบถูกอ่านกลับมาไม่ครบ (ตัดกลางคัน) ระบบยิงซ้ำให้แล้ว' : '';
+  /**
+   * "เหลือแต่หมุดอ้างอิง" ต้องรายงานเป็นคนละอาการกับ "ตัดกลางคัน"
+   *
+   * ทั้งสองอย่างทำให้วงเล็บเปิดค้างเหมือนกัน อาการนี้จึงถูกรายงานผิดเป็นตัดกลางคันมาตลอด
+   * แล้วเราก็ไปตามหาสาเหตุผิดที่ — ที่จังหวะการอ่านหน้าเว็บ ทั้งที่ต้นเหตุคือการค้นเว็บ
+   * ของ ChatGPT ที่แทนเนื้อหาจริงด้วยหมุด ยิงซ้ำกี่รอบก็ได้ผลเดิมเป๊ะทุกรอบ
+   */
+  const cut = citationGutted(raw)
+    ? ' · หน้าเว็บคืนมาแต่หมุดอ้างอิงของการค้นเว็บ (contentReference/oaicite) เนื้อหาจริงไม่ได้อยู่ในข้อความ — ยิงซ้ำก็ได้ผลเดิม ต้องสั่งไม่ให้ค้นเว็บ'
+    : opens > 0
+      ? ' · คำตอบถูกอ่านกลับมาไม่ครบ (ตัดกลางคัน) ระบบยิงซ้ำให้แล้ว'
+      : '';
   return (
     `[ยาว ${String(raw || '').length} ตัวอักษร${cut}` +
     (keys.length ? ` · คีย์ที่อ่านได้: ${keys.slice(0, 12).join(', ')}` : '') +
@@ -1054,6 +1132,21 @@ const safeHttpUrl = (v) => {
  * เป็นแค่ตัวอักษรสีเหลืองที่ผู้ใช้ต้องอ่านผ่านทุกครั้งจนเลิกอ่าน แล้วพอถึงวันที่มันสำคัญจริง
  * ก็ไม่มีใครเห็นมันอีกแล้ว — คำเตือนที่ขึ้นตลอดเวลาเท่ากับไม่มีคำเตือน
  */
+/**
+ * ฝ่ายธุรการ — บรรทัดเดียวที่ตอบว่า "ตอนนี้ติดอะไร ซ้ำที่เดิมกี่ครั้ง ลองท่าอะไรไปแล้ว"
+ *
+ * ข้อมูลนี้มีอยู่ในระบบมาตลอด แต่กระจายเป็นตัวนับท้องถิ่นในห้าที่ที่มองไม่เห็นกัน
+ * คนอ่านหน้าจอจึงต้องไล่บันทึกย้อนหลังเองเพื่อประกอบภาพ ว่าที่ค้างอยู่นี่ลองอะไรไปบ้างแล้ว
+ * ตัวนี้ไม่ตัดสินใจอะไรทั้งนั้น มันแค่พูดสิ่งที่เกิดขึ้นออกมาให้ได้ยิน
+ */
+function renderDeskNote() {
+  const el = $('deskNote');
+  if (!el) return;
+  const s = troubleSummary();
+  el.classList.toggle('hidden', !s.total);
+  el.textContent = s.total ? `ฝ่ายธุรการ: ${s.line}` : '';
+}
+
 function syncStepWarn() {
   document.querySelector('.stepWarn')?.classList.toggle('hidden', !outlineDirection);
 }
@@ -1570,6 +1663,18 @@ async function polishUserOutline() {
  *
  * อ่านจากทั้งเครื่องนี้และ Shared Workspace เพราะเล่มเก่าอาจถูกทำจาก Chrome profile อื่น
  */
+/**
+ * ชื่อเล่มที่เคยทำไปแล้ว ไว้ห้ามตัวคิดชื่อเสนอซ้ำ — เอาแค่ 10 เล่มล่าสุดพอ
+ *
+ * ของเดิมเทรายชื่อทั้งคลังแล้วตัด 40 ตัวท้ายของ "ลำดับที่ฐานข้อมูลคืนมา" ซึ่งเรียงตาม id
+ * ที่เป็น uuid สุ่ม จึงไม่ใช่เล่มล่าสุดเลยสักนิด ได้ 40 ชื่อแบบสุ่มติดไปกับทุกคำสั่งคิดชื่อ
+ * — เปลืองความยาวคำสั่ง และยิ่งรายการยาวโมเดลยิ่งอ่านผ่าน ๆ จนกันซ้ำได้แย่ลง
+ *
+ * ความซ้ำที่คนสังเกตเห็นจริงคือซ้ำกับเล่มที่เพิ่งทำ ไม่ใช่เล่มเมื่อครึ่งปีก่อน
+ * เรียงตามเวลาแก้ไขล่าสุดแล้วเอา 10 ชื่อแรก จึงตรงเป้ากว่าและสั้นพอให้โมเดลอ่านครบทุกบรรทัด
+ */
+const RECENT_TITLE_LIMIT = 10;
+
 async function previousTitles() {
   try {
     const [books, shared] = await Promise.all([
@@ -1577,9 +1682,10 @@ async function previousTitles() {
       W.listProjects().catch(() => []),
     ]);
     const names = [...books, ...shared]
+      .sort((a, b) => (Number(b?.updatedAt) || 0) - (Number(a?.updatedAt) || 0))
       .map((b) => String(b?.outline?.title || b?.title || b?.topic || '').trim())
       .filter((t) => t && t !== '(ยังไม่มีชื่อ)');
-    return [...new Set(names)].slice(-40);
+    return [...new Set(names)].slice(0, RECENT_TITLE_LIMIT);
   } catch {
     return [];
   }
@@ -2204,6 +2310,7 @@ function imagesLeftForCeo() {
 async function askResumeDecision() {
   if (askingResume) return;
   const stopHere = (why) => {
+    noteTrouble({ step: book?.job?.step || '', symptom: 'quiet_stall', move: 'stop', detail: why, by: 'ผู้คุมกระบวนการ' });
     unattended = false;
     ceoStopped = true;
     addEvent('system', 'เลิกกดทำต่อให้เอง', why);
@@ -2239,6 +2346,7 @@ async function askResumeDecision() {
      * ไม่ส่งข้อความใหม่ ไม่กินโควตา แค่สั่งให้สิ่งที่ค้างอยู่เดินต่อ
      */
     const go = async (why, run) => {
+      noteTrouble({ step, symptom: 'quiet_stall', move: decision?.action || '', detail: decision?.reason || '', by: 'ผู้คุมกระบวนการ' });
       autoContinues = 0;
       autoContinueTotal++;
       lastActivityAt = Date.now();
@@ -2305,6 +2413,7 @@ async function runFullAuto() {
   autoContinues = 0;
   autoContinueStep = '';
   autoContinueTotal = 0;
+  await clearImageGiveUp();
   runState('working', 'เริ่มอัตโนมัติ: เลือกหัวข้อ ชื่อ และสารบัญ');
   const button = $('fullAuto');
   button.disabled = true;
@@ -2346,7 +2455,26 @@ async function runFullAuto() {
       }
 
       status('อัตโนมัติ: กำลังให้ ChatGPT คิดชื่อหนังสือ');
-      await generateTitleIdeas();
+      /**
+       * ขั้นขัดชื่อล้ม ต้องไม่ล้มทั้งเล่ม เพราะหัวข้อที่ใช้ได้จริงวางอยู่ในช่องแล้ว
+       *
+       * ขั้นก่อนหน้าเพิ่งเขียนหัวข้อจากโหมดกระแสลง $('title') ไปหมาด ๆ ขั้นนี้เป็นแค่การ
+       * ขัดหัวข้อนั้นให้เป็นชื่อหนังสือที่ขายได้ — เป็นของแถม ไม่ใช่ของที่ขาดไม่ได้
+       * แต่มันถูกเรียกแบบไม่มีตัวรับ ต่างจากขั้นถามหัวข้อที่ห่อ try ไว้ตั้งแต่ต้น
+       * พอ ChatGPT คืนคำตอบที่แกะไม่ได้ ทั้งเล่มจึงตายตรงนี้ ทั้งที่มีชื่อใช้ได้อยู่แล้ว
+       * และยังไม่ได้เขียนเนื้อหาสักตัวอักษร — เสียทั้งรอบเพราะขั้นที่ข้ามได้
+       *
+       * ด่าน "ยังไม่มีชื่อเลย" ข้างล่างยังอยู่ครบ กรณีที่หมดทางจริงจึงยังหยุดเหมือนเดิม
+       */
+      try {
+        await generateTitleIdeas();
+      } catch (e) {
+        addEvent(
+          'system',
+          'อัตโนมัติ: ขัดชื่อหนังสือไม่สำเร็จ',
+          `${e?.message || e} — ${$('title').value.trim() ? `ใช้หัวข้อที่ได้มาเป็นชื่อเล่มไปก่อน: “${$('title').value.trim()}”` : 'และยังไม่มีหัวข้อสำรอง'}`,
+        );
+      }
       if (!fullAutoRunning) return;
       // อ่านค่าจากตัวเลือกแรกตรง ๆ ไม่กดปุ่ม เพราะปุ่มนั้นสั่งวางสารบัญต่อทันที
       // ซึ่งจะซ้ำกับขั้นถัดไปของเราเอง แล้วเปลืองข้อความ ChatGPT ไปฟรีหนึ่งรอบ
@@ -2556,6 +2684,18 @@ async function runMachine() {
     fullAutoRunning = true;
     addEvent('system', 'อัตโนมัติ: เดินต่อตามที่สั่งไว้', 'เล่มนี้ถูกสั่งให้ทำจนจบ ประตูระหว่างทางจึงผ่านให้เองเหมือนเดิม');
   }
+  startTrouble(book?.id || '');
+  /**
+   * บอกให้เห็นทุกครั้งว่าโค้ดที่กำลังรันอยู่คือรุ่นไหน
+   *
+   * ส่วนขยายไม่โหลดโค้ดใหม่จนกว่าจะกดโหลดใหม่ที่ chrome://extensions ซึ่งลืมกันได้ง่ายมาก
+   * ที่ผ่านมาจึงแยกไม่ออกเลยว่าอาการที่เห็นบนจอเป็นของโค้ดเก่าหรือโค้ดที่เพิ่งแก้ไป
+   * — เสียเวลาไล่หาสาเหตุที่แก้ไปแล้วหลายรอบ บรรทัดเดียวนี้ตัดคำถามนั้นทิ้งถาวร
+   */
+  try {
+    const m = chrome.runtime.getManifest();
+    addEvent('system', 'โค้ดที่รันอยู่', m.version_name || m.version || '-');
+  } catch {}
   machineBusy = true;
   runState('working', 'กำลังดำเนินการตามขั้นของเล่ม');
   lastActivityAt = Date.now();
@@ -2718,6 +2858,19 @@ function showResume(b) {
     (why ? ` — ${why}` : '');
 }
 
+/**
+ * คนกดปุ่มเอง = คำสั่งใหม่ ตัวนับ "ยอมแพ้" ของรอบก่อนจึงหมดอายุตรงนั้น
+ *
+ * เพดานรอบสร้างภาพมีไว้กันไม่ให้เครื่องวนทั้งคืนตอนไม่มีคนเฝ้า ไม่ได้มีไว้ปิดโหมดอัตโนมัติ
+ * ของเล่มนั้นถาวร เมื่อมีคนอยู่ตรงนั้นและสั่งให้เริ่มใหม่ เจตนานั้นชนะบันทึกของรอบที่แล้วเสมอ
+ */
+async function clearImageGiveUp() {
+  if (!book?.id || !book.imagePhase) return;
+  if (!book.imagePhase.autoRounds && book.imagePhase.autoRoundsLeft == null) return;
+  book.imagePhase = { ...book.imagePhase, autoRounds: 0, autoRoundsLeft: null };
+  await db.saveBook(book).catch(() => {});
+}
+
 async function resumeGo() {
   /**
    * ห้ามเดินเครื่องซ้อนเครื่องที่เดินอยู่
@@ -2754,7 +2907,19 @@ async function resumeGo() {
   $('start').classList.add('hidden');
   // มีคนมาดูแล้วและสั่งเดินต่อ คำตัดสิน "หยุดรอคุณ" ของผู้คุมจึงหมดหน้าที่
   ceoStopped = false;
+  /**
+   * กู้ "เจตนา" กลับมาให้ครบทั้งสองใบ ไม่ใช่ใบเดียว
+   *
+   * ธงทั้งสองเป็นค่าของหน้านี้ รีโหลด Studio ทีเดียวหายทั้งคู่ ของเดิมกู้กลับมาแค่ใบเดียว
+   * ผลคือครึ่ง ๆ กลาง ๆ: ประตูระหว่างทางผ่านให้เอง (fullAutoRunning) แต่พองานสะดุด
+   * นาฬิกาเฝ้าดูกดทำต่อให้ไม่ได้ (unattended หายไป) เล่มจึงนอนค้างจนกว่าคนจะมากดเอง
+   * ทั้งที่ผู้ใช้สั่งไว้ตั้งแต่ต้นว่าให้ทำจนได้เล่ม — เจตนานั้นถูกบันทึกไว้กับเล่มอยู่แล้ว
+   *
+   * ปลดได้ด้วยปุ่มหยุดหรือคำสั่งหยุดของผู้คุมเหมือนเดิม ใครสั่งหยุดไปแล้วยังหยุดจริง
+   */
+  await clearImageGiveUp();
   fullAutoRunning = book.automation?.mode === 'full';
+  if (fullAutoRunning) unattended = true;
   if (book.job.step === 'done') return finish();
   if (['gate_images', 'images'].includes(book?.job?.step)) {
     if (fullAutoRunning && !hasManualImages(book)) return startPhase2();
@@ -2938,7 +3103,23 @@ async function loadUnfinished() {
   showResume(book);
 }
 
+/**
+ * ชั้นหนังสือคือของประดับ ส่วนการทำเล่มคืองานจริง — ของประดับห้ามล้มงานจริงเด็ดขาด
+ *
+ * ตัวนี้ถูก await อยู่กลางเส้นทางการผลิตหลายจุด (จบ Phase 1 · จบเล่ม · หลังสร้างภาพ)
+ * ถ้าอ่านรายการหรือวาดปกพลาดขึ้นมา ความผิดพลาดจะไหลขึ้นไปหยุดงานที่กำลังเดินอยู่
+ * ทั้งที่ไม่มีอะไรเกี่ยวกับเนื้อหาหนังสือเลยสักนิด — วาดไม่ได้ก็แค่ไม่ต้องวาด
+ */
 async function loadProjectHistory() {
+  try {
+    return await renderProjectHistory();
+  } catch (e) {
+    $('projectList').innerHTML = `<div class="muted">อ่านชั้นหนังสือไม่สำเร็จ: ${esc(e?.message || e)}</div>`;
+    return null;
+  }
+}
+
+async function renderProjectHistory() {
   const [localBooks, sharedMetas] = await Promise.all([
     db.listBooks(),
     W.listProjects().catch(() => []),
@@ -2963,6 +3144,7 @@ async function loadProjectHistory() {
         return {
           id,
           title: shared.title || shared.topic || '(ยังไม่มีชื่อ)',
+          author: shared.author || '',
           updatedAt: shared.updatedAt || 0,
           stateDone: shared.job?.status === 'done' || shared.job?.step === 'done',
           step: shared.job?.step,
@@ -2984,6 +3166,7 @@ async function loadProjectHistory() {
       return {
         id,
         title: b?.outline?.title || b?.topic || '(ยังไม่มีชื่อ)',
+        author: b?.author || '',
         updatedAt: b?.updatedAt || 0,
         stateDone: b?.job?.status === 'done' || b?.job?.step === 'done',
         step: b?.job?.step,
@@ -3002,31 +3185,140 @@ async function loadProjectHistory() {
     return;
   }
 
-  $('projectList').innerHTML = rows
-    .map((r) => {
-      const when = r.updatedAt ? new Date(r.updatedAt).toLocaleString('th-TH') : 'ไม่ทราบเวลา';
-      const state = r.stateDone
-        ? 'เสร็จแล้ว'
-        : r.isPhase2
-          ? r.phase2Missing > 0
-            ? `รอ Image Phase 2 · ยังขาด ${r.phase2Missing}/${r.phase2Total} รูป`
-            : 'Image Phase 2 ภาพครบแล้ว · รอตรวจและประกอบ PDF'
-          : `ค้างที่ ${STEP_NAMES[r.step] || r.step || '-'}`;
-      const buttonLabel = r.isPhase2 ? 'เปิด Phase 2' : 'เปิดโครงการ';
-      const sharedNote = r.shared ? ' · Shared Workspace' : '';
-      return `<div class="projectItem${r.isPhase2 ? ' projectPhase2' : ''}"><div class="projectMeta"><div class="projectTitle">${esc(r.title)}</div><div class="projectInfo">${when} · ${state} · ${r.sectionCount} ตอน · ${r.targetPages} หน้า${sharedNote}</div></div><div class="projectActions"><button data-open-project="${esc(r.id)}">${buttonLabel}</button><button class="projectEdit" data-rename-project="${esc(r.id)}" title="เปลี่ยนชื่อโครงการ">แก้ชื่อ</button><button class="danger projectEdit" data-drop-project="${esc(r.id)}" title="ลบโครงการนี้ถาวร">ลบ</button></div></div>`;
+  await renderShelf(rows);
+}
+
+/**
+ * ชั้นหนังสือ — ปกคือสิ่งที่คนจำเล่มได้ ไม่ใช่ชื่อไฟล์หรือวันที่
+ *
+ * รายการแบบบรรทัดต่อบรรทัดบังคับให้ไล่อ่านทีละแถวเพื่อหาเล่มที่ต้องการ
+ * ส่วนชั้นที่วางปกจริงให้สายตาเจอได้ในครั้งเดียว และปกที่เห็นคือปกเดียวกับที่จะพิมพ์
+ *
+ * เล่มที่ยังไม่มีไฟล์ปก วาดปกจากชื่อเรื่องแทน — ดีกว่าช่องว่างที่บอกอะไรไม่ได้เลย
+ */
+let shelfUrls = [];
+let shelfSelected = '';
+
+function releaseShelfUrls() {
+  for (const u of shelfUrls) URL.revokeObjectURL(u);
+  shelfUrls = [];
+}
+
+/** ปกหน้าของเล่มนี้ ถ้ามีไฟล์อยู่จริงในเครื่อง */
+async function coverUrlFor(id) {
+  try {
+    const a = await db.loadAsset(id, 'cover-front.png');
+    if (!a?.blob?.size) return '';
+    const url = URL.createObjectURL(a.blob);
+    shelfUrls.push(url);
+    return url;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * เล่มที่ยังไม่มีไฟล์ปก ใช้ "หน้าปกใน" ของเล่มนั้นแทน — หน้าแรกสุดที่มีชื่อเรื่องกับชื่อผู้เขียน
+ *
+ * เดิมวาดเป็นแผ่นไล่สีเข้มพร้อมชื่อ ซึ่งไม่ใช่อะไรที่มีอยู่จริงในเล่ม เป็นของที่เราแต่งขึ้นเอง
+ * ส่วนหน้าปกในมีอยู่จริงทุกเล่ม และเป็นสิ่งแรกที่ผู้อ่านเห็นเมื่อเปิดเล่มที่ไม่มีปก
+ * ชั้นหนังสือจึงควรแสดงสิ่งเดียวกับที่เล่มนั้นมีจริง ไม่ใช่ภาพแทนที่ไม่มีใครเคยเห็น
+ */
+const titlePageArt = (r) =>
+  `<div class="titlepage"><div class="t">${esc(r.title)}</div>${
+    r.author ? `<div class="a">${esc(r.author)}</div>` : ''
+  }</div>`;
+
+const shelfState = (r) =>
+  r.stateDone
+    ? { text: 'เสร็จแล้ว', cls: 'done' }
+    : r.isPhase2
+      ? { text: r.phase2Missing > 0 ? `ขาด ${r.phase2Missing} รูป` : 'ภาพครบ', cls: 'busy' }
+      : { text: STEP_NAMES[r.step] || r.step || 'ค้างอยู่', cls: '' };
+
+async function renderShelf(rows) {
+  releaseShelfUrls();
+  const covers = await Promise.all(rows.map((r) => coverUrlFor(r.id)));
+  const list = $('projectList');
+  list.classList.add('shelf');
+  list.innerHTML = rows
+    .map((r, i) => {
+      const st = shelfState(r);
+      const when = r.updatedAt ? new Date(r.updatedAt).toLocaleDateString('th-TH') : '';
+      const art = covers[i] ? `<img src="${covers[i]}" alt="ปกของ ${esc(r.title)}">` : titlePageArt(r);
+      /**
+       * ปุ่มลบต้องเป็นปุ่มของตัวเอง ไม่ใช่ปุ่มซ้อนในปุ่ม
+       *
+       * การ์ดทั้งใบเคยเป็น <button> ตัวเดียว ซึ่งซ้อนปุ่มข้างในไม่ได้ (HTML ไม่ยอม
+       * และเบราว์เซอร์จะยุบให้เอง แล้วคลิกลบจะกลายเป็นคลิกเปิดเล่ม)
+       * จึงแยกเป็นกล่องครอบ + ปุ่มเลือกเล่ม + ปุ่มลบที่ลอยอยู่มุมปก
+       */
+      return `<div class="shelfBook${r.id === shelfSelected ? ' sel' : ''}">
+        <button class="pick" data-book="${esc(r.id)}" title="${esc(r.title)}">
+          <div class="cover">${art}</div>
+          <div class="name">${esc(r.title)}</div>
+          <div class="when"><i class="dot ${st.cls}"></i>${esc(st.text)}${when ? ` · ${esc(when)}` : ''}${r.shared ? ' · Shared' : ''}</div>
+        </button>
+        <button class="del" data-drop="${esc(r.id)}" title="ลบ “${esc(r.title)}” ถาวร" aria-label="ลบ ${esc(r.title)}">✕</button>
+      </div>`;
     })
     .join('');
+  list.querySelectorAll('[data-book]').forEach((el) => {
+    el.onclick = () => openProjectDetail(el.dataset.book, rows);
+  });
+  list.querySelectorAll('[data-drop]').forEach((el) => {
+    el.onclick = (ev) => {
+      // ห้ามให้คลิกลบไหลไปเป็นคลิกเปิดเล่มด้วย
+      ev.preventDefault();
+      ev.stopPropagation();
+      deleteSavedProject(el.dataset.drop);
+    };
+  });
+  if (shelfSelected && rows.some((r) => r.id === shelfSelected)) openProjectDetail(shelfSelected, rows);
+  else $('projectDetail').classList.add('hidden');
+}
 
-  $('projectList').querySelectorAll('[data-open-project]').forEach((btn) => {
-    btn.onclick = () => openSavedProject(btn.dataset.openProject);
+/** รายละเอียดของเล่มที่คลิก พร้อมปุ่มที่ทำอะไรกับเล่มนั้นได้จริง */
+async function openProjectDetail(id, rows) {
+  const r = rows.find((x) => x.id === id);
+  if (!r) return;
+  shelfSelected = id;
+  $('projectList').querySelectorAll('[data-book]').forEach((el) => {
+    el.closest('.shelfBook')?.classList.toggle('sel', el.dataset.book === id);
   });
-  $('projectList').querySelectorAll('[data-rename-project]').forEach((btn) => {
-    btn.onclick = () => renameSavedProject(btn.dataset.renameProject);
-  });
-  $('projectList').querySelectorAll('[data-drop-project]').forEach((btn) => {
-    btn.onclick = () => deleteSavedProject(btn.dataset.dropProject);
-  });
+
+  const st = shelfState(r);
+  const when = r.updatedAt ? new Date(r.updatedAt).toLocaleString('th-TH') : 'ไม่ทราบเวลา';
+  const cover = await coverUrlFor(id);
+  const box = $('projectDetail');
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div class="cover">${cover ? `<img src="${cover}" alt="ปกของ ${esc(r.title)}">` : titlePageArt(r)}</div>
+    <div>
+      <h3>${esc(r.title)}</h3>
+      <div class="muted">${esc(when)}${r.shared ? ' · Shared Workspace' : ''}</div>
+      <div class="facts">
+        <div class="fact"><b>${esc(st.text)}</b><span>สถานะ</span></div>
+        <div class="fact"><b>${r.sectionCount}</b><span>ตอน</span></div>
+        <div class="fact"><b>${esc(String(r.targetPages))}</b><span>หน้าที่ตั้งไว้</span></div>
+        ${r.isPhase2 ? `<div class="fact"><b>${r.phase2Total - r.phase2Missing}/${r.phase2Total}</b><span>ภาพที่ได้แล้ว</span></div>` : ''}
+      </div>
+      <div class="actions">
+        <button class="primary inline" data-detail-open>${r.isPhase2 ? 'เปิด Phase 2' : 'เปิดและแก้ไข'}</button>
+        <button data-detail-rename>แก้ชื่อ</button>
+        <button data-detail-close>ปิด</button>
+        <button class="danger" data-detail-drop>ลบ</button>
+      </div>
+    </div>`;
+  box.querySelector('[data-detail-open]').onclick = () => openSavedProject(id);
+  box.querySelector('[data-detail-rename]').onclick = () => renameSavedProject(id);
+  box.querySelector('[data-detail-drop]').onclick = () => deleteSavedProject(id);
+  box.querySelector('[data-detail-close]').onclick = () => {
+    shelfSelected = '';
+    box.classList.add('hidden');
+    $('projectList').querySelectorAll('.sel').forEach((el) => el.classList.remove('sel'));
+  };
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 /**
@@ -3905,7 +4197,9 @@ async function pullImagesFromFolder() {
   }
 
   if (!files.length) {
-    const dirHint = `_EbookAuto/images/${String(book.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+    // บอกที่อยู่จริงของเล่มนี้ ไม่ใช่รูปแบบทั่วไปที่ผู้ใช้ต้องแปล id เป็นโฟลเดอร์เอง
+    const home = await W.bookDirPath(book).catch(() => '');
+    const dirHint = home ? `${home}/drop` : 'โฟลเดอร์ของเล่มใน Shared Workspace (ยังไม่ได้เลือกโฟลเดอร์ไว้)';
     return phase2Notice(
       '<b>ยังไม่มีไฟล์ในโฟลเดอร์รับรูป</b>' +
         `วางไฟล์ไว้ที่ <b>${esc(dirHint)}</b> ในโฟลเดอร์ Shared Workspace แล้วกดปุ่มนี้อีกครั้ง<br>` +
@@ -4355,6 +4649,19 @@ async function openImagePhaseGate() {
     chime('attention');
     status('รอคุณใส่ภาพ — คัดลอก Prompt ไปสร้างแล้วอัปโหลดกลับ');
     runState('input', 'คุณเลือกใช้ภาพอัปโหลด — ใส่ไฟล์ที่ยังขาดใน Studio', 'imagePhase', 'เปิดรายการภาพที่ขาด');
+    /**
+     * รอบอัตโนมัติจบลงตรงนี้จริง ๆ — ต้องปลดธงทั้งสองใบ ไม่ใช่แค่หยุดเดิน
+     *
+     * ทางออกนี้เป็นทางเดียวในหน้านี้ที่ออกจากโหมดอัตโนมัติโดยไม่ปลดธงเลย ผลคือค้างสองชั้น:
+     *   · fullAutoRunning ค้างเป็นจริงทั้งที่ไม่มีอะไรเดินอยู่ ปุ่ม “เริ่มอัตโนมัติทั้งเล่ม”
+     *     จึงตอบว่า “กำลังทำงานอยู่แล้ว — กดหยุดก่อน” ทุกครั้งที่กด ทั้งที่ไม่มีงานให้หยุด
+     *   · unattended ค้างเป็นจริง นาฬิกาเฝ้าดูจึงกดทำต่อให้เองทุก 45 วินาที มาเปิดประตูเดิมซ้ำ
+     *     จนหมดเพดาน แล้วไปจบที่ “งานค้างซ้ำที่เดิม” ทั้งที่ประตูนี้รออยู่อย่างถูกต้อง
+     *
+     * ประตูนี้รอไฟล์จากมือคน ไม่มีท่าไหนที่เครื่องกดแล้วเดินต่อได้ การกดต่อจึงมีแต่เสียเวลาเปล่า
+     */
+    stopAutoPilot();
+    unattended = false;
   } else if (autoPilot() || (unattended && book.job?.status !== 'rate_limited')) {
     /**
      * ประตูภาพต้องเริ่มเองด้วยเมื่อผู้ใช้สั่งโหมดไร้คนเฝ้าไว้ ไม่ใช่ดูแค่ธงรอบอัตโนมัติ
@@ -4376,7 +4683,22 @@ async function openImagePhaseGate() {
      * แต่ต้องมีที่สิ้นสุด รอบที่กี่ครั้งก็ได้ผลเดิมคือเรื่องที่คนต้องมาดูเอง ไม่ใช่วนทั้งคืน
      */
     const stuck = book.imagePhase?.failures?.length || book.imagePhase?.status === 'partial';
-    const rounds = Number(book.imagePhase?.autoRounds) || 0;
+    /**
+     * นับเฉพาะ "รอบที่ไม่ได้อะไรเลย" ไม่ใช่ทุกรอบที่ยังไม่ครบ
+     *
+     * ตัวนับนี้ถูกบันทึกลงเล่ม และเดิมมีทางลดลงทางเดียวคือรอบที่ไม่มีอะไรค้างเลย
+     * ซึ่งเอื้อมไม่ถึงเมื่อยังมีภาพขาด ผลคือพอครบสองรอบแล้ว ประตูนี้จะหยุดทันที
+     * ทุกครั้งที่กลับมา — ตลอดไป ไม่ว่าจะกดอัตโนมัติอีกกี่ครั้ง เล่มที่เคยพลาดภาพ
+     * สองรอบจึงเสียโหมดอัตโนมัติไปถาวรโดยไม่มีอะไรบอก และทางเดียวที่เหลือคือ
+     * คนมากดปุ่ม "เริ่มสร้างภาพ" เอง ซึ่งข้ามด่านนี้ไปตรง ๆ
+     *
+     * รอบที่สร้างภาพได้เพิ่มแม้แต่ใบเดียวคือรอบที่คุ้ม ไม่ใช่รอบที่เสียเปล่า
+     * เกณฑ์จึงเป็น "จำนวนภาพที่ยังขาดไม่ลดลง" ซึ่งตรงกับเจตนาเดิมว่า
+     * "รอบที่กี่ครั้งก็ได้ผลเดิมคือเรื่องที่คนต้องมาดู"
+     */
+    const left = plannedImageJobs(book).filter((j) => !j.manual && !assetNames.includes(j.name)).length;
+    const leftBefore = Number(book.imagePhase?.autoRoundsLeft ?? Infinity);
+    const rounds = left < leftBefore ? 0 : Number(book.imagePhase?.autoRounds) || 0;
     if (stuck && rounds >= AUTO_PHASE2_ROUNDS) {
       stopAutoPilot();
       status('ภาพยังไม่ผ่านตรวจหรือสร้างไม่สำเร็จ — บันทึกงานแล้ว กรุณาตรวจเหตุผลในรายการภาพ');
@@ -4388,7 +4710,7 @@ async function openImagePhaseGate() {
       );
       return;
     }
-    book.imagePhase = { ...(book.imagePhase || {}), autoRounds: stuck ? rounds + 1 : 0 };
+    book.imagePhase = { ...(book.imagePhase || {}), autoRounds: stuck ? rounds + 1 : 0, autoRoundsLeft: left };
     await db.saveBook(book);
     if (stuck)
       addEvent(
@@ -4635,6 +4957,45 @@ async function autoExportFinished() {
 }
 
 // ---------- เสร็จ ----------
+/**
+ * เก็บของในโฟลเดอร์กลับเข้าระบบก่อนประกอบเล่ม — "ประกอบทีหลังจากไฟล์ที่ save ไว้"
+ *
+ * ที่เก็บภาพจริงของระบบคือ IndexedDB ซึ่งผูกกับ Chrome profile ที่ใช้ตอนนั้น
+ * ส่วนไฟล์ในโฟลเดอร์อยู่ได้ตลอดและไม่ขึ้นกับอะไรเลย ตอนประกอบเล่มจึงต้องเชื่อโฟลเดอร์ด้วย
+ * ไม่ใช่เชื่อแต่ฐานข้อมูลอย่างเดียว — ไม่งั้นภาพที่ save ไว้ครบแล้วจะกลายเป็นช่องว่างในไฟล์จบ
+ * เพียงเพราะฐานข้อมูลของโปรไฟล์นี้ไม่มีมัน
+ *
+ * ผ่านด่านตรวจชุดเดียวกับภาพที่คว้ามาเอง เพราะไฟล์ในโฟลเดอร์แก้ด้วยมือได้ตลอด
+ */
+async function hydrateImagesFromFolder() {
+  if (!book?.id) return 0;
+  let files = [];
+  try {
+    files = await W.listBookImages(book);
+  } catch {
+    return 0;
+  }
+  if (!files.length) return 0;
+  const byName = new Map(files.map((f) => [f.name, f]));
+  let taken = 0;
+  for (const j of plannedImageJobs(book)) {
+    const f = byName.get(j.name);
+    if (!f || assetNames.includes(j.name)) continue;
+    try {
+      book = await db.loadBook(book.id);
+      await ingestImageDataUrl(book, j.name, await db.blobToDataUrl(f.blob));
+      taken++;
+    } catch (e) {
+      addEvent('system', `ไฟล์ ${j.name} ในโฟลเดอร์ใช้ไม่ได้`, e?.message || String(e));
+    }
+  }
+  if (taken) {
+    assetNames = (await db.loadAssets(book.id)).map((a) => a.name);
+    addEvent('system', 'ประกอบจากไฟล์ที่เก็บไว้', `เก็บภาพจากโฟลเดอร์ของเล่มกลับเข้าระบบ ${taken} รูปก่อนประกอบเล่ม`);
+  }
+  return taken;
+}
+
 async function finish() {
   /**
    * ตอนจบต้องได้ไฟล์ ไม่ใช่ค้างรอให้กดส่งออกเอง
@@ -4649,6 +5010,9 @@ async function finish() {
   phase2Stage = null;
   $('imagePhase').classList.add('hidden');
   sections = (await db.loadSections(book.id)).sort((a, b) => cmpId(a.id, b.id));
+  // ไฟล์ที่ save ไว้ในโฟลเดอร์คือแหล่งความจริงของภาพ ต้องหยิบกลับมาก่อนประกอบเสมอ
+  assetNames = (await db.loadAssets(book.id)).map((a) => a.name);
+  await hydrateImagesFromFolder();
 
   /**
    * ห้ามประกอบไฟล์อัตโนมัติเมื่อยังมีตอนที่ไม่มีเนื้อหา

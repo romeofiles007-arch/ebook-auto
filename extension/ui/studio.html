@@ -619,10 +619,12 @@
 
   <section class="projectArchive" data-step="mode">
     <div class="row">
-      <b>ประวัติโครงการหนังสือ</b>
+      <b>ชั้นหนังสือ</b>
       <button id="refreshProjects"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>รีเฟรช</button>
     </div>
     <div id="projectList" class="projectList"><div class="muted">กำลังอ่านรายการ...</div></div>
+    <!-- รายละเอียดของเล่มที่คลิก — เปิดอยู่ทีละเล่ม ปิดแล้วกลับไปเห็นชั้นเต็ม -->
+    <div id="projectDetail" class="projectDetail hidden"></div>
   </section>
 
   <section id="resume" class="resumeBar hidden" data-step="always">
@@ -660,6 +662,8 @@
     <div id="ceoRunningCost" class="muted"></div>
     <div class="bar"><i id="bar"></i></div>
     <div id="detail" class="muted"></div>
+    <!-- ฝ่ายธุรการ: ติดอะไรอยู่ · ซ้ำที่เดิมกี่ครั้ง · ลองท่าอะไรไปแล้ว (มองอย่างเดียว ไม่สั่งใคร) -->
+    <div id="deskNote" class="muted hidden"></div>
     <div id="pagestat" class="pagestat hidden"></div>
   </div>
 

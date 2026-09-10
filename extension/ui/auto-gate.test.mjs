@@ -51,8 +51,12 @@ test('ติดธงตอนเครื่องเริ่มเดิน �
   const run = source.slice(source.indexOf('async function runMachine'), source.indexOf('  machineBusy = true;'));
   assert.match(run, /fullAutoRunning = true/);
   // ประตูภาพมีเหตุผลของตัวเองที่ต้องรอคนเมื่อชนลิมิต ห้ามให้ตรงนั้นเริ่มเอง
-  const gate = source.slice(source.indexOf('function openImagePhaseGate'), source.indexOf('function openImagePhaseGate') + 3000);
+  const gate = source.slice(source.indexOf('function openImagePhaseGate'), source.indexOf('function openImagePhaseGate') + 5000);
   assert.match(gate, /unattended && book\.job\?\.status !== 'rate_limited'/);
+  // ทางออก "รอคุณอัปโหลดภาพเอง" ต้องปลดธงทั้งสองใบ ไม่งั้นปุ่มอัตโนมัติตายค้างและนาฬิกากดต่อวนเปล่า
+  const manual = gate.slice(0, gate.indexOf('} else if'));
+  assert.match(manual, /stopAutoPilot\(\);/);
+  assert.match(manual, /unattended = false;/);
 });
 
 test('กล่องยืนยันไม่ค้างรอคนที่ไม่ได้นั่งอยู่', () => {
@@ -78,6 +82,10 @@ async function gate(imagePhase) {
     AUTO_PHASE2_ROUNDS: 2,
     Number,
     Date,
+    Infinity,
+    // ประตูนี้นับ "ภาพที่ยังขาด" เพื่อดูว่ารอบที่แล้วได้อะไรกลับมาบ้าง
+    assetNames: [],
+    plannedImageJobs: () => (imagePhase?.remaining || []).map((name) => ({ name, manual: false })),
     db: { saveBook: async () => calls.push('save') },
     stopAutoPilot: () => calls.push('stop'),
     status() {},
@@ -99,10 +107,27 @@ test('ภาพเคยพลาด = ลองใหม่ให้ ไม่�
 });
 
 test('ลองจนครบเพดานแล้วยังเหมือนเดิม = เรียกคนมาดู', async () => {
-  const r = await gate({ failures: [{ name: 'cover' }], status: 'partial', autoRounds: 2 });
+  // "เหมือนเดิม" ต้องหมายถึงจำนวนภาพที่ขาดไม่ลดลงด้วย ไม่ใช่แค่ยังมีรอยพลาดค้างอยู่
+  const r = await gate({
+    failures: [{ name: 'cover' }], status: 'partial', autoRounds: 2,
+    remaining: ['cover-front.png', 'cover-back.png'], autoRoundsLeft: 2,
+  });
   assert.ok(r.calls.includes('stop'));
   assert.equal(r.calls.includes('startPhase2'), false);
   assert.match(r.calls.join(), /สร้างภาพบางรูปไม่สำเร็จหลังลองอัตโนมัติแล้ว 2 รอบ/);
+});
+
+/**
+ * รอบที่สร้างภาพได้เพิ่มแม้แต่ใบเดียวคือรอบที่คุ้ม ต้องไม่นับเป็นรอบที่เสียเปล่า
+ * ไม่งั้นเล่มที่ค่อย ๆ เก็บภาพทีละใบจะหมดสิทธิ์อัตโนมัติทั้งที่กำลังคืบหน้าอยู่
+ */
+test('ได้ภาพเพิ่มจากรอบก่อน = ล้างตัวนับ แล้วไปต่อ', async () => {
+  const r = await gate({
+    failures: [{ name: 'cover' }], status: 'partial', autoRounds: 2,
+    remaining: ['cover-back.png'], autoRoundsLeft: 4,
+  });
+  assert.ok(r.calls.includes('startPhase2'));
+  assert.equal(r.calls.includes('stop'), false);
 });
 
 test('รอบที่ผ่านหมดรีเซ็ตตัวนับ ไม่สะสมข้ามรอบ', async () => {

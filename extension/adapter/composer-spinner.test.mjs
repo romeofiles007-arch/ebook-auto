@@ -85,6 +85,7 @@ function release({ spinnerButton = null, stopButton = null } = {}) {
     : null;
   const scope = {
     composerSpinner: () => spinner,
+    stopButtonVisible: () => !!stopButton,
     visibleStopButton: () => (stopButton ? { click: () => clicked.push('stop') } : null),
   };
   vm.createContext(scope);
@@ -98,10 +99,24 @@ test('กดปลดวงกลมที่ค้างเองหนึ่�
   assert.deepEqual(r.clicked, ['spinner']);
 });
 
-test('ไม่มีวงกลมให้กด ก็ใช้ปุ่มหยุดที่เห็นอยู่แทน', () => {
+/**
+ * เดิมข้อนี้ยืนยันว่า "ไม่มีวงกลมให้กด ก็ใช้ปุ่มหยุดแทน" ซึ่งกลับหัวกับเจตนาของฟังก์ชัน
+ *
+ * สิ่งที่ต้องการปลดคือช่องพิมพ์ที่ค้างโดยไม่มีงานเดินอยู่ ส่วนปุ่มหยุดคือหลักฐานว่ามีงานเดินอยู่
+ * การกดมันคือการฆ่างานวาดภาพของตัวเองกลางคัน แล้วจ่ายโควตาใหม่เพื่อวาดซ้ำ
+ * หลักฐานจากหน้าจอจริง: เทิร์นแรก "Worked for 2m 5s" ได้ภาพ เทิร์นถัดมาเป็น
+ * "Stopped thinking" ทุกอันโดยไม่ได้ภาพสักใบ แล้ววนสั่งวาดใหม่ไม่จบ
+ */
+test('เห็นปุ่มหยุด = มีงานเดินอยู่ ห้ามแตะ', () => {
   const r = release({ stopButton: true });
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.clicked, ['stop']);
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.clicked, []);
+});
+
+test('มีทั้งวงกลมและปุ่มหยุด ก็ยังห้ามแตะ เพราะงานยังเดินอยู่', () => {
+  const r = release({ spinnerButton: true, stopButton: true });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.clicked, []);
 });
 
 test('ไม่มีอะไรให้กดเลย = บอกตรง ๆ ว่าปลดไม่ได้ ไม่ใช่แกล้งว่าสำเร็จ', () => {

@@ -23,6 +23,7 @@ function fixture(overrides = {}) {
   const book = { id: 'b1', job: { step: 'write' } };
   const scope = {
     machineBusy: false,
+    clearImageGiveUp: async () => {},
     hasPendingTurn: () => false,
     book,
     $: (id) => nodes[id],

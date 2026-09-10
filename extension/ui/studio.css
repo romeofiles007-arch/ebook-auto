@@ -353,3 +353,50 @@ button.reviewIssue:hover{border-color:#6f8cff}
 .ceoBar label{display:flex;align-items:center;gap:9px;font-weight:750;font-size:14px;cursor:pointer}
 .ceoBar input{width:auto;margin:0}
 .ceoBar .muted{margin-top:6px;font-size:12px;line-height:1.5}
+
+/* ---------- ชั้นหนังสือ ----------
+ * ปกคือสิ่งที่คนจำเล่มได้ ไม่ใช่ชื่อไฟล์หรือวันที่ — รายการแบบบรรทัดต่อบรรทัดอ่านแล้วต้อง
+ * ไล่หาทีละแถว ส่วนชั้นวางปกให้สายตาเจอเล่มที่ต้องการได้ในครั้งเดียว
+ * สัดส่วนปกใช้ 148:210 (A5) เท่ากับที่ระบบใช้จริง ปกที่วางบนชั้นจึงเป็นรูปเดียวกับที่จะพิมพ์
+ */
+.projectList.shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:16px 14px;max-height:none;padding:4px 2px}
+.shelfBook{position:relative}
+.shelfBook .pick{display:flex;flex-direction:column;gap:8px;width:100%;padding:0;background:0;border:0;text-align:left;cursor:pointer;border-radius:10px}
+.shelfBook .pick:hover{filter:none}
+/* ปุ่มลบซ่อนไว้จนกว่าจะชี้ — ชั้นหนังสือควรเห็นปกก่อน ไม่ใช่เห็นปุ่มลบก่อน
+   แต่บนจอสัมผัสไม่มี hover จึงต้องโผล่ให้เห็นเสมอที่นั่น */
+.shelfBook .del{position:absolute;top:6px;right:6px;width:26px;height:26px;padding:0;line-height:1;
+  border-radius:8px;background:#0b1020cc;border:1px solid #34435f;color:#c6d2ea;font-size:13px;font-weight:800;
+  opacity:0;transition:opacity .14s,background .14s,border-color .14s;backdrop-filter:blur(3px)}
+.shelfBook:hover .del,.shelfBook .del:focus-visible{opacity:1}
+.shelfBook .del:hover{background:#642f3a;border-color:#a4505f;color:#fff;filter:none}
+@media (hover:none){.shelfBook .del{opacity:1}}
+.shelfBook .cover{position:relative;aspect-ratio:148/210;border-radius:8px;overflow:hidden;background:#0c1425;border:1px solid #2b3956;box-shadow:0 10px 22px #0006;transition:transform .16s,border-color .16s,box-shadow .16s}
+.shelfBook:hover .cover,.shelfBook .pick:focus-visible .cover{transform:translateY(-3px);border-color:#6f8cff;box-shadow:0 16px 30px #0008}
+.shelfBook.sel .cover{border-color:#6f8cff;box-shadow:0 0 0 2px #6f8cff55,0 16px 30px #0008}
+.shelfBook .cover img{width:100%;height:100%;object-fit:cover;display:block}
+/* ไม่มีไฟล์ปก = แสดง "หน้าปกใน" ซึ่งเป็นสิ่งที่เล่มนั้นมีอยู่จริง
+   ไม่ใช่ภาพแทนที่เราแต่งขึ้นเอง จึงทำเป็นกระดาษจริงพร้อมชื่อเรื่องและชื่อผู้เขียน */
+.titlepage{width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;
+  gap:10px;padding:16px 13px;background:#f7f4ec;text-align:center}
+.titlepage .t{font-size:13px;font-weight:800;line-height:1.5;color:#1b2333;
+  display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+.titlepage .a{font-size:10.5px;color:#5c6a80;letter-spacing:.02em}
+/* สถานะย้ายลงมาอยู่ใต้ปก — ป้ายที่ลอยทับปกไปบังชื่อหนังสือ ซึ่งเป็นสิ่งที่ต้องอ่านออกก่อนอย่างอื่น
+   ชั้นหนังสือมีไว้ให้เห็นปก ไม่ใช่ให้เห็นป้ายของเรา */
+.shelfBook .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;
+  background:#6b7a94;vertical-align:middle;flex:none}
+.shelfBook .dot.done{background:#63d5a5}
+.shelfBook .dot.busy{background:#6f8cff}
+.shelfBook .name{font-size:12.5px;font-weight:750;line-height:1.45;color:#eaf0ff;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.shelfBook .when{font-size:11px;color:#8f9db8;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:0;line-height:1.5}
+
+.projectDetail{margin-top:14px;padding:16px;border:1px solid #34435f;border-radius:12px;background:#111a2d;display:grid;grid-template-columns:150px 1fr;gap:16px}
+@media (max-width:640px){.projectDetail{grid-template-columns:1fr}}
+.projectDetail .cover{aspect-ratio:148/210;border-radius:8px;overflow:hidden;background:#0c1425;border:1px solid #2b3956}
+.projectDetail .cover img{width:100%;height:100%;object-fit:cover;display:block}
+.projectDetail h3{margin:0 0 4px;font-size:19px;line-height:1.4}
+.projectDetail .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:12px 0}
+.projectDetail .fact{padding:9px 11px;border-radius:9px;background:#0c1425;border:1px solid #2b3956}
+.projectDetail .fact b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
+.projectDetail .fact span{font-size:11.5px;color:#8f9db8}

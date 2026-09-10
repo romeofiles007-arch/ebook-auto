@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import { noteTrouble } from './dispatch.js';
 
 const source = await readFile(new URL('./machine.js', import.meta.url), 'utf8');
 const start = source.indexOf('  async askSupervisor(context) {');
@@ -13,7 +14,8 @@ const fn = source.slice(start, source.indexOf('\n  }', start) + 4);
  */
 function machineLike(supervisor) {
   const logs = [];
-  const scope = { console };
+  // ฝ่ายธุรการเป็นตัวจริง ไม่ใช่ของปลอม — สายที่ต่อไว้จริงต้องถูกทดสอบด้วย
+  const scope = { console, noteTrouble };
   vm.runInNewContext(`globalThis.make = (supervisor, logs) => ({ supervisor, log:(lv,m)=>logs.push(lv+': '+m), ${fn.trim().replace(/^async function |^  async /, 'askSupervisor: async ').replace('askSupervisor(context) {', 'askSupervisor(context) {')} });`, scope);
   return { obj: scope.make(supervisor, logs), logs };
 }

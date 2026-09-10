@@ -27,6 +27,7 @@ import { duplicateItems, reviewGroups, itemReviewPrompt, reviewIssues } from './
 import { compileBook, calibrate } from '../typeset/compiler.js';
 import { jitter, sleep } from '../transport/index.js';
 import { turnDelay } from './production-mode.js';
+import { noteTrouble } from './dispatch.js';
 import { generateImage, DEFAULT_IMAGE_MODEL } from './imageApi.js';
 import { wantsAuthorRef, promptWantsAuthorRef, prepareRefImage, dataUrlToFile, enforceAuthorRefPrompt } from './imageRef.js';
 
@@ -96,6 +97,16 @@ const NO_COST_ERRORS = new Set([
 ]);
 const MAX_FREE_RETRIES = 4;
 
+/**
+ * "ChatGPT ยังทำเทิร์นก่อนหน้าอยู่" คือการรอ ไม่ใช่ความล้มเหลว
+ *
+ * ทุกที่ในหน้าเว็บที่คืนรหัสนี้ คืนก่อนแตะช่องพิมพ์ทั้งหมด (เห็นปุ่มหยุดค้างอยู่แล้วถอยออกมา)
+ * แปลว่าคำสั่งของเรายังไม่เคยถูกส่ง — ไม่มีงานซ้อน ไม่เสียโควตา รอแล้วลองใหม่ได้เสมอ
+ * สภาพนี้เกิดบ่อยที่สุดตรงรอยต่อหลังภาพเพิ่งวาดเสร็จ ซึ่งหน้าเว็บยังไม่คืนช่องพิมพ์ให้
+ */
+const MAX_BUSY_WAITS = 4;
+const BUSY_WAIT_MS = 20000;
+
 const isNoCostFailure = (res) =>
   res?.status !== 'ok' && NO_COST_ERRORS.has(String(res?.meta?.error || ''));
 
@@ -138,6 +149,7 @@ export class Machine {
     try {
       const decision = await this.supervisor(context);
       if (!decision?.action) return null;
+      noteTrouble({ step: context?.step || this.job.step, symptom: 'outcome_unknown', move: decision.action, detail: decision.reason || '', by: 'ผู้คุมกระบวนการ' });
       this.log('ok', `ผู้คุมกระบวนการเลือก: ${decision.action}${decision.reason ? ` — ${decision.reason}` : ''}`);
       return decision;
     } catch (e) {
@@ -320,9 +332,43 @@ export class Machine {
    * (นับโควตาไปแล้วทุกครั้ง) ถ้าตัวตรวจจับ "ตอบจบ" เพี้ยน ทุกเทิร์นจะหมดเวลาแล้วยิงซ้ำ
    * จึงจำกัดการลองใหม่ไว้ครั้งเดียว และตัดเวลารอลงจาก 5 นาทีเหลือ 2.5 นาที
    */
+  /**
+   * โหลดแท็บ ChatGPT ใหม่ทั้งใบ — ท่าสุดท้ายของบันไดกู้ที่ไม่กินโควตา
+   *
+   * ทำได้เฉพาะตอนที่งานวิ่งผ่านหน้าเว็บจริงเท่านั้น เล่มที่เขียนด้วย API ไม่มีแท็บให้โหลด
+   * และการเรียกไปจะกลายเป็นการ "เปิดแท็บ ChatGPT ขึ้นมาใหม่" ให้คนที่ไม่ได้ใช้มันเลย
+   * (ensureChatTab สร้างแท็บให้เมื่อหาไม่เจอ) — ผลข้างเคียงที่ผู้ใช้ไม่ได้ขอและอธิบายไม่ได้
+   */
+  async reloadChatTab() {
+    if (this.tr?.kind !== 'chatgpt_tab') return false;
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return false;
+    const done = await chrome.runtime.sendMessage({ type: 'sw.reloadChat' }).catch(() => null);
+    return !!done?.ok;
+  }
+
   async turnWithRetry(prompt, opts = {}) {
     let last = null;
     let free = 0;
+    /**
+     * คำตอบที่เหลือแต่หมุดอ้างอิงของการค้นเว็บ — ล้มแบบที่ status บอกว่า "ok"
+     *
+     * เมื่อ ChatGPT ค้นเว็บก่อนตอบ มันแทนค่าที่ควรเป็นข้อความจริงด้วยหมุด
+     * :contentReference[oaicite:N]{index=N} สิ่งที่เราอ่านกลับมาจึงเป็นหมุดล้วน ไม่มีเนื้อหาเลย
+     * เทิร์นนั้นนับว่าสำเร็จทุกด่าน (มีข้อความ ไม่ timeout ไม่ว่าง) แล้วไปพังตอนแกะ JSON แทน
+     * ขั้นบนจึงเห็นเป็น "โมเดลตอบผิดฟอร์แมต" แล้วสั่งคำสั่งเดิมซ้ำ ซึ่งพามันไปตัดสินใจแบบเดิม
+     * ได้ผลเดิมทุกรอบจนหมดโควตาลองใหม่ แล้วทั้งเล่มหยุดตรงนั้น
+     *
+     * ตรงนี้เป็นทางผ่านของทุกขั้นที่คุยกับหน้าเว็บ จึงเป็นที่เดียวที่ปิดอาการนี้ได้ครบทุกโหมด
+     * ท่าที่ใช้ได้คือเปลี่ยนคำสั่ง ไม่ใช่เปลี่ยนจังหวะ — สั่งห้ามค้นเว็บแล้วขอเป็นข้อความล้วน
+     * ให้โอกาสครั้งเดียว เพราะมันคือหนึ่งข้อความจริงที่นับโควตา และครั้งเดียวก็พอพิสูจน์แล้ว
+     */
+    let hardened = false;
+    /** รอหน้าเว็บว่างได้กี่รอบ — การรอไม่กินโควตา แต่ต้องมีที่สิ้นสุด */
+    let busyWaits = 0;
+    /** โหลดแท็บใหม่ได้ครั้งเดียวต่อเทิร์น — วนโหลดไม่จบไม่ใช่การแก้ปัญหา */
+    let unstuck = false;
+    /** เคยเปิดห้องแชตใหม่ไปแล้วหรือยัง — ขั้นถัดจากห้องใหม่ที่ยังไม่หายคือโหลดแท็บใหม่ */
+    let triedNewThread = !!opts.newThread;
     for (let i = 0; i <= MAX_RETRIES; i++) {
       let res;
       try {
@@ -333,6 +379,20 @@ export class Machine {
          * ลองใหม่ได้โดยไม่มีทางเกิดงานซ้อน ผู้คุมกระบวนการจึงมีสิทธิ์สั่งลองต่อได้
          * ส่วน outcome_unknown ไม่ติดรหัสนี้ เพราะอาจส่งไปแล้ว ห้ามลองซ้ำเด็ดขาด
          */
+        /**
+         * หน้าเว็บยังทำเทิร์นก่อนหน้าอยู่ — รอให้มันจบ ไม่ใช่ล้มทั้งขั้น
+         *
+         * เดิมรหัสนี้ถูกโยนทะลุขึ้นไปหยุดทั้งงาน ทั้งที่คำสั่งยังไม่เคยออกจากเครื่องเรา
+         * และอีกไม่กี่สิบวินาทีหน้าเว็บก็ว่างเอง การหยุดตรงนี้จึงทิ้งงานทั้งเล่มเพราะการรอ
+         */
+        if (e instanceof Halt && e.code === 'previous_turn_running' && busyWaits < MAX_BUSY_WAITS) {
+          busyWaits++;
+          i--;
+          noteTrouble({ step: this.job.step, symptom: 'prompt_not_sent', move: 'retry', detail: 'หน้าเว็บยังทำเทิร์นก่อนหน้าอยู่', by: 'เครื่องผลิต' });
+          this.log('warn', `ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — รอ ${BUSY_WAIT_MS / 1000} วินาทีแล้วลองใหม่ ${busyWaits}/${MAX_BUSY_WAITS} (คำสั่งยังไม่เคยถูกส่ง)`);
+          await sleep(BUSY_WAIT_MS);
+          continue;
+        }
         if (!(e instanceof Halt) || e.code !== 'not_sent' || i >= MAX_RETRIES) throw e;
         const d = await this.askSupervisor({
           step: this.job.step,
@@ -347,14 +407,58 @@ export class Machine {
         await sleep(2500);
         continue;
       }
+      if (res.status === 'ok' && X.citationGutted(res.text)) {
+        if (!hardened) {
+          hardened = true;
+          noteTrouble({ step: this.job.step, symptom: 'citation_only', move: 'harden_prompt', by: 'เครื่องผลิต' });
+          prompt = `${prompt}
+
+${P.NO_CITATION_RULE}
+
+รอบที่แล้วคุณตอบกลับมาเป็นหมุดอ้างอิงล้วน ๆ ซึ่งเราอ่านไม่ได้เลย
+รอบนี้ห้ามค้นเว็บ ห้ามอ้างอิง ให้ตอบจากที่รู้เป็นข้อความล้วนในบล็อกโค้ดเดียว`;
+          i--;
+          this.log('warn', 'คำตอบเหลือแต่หมุดอ้างอิงของการค้นเว็บ (contentReference/oaicite) เนื้อหาจริงไม่ได้อยู่ในข้อความ — สั่งใหม่แบบห้ามค้นเว็บ');
+          continue;
+        }
+        // สั่งห้ามค้นเว็บแล้วยังได้หมุดอีก = ปัญหาอยู่ที่โหมดของหน้าเว็บ ไม่ใช่ที่คำสั่ง
+        res = { ...res, status: 'empty', meta: { ...(res.meta || {}), error: 'citation_only', detail: 'หน้าเว็บคืนมาแต่หมุดอ้างอิงของการค้นเว็บ เนื้อหาจริงไม่ได้อยู่ในข้อความ — ปิดการค้นเว็บในห้องแชตนี้แล้วลองใหม่' } };
+      }
       if (res.status === 'ok') return res;
       if (res.meta?.error === 'outcome_unknown')
         throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
       last = res;
 
-      // วงกลมที่ปุ่มส่งนิ่งครบเกณฑ์ไม่หายด้วยการกดซ้ำในหน้าเดิม และ prompt ยังไม่ถูกส่ง
-      // ข้ามการลองเดิมสี่รอบแล้วส่งหลักฐานให้ CEO เลือก reload ทันที
+      /**
+       * วงกลมที่ปุ่มส่งค้าง — โหลดหน้าใหม่เองหนึ่งครั้ง ไม่ต้องรอให้ใครมาสั่ง
+       *
+       * มาถึงรหัสนี้ได้ก็ต่อเมื่อ adapter ตรวจครบทุกด่านแล้ว: รอปุ่มกลับมา 4 วินาที
+       * รอหน้าเว็บว่างอีกถึงสามนาที เห็นว่านิ่งสนิท 30 วินาที และกดปลดเองไปแล้วหนึ่งครั้ง
+       * เราจึงรู้แน่นอนสองอย่าง — หน้าเว็บค้างจริง และคำสั่งยังไม่เคยออกจากเครื่องเรา
+       * (อยู่ใน NO_COST_ERRORS) ส่งซ้ำได้โดยไม่มีทางเกิดงานซ้อนหรือเสียโควตาซ้ำ
+       *
+       * ท่าที่ปลดสถานะนี้ได้มีท่าเดียวคือโหลดหน้าใหม่ ซึ่งเป็นฟังก์ชันที่เรามีอยู่แล้ว
+       * แต่เดิมสั่งได้เฉพาะทางผู้คุมกระบวนการ ปิดโหมด CEO ไว้ = ตรวจเจอ รายงานถูก
+       * แล้วหยุดทั้งงานโดยไม่มีใครลงมือ ทั้งที่ทางแก้วางอยู่ตรงนั้นและปลอดภัยแน่นอน
+       * — การให้โมเดลมาเลือกท่าที่มีอยู่ท่าเดียวไม่ได้เพิ่มความถูกต้อง มีแต่เพิ่มจุดล้ม
+       *
+       * ครั้งเดียวต่อเทิร์นเท่านั้น ถ้าโหลดใหม่แล้วยังค้างอีก แปลว่าไม่ใช่สถานะค้างของหน้า
+       * ให้ตกไปทางเดิมคือส่งหลักฐานให้ผู้คุมตัดสิน หรือหยุดให้คนมาดู
+       */
       if (res.meta?.error === 'composer_busy_stuck') {
+        if (!unstuck) {
+          unstuck = true;
+          noteTrouble({ step: this.job.step, symptom: 'composer_busy', move: 'reload_tab', by: 'เครื่องผลิต' });
+          this.log('warn', 'ปุ่มส่งเป็นวงกลมหมุนค้าง กดปลดแล้วไม่หาย — โหลดหน้า ChatGPT ใหม่เองหนึ่งครั้ง (คำสั่งยังไม่เคยถูกส่ง จึงไม่มีงานซ้อน)');
+          const done = await this.reloadChatTab();
+          if (done) {
+            this.log('ok', 'โหลดหน้า ChatGPT ใหม่แล้ว — สั่งขั้นเดิมอีกครั้ง');
+            i--;
+            await sleep(2500);
+            continue;
+          }
+          this.log('warn', 'โหลดหน้า ChatGPT ใหม่ไม่สำเร็จ — ส่งต่อให้ผู้คุมกระบวนการตัดสิน');
+        }
         i = MAX_RETRIES;
         break;
       }
@@ -372,7 +476,36 @@ export class Machine {
          * เปิดห้องใหม่เลยดีกว่า และยังไม่เสียโควตาเหมือนกันเพราะคำสั่งไม่เคยออกจากเครื่องเรา
          */
         const freshRoom = free >= 2 && this.book.threadMode !== 'reuse' && !opts.wantImages;
-        if (freshRoom) opts = { ...opts, newThread: true };
+        if (freshRoom) {
+          opts = { ...opts, newThread: true };
+          triedNewThread = true;
+        }
+
+        /**
+         * เปิดห้องใหม่แล้วยังส่งไม่ออก = ตัวหน้าเว็บเองค้าง ไม่ใช่ห้องแชตเสีย
+         *
+         * ห้องใหม่ล้างบทสนทนาทิ้ง แต่ไม่ได้ล้างสถานะของหน้าเว็บที่ค้างอยู่ ถ้าเปลี่ยนห้องแล้ว
+         * ช่องพิมพ์ยังหาย เขียนไม่ลง หรือกดส่งไม่ติดเหมือนเดิม การลองห้องที่สาม สี่ ก็ได้ผลเดิม
+         * — เสียเวลาไปครบเพดานแล้วจบด้วยการหยุดงาน ทั้งที่ท่าที่เหลืออยู่ยังไม่เคยถูกลอง
+         *
+         * โหลดแท็บใหม่คือการล้างสถานะนั้นทั้งใบ (reload จริง + รอโหลดจบ + ฉีด adapter กลับ)
+         * ปลอดภัยเสมอตรงนี้เพราะทั้งกลุ่มนี้คือความล้มที่คำสั่งไม่เคยออกจากเครื่องเรา
+         * ครั้งเดียวต่อเทิร์น ถ้าโหลดใหม่แล้วยังส่งไม่ออกอีก แปลว่าไม่ใช่สถานะค้างของหน้า
+         */
+        if (triedNewThread && !unstuck) {
+          unstuck = true;
+          noteTrouble({ step: this.job.step, symptom: 'prompt_not_sent', move: 'reload_tab', detail: res.meta?.detail || res.meta?.error || '', by: 'เครื่องผลิต' });
+          this.log('warn', `เปิดห้องแชตใหม่แล้วยังส่งไม่ออก (${res.meta?.detail || res.meta?.error}) — โหลดแท็บ ChatGPT ใหม่ทั้งใบ`);
+          const done = await this.reloadChatTab();
+          if (done) {
+            this.log('ok', 'โหลดแท็บ ChatGPT ใหม่แล้ว — สั่งขั้นเดิมอีกครั้งในห้องใหม่');
+            await sleep(2500);
+            continue;
+          }
+          this.log('warn', 'โหลดแท็บ ChatGPT ใหม่ไม่สำเร็จ — ลองส่งต่อตามเดิม');
+        }
+
+        noteTrouble({ step: this.job.step, symptom: 'prompt_not_sent', move: freshRoom ? 'new_thread' : 'retry', detail: res.meta?.detail || res.meta?.error || '', by: 'เครื่องผลิต' });
         this.log(
           'warn',
           `ส่งงานไม่ออกจากเครื่องเรา (${res.meta?.detail || res.meta?.error}) — ยังไม่เสียโควตา ` +
@@ -2542,6 +2675,43 @@ export class Machine {
     );
   }
 
+  /**
+   * ภาพที่เคยสร้างไว้แล้วอยู่ในโฟลเดอร์ — เอากลับเข้าระบบก่อนสั่งวาดใหม่
+   *
+   * ที่เก็บภาพจริงของระบบคือ IndexedDB ซึ่งผูกกับ Chrome profile ที่ใช้ตอนนั้น
+   * ล้างข้อมูลเว็บ · เปิดเล่มเดิมในโปรไฟล์อื่น · ติดตั้งส่วนขยายใหม่ — ภาพหายหมด
+   * แล้วรอบถัดไปจะสั่งวาดใหม่ทุกใบ ทั้งที่ไฟล์ยังนอนอยู่ในโฟลเดอร์ครบทุกรูป
+   * นั่นคือการจ่ายค่าสร้างภาพซ้ำสำหรับงานที่ทำเสร็จไปแล้ว
+   *
+   * ผ่านด่านตรวจชุดเดียวกับภาพที่คว้ามาจากหน้าเว็บ (ingestImageDataUrl) ไม่ใช่ทางลัด
+   * ไฟล์ในโฟลเดอร์แก้ด้วยมือได้ตลอด จึงเชื่อว่าใช้ได้เลยไม่ได้ ต้องตรวจเหมือนกันทุกใบ
+   */
+  async hydrateImagesFromFolder(jobs) {
+    let taken = 0;
+    let files = [];
+    try {
+      files = await W.listBookImages(this.book);
+    } catch {
+      return 0;
+    }
+    if (!files.length) return 0;
+    const byName = new Map(files.map((f) => [f.name, f]));
+    for (const j of jobs) {
+      const f = byName.get(j.name);
+      if (!f) continue;
+      const existing = await db.loadAsset(this.book.id, j.name).catch(() => null);
+      if ((await validatePhase2Asset(existing, j)).ok) continue; // มีของดีอยู่แล้ว ไม่ต้องแตะ
+      try {
+        await ingestImageDataUrl(this.book, j.name, await db.blobToDataUrl(f.blob));
+        taken++;
+      } catch (e) {
+        this.log('warn', `ไฟล์ ${j.name} ในโฟลเดอร์ใช้ไม่ได้ (${e?.message || e}) — จะสร้างใหม่แทน`);
+      }
+    }
+    if (taken) this.log('ok', `เก็บภาพจากโฟลเดอร์ของเล่มกลับเข้าระบบ ${taken} รูป — ไม่ต้องสั่งวาดซ้ำ`);
+    return taken;
+  }
+
   async images() {
     // โปรเจกต์เก่าบางเล่มมี Prompt ปกก่อนระบบ GPT Art Director และยังคงเว้นพื้นที่โล่งแบบตายตัว
     // ห้ามใช้ Prompt เก่านั้นต่อใน Phase 2: ปรึกษา GPT ใหม่และล้างเฉพาะ asset ปกเก่า 1 ครั้ง
@@ -2603,6 +2773,9 @@ export class Machine {
       this.job.step = 'done';
       return;
     }
+
+    // เก็บของที่มีอยู่ในโฟลเดอร์กลับเข้าระบบก่อน จะได้ไม่สั่งวาดสิ่งที่วาดไปแล้ว
+    await this.hydrateImagesFromFolder(jobs);
 
     this.log('ok', `Phase 2 อัตโนมัติ: ตรวจ/สร้างภาพทั้งหมด ${jobs.length} รูปตามลำดับ แล้วค่อยประกอบเล่ม`);
     let made = 0;
@@ -2672,6 +2845,10 @@ export class Machine {
       let freeRetries = 0;
       let dupeHits = 0;
       let ceoRecoveries = 0;
+      /** โหลดแท็บใหม่ได้ครั้งเดียวต่อหนึ่งรูป — วนโหลดไม่จบไม่ใช่การแก้ปัญหา */
+      let imgUnstuck = false;
+      /** รอหน้าเว็บว่างได้กี่รอบต่อหนึ่งรูป — การรอไม่กินโควตา แต่ต้องมีที่สิ้นสุด */
+      let busyWaits = 0;
       /**
        * โหมด API ไม่ต้องยุ่งกับหน้าเว็บเลย จึงไม่มีเรื่องห้องแชตให้จัดการ
        *
@@ -2696,46 +2873,36 @@ export class Machine {
         this.log('ok', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ส่งคำสั่งสร้าง${attempt > 1 ? `ใหม่ครั้งที่ ${attempt}` : ''}`);
 
         /**
-         * ห้องแชตเดียวตลอด Phase 2 — เปิดใหม่เฉพาะตอนที่มีเหตุผลจริงเท่านั้น
+         * ห้องแชตใหม่ทุกครั้งที่จะสร้างภาพ — ทุกใบ และทุกรอบที่ลองใหม่ด้วย
          *
-         * ของเดิมเปิดห้องใหม่ทุกรูปด้วยเหตุผลว่า "ห้องที่มีภาพจะทำให้เครื่องมือเข้าโหมดแก้ภาพ"
-         * แต่การเปิดห้องใหม่มีราคาที่มองไม่เห็น: ทุกครั้งที่เปิด ภาพที่ยังไม่ได้เก็บจะหายไปพร้อมห้องเก่า
-         * และหน้าเว็บต้องวาดใหม่ทั้งหน้า ซึ่งเป็นจังหวะที่ Prompt ถูกล้างทิ้งบ่อยที่สุด
-         * ที่ผ่านมาจึงเสียภาพที่วาดเสร็จแล้วไปหลายรูปเพราะเหตุนี้โดยตรง
+         * ห้องที่มีภาพอยู่แล้ว ทำให้เครื่องมือสร้างภาพอ่านคำสั่งถัดไปเป็น "แก้ภาพเดิม"
+         * ไม่ใช่ "วาดใหม่" ผลคือรูปที่สองกลายเป็นรูปแรกที่ถูกต่อเติม แล้ววนไม่จบ
          *
-         * ตอนนี้แยกภาพใหม่จากภาพเก่าได้แน่นอนแล้ว (ปักหมุดที่ข้อความของเราในเทิร์นนี้
-         * บวกกับตัวกันภาพซ้ำที่จำลายนิ้วมือของทุกภาพที่ใช้ไปแล้ว) จึงอยู่ห้องเดิมได้
-         * เปิดห้องใหม่เมื่อรูปก่อนหน้ามีปัญหาเท่านั้น — ตัวที่ตั้ง imageThreadStarted = false
-         */
-        // ตัวแปรเกี่ยวกับห้องแชตยังต้องคงค่าไว้ เผื่อผู้ใช้สลับกลับไปโหมดหน้าเว็บกลางคัน
-        /**
-         * ห้องใหม่ต่อ "กลุ่มงานภาพ" — ปก / ลายพื้นหลัง / ภาพประกอบ
+         * ทางที่ลองมาแล้วและใช้ไม่ได้จริง (เรียงตามที่ลอง):
+         *   · ห้องเดียวทั้ง Phase 2 — ลายพื้นหลังออกมาหน้าตาเหมือนปก
+         *   · ห้องใหม่ต่อกลุ่ม (ปก · ลาย · ภาพประกอบ) — ภายในกลุ่มยังต่อภาพเดิม
+         *   · คั่นด้วยเทิร์นข้อความระหว่างภาพ — ผู้ใช้ทดสอบซ้ำแล้วว่าไม่ช่วย แถมเสียโควตาต่อใบ
+         *   · ห้องใหม่เมื่อ "เก็บภาพสำเร็จแล้ว" — ยังพลาดรอบที่ลองใหม่ในใบเดิม ซึ่งเป็นรอบ
+         *     ที่ห้องมีภาพของรอบก่อนค้างอยู่พอดี จึงได้ภาพที่สองเป็นภาพแรกที่ถูกแก้
          *
-         * สามกลุ่มนี้เป็นคนละโจทย์กันจริง ๆ ปกคือภาพขายของหน้าเดียว ลายพื้นหลังคือพื้นผิวจาง ๆ
-         * ที่ต้องอยู่ใต้ตัวหนังสือทั้งเล่ม ภาพประกอบคือภาพอธิบายเนื้อหาทีละจุด
-         * อยู่ห้องเดียวกันหมดทำให้ห้องนั้นสะสมบริบทของงานก่อนหน้า แล้วเครื่องมือเข้าโหมด
-         * "แก้ภาพเดิม" แทนที่จะวาดภาพใหม่ตามโจทย์ใหม่ ผลคือลายพื้นหลังออกมาหน้าตาเหมือนปก
-         * และภาพประกอบยืมองค์ประกอบของปกมาใช้ซ้ำ
+         * เหตุผลเดียวที่เคยห้ามเปิดห้องใหม่ทุกใบคือ "ภาพที่วาดเสร็จแต่ยังไม่ได้เก็บจะหายไป
+         * พร้อมห้องเก่า" — เหตุผลนั้นหมดไปแล้ว: ก่อนจะถึงตรงนี้ระบบไล่คว้าภาพของรอบก่อน
+         * จนสุดทางแล้ว (fetch ในหน้า → วาดลงผ้าใบ → ให้ service worker ดึง → วนคว้าซ้ำ)
+         * และทุกไฟล์ที่ดึงได้ถูกเขียนลงโฟลเดอร์ของเล่มทันทีตั้งแต่ก่อนตรวจ
          *
-         * ขอบกลุ่มเป็นจุดที่เปิดห้องใหม่ได้ปลอดภัย เพราะภาพของกลุ่มก่อนหน้าถูกบันทึกลงฐานข้อมูล
-         * ไปแล้วทุกใบ ไม่มีภาพค้างในห้องเก่าให้เสีย ต่างจากการเปิดห้องใหม่ทุกใบแบบเดิม
-         * ที่ทำให้ภาพที่วาดเสร็จแล้วแต่ยังไม่ได้เก็บหายไปพร้อมห้อง
-         *
-         * ภายในกลุ่มยังอยู่ห้องเดิมเหมือนเดิม และยังเปิดห้องใหม่กลางกลุ่มได้
-         * เมื่อรูปก่อนหน้ามีปัญหา (ตัวที่ตั้ง imageThreadStarted = false)
+         * ห้องใหม่ไม่กินโควตาข้อความ ต่างจากการวาดซ้ำที่จ่ายเต็มราคาทุกครั้ง
          */
         const group = j.kind === 'cover' ? 'cover' : j.kind === 'pattern' ? 'pattern' : 'figure';
-        const groupChanged = this.job.imageThreadGroup !== group;
-        const newThread = !useApi && (!this.job.imageThreadStarted || groupChanged);
+        const newThread = !useApi;
         if (!useApi) {
-          if (newThread && groupChanged)
-            this.log(
-              'ok',
-              `เปิดห้องแชตใหม่สำหรับกลุ่ม${group === 'cover' ? 'ปกหน้า/ปกหลัง' : group === 'pattern' ? 'ลายพื้นหลัง' : 'ภาพประกอบ'} — คนละโจทย์กับกลุ่มก่อนหน้า`,
-            );
+          this.log(
+            'ok',
+            `เปิดห้องแชตใหม่ก่อนสร้าง${j.what}${attempt > 1 ? ` (รอบที่ ${attempt})` : ''} — ห้องว่างทำให้เป็นงานวาดใหม่ ไม่ใช่งานแก้ภาพเดิม`,
+          );
           this.job.imageThreadStarted = true;
           this.job.imageThreadGroup = group;
         }
+
         this.book.imagePhase = {
           ...(this.book.imagePhase || {}),
           status: 'running',
@@ -2777,6 +2944,14 @@ export class Machine {
           // ซึ่งแปลว่าตัวกันจะเงียบพอดีในรอบของรูปปก อันเป็นรูปที่โดนปัญหานี้จริง
           this.usedImageKeys ||= new Set();
           this.usedImageKeys.add(imageFingerprint(ref.dataUrl));
+          // ไบต์ไม่ตรงเพราะหน้าเว็บบีบอัดใหม่ จึงต้องจำ "หน้าตา" ของรูปไว้ด้วย
+          if (!this.refHash) {
+            try {
+              this.refHash = await imageAHash(await db.dataUrlToBlob(ref.dataUrl));
+            } catch {
+              this.refHash = '';
+            }
+          }
         }
 
         /**
@@ -2856,6 +3031,26 @@ export class Machine {
            * จึงต้องส่องหน้าแชตก่อนยอมหยุด — การคว้าภาพไม่ส่งอะไรใหม่ ไม่มีทางทำให้งานซ้อน
            * ถ้าส่องแล้วไม่มีภาพจริงค่อยหยุดตามเดิม
            */
+          /**
+           * รอยต่อระหว่างกลุ่มงานภาพคือจุดที่พังบ่อยที่สุด และเป็นจุดที่แพงที่สุดด้วย
+           *
+           * ปก → ลายพื้นหลัง → ภาพประกอบ แต่ละกลุ่มเปิดห้องแชตของตัวเอง ซึ่งถูกต้อง
+           * แต่จังหวะที่ขอห้องใหม่คือจังหวะที่ภาพของกลุ่มก่อนเพิ่งวาดเสร็จหมาด ๆ
+           * หน้าเว็บยังคืนช่องพิมพ์ไม่ทัน แล้วตอบว่า "ยังทำเทิร์นก่อนหน้าอยู่"
+           *
+           * รหัสนั้นถูกโยนทะลุขึ้นไปหยุดทั้ง Phase 2 ทันที ทั้งที่คำสั่งยังไม่เคยถูกส่ง
+           * และอีกไม่กี่สิบวินาทีหน้าเว็บก็ว่างเอง — ผลคือทำปกกับลายเสร็จ 4 รูป
+           * แล้วจอดตายตรงประตูเข้ากลุ่มภาพประกอบ เสียทั้งรอบไปกับการไม่ยอมรอ
+           */
+          if (e instanceof Halt && e.code === 'previous_turn_running' && busyWaits < MAX_BUSY_WAITS) {
+            busyWaits++;
+            attempt--;
+            lastError = 'หน้าเว็บยังทำเทิร์นก่อนหน้าอยู่';
+            noteTrouble({ step: 'images', symptom: 'prompt_not_sent', move: 'retry', detail: `${j.what}: รอหน้าเว็บว่าง`, by: 'เครื่องผลิต' });
+            this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: หน้าเว็บยังทำเทิร์นก่อนหน้าอยู่ — รอ ${BUSY_WAIT_MS / 1000} วินาทีแล้วลองใหม่ ${busyWaits}/${MAX_BUSY_WAITS} (ยังไม่เสียโควตา)`);
+            await sleep(BUSY_WAIT_MS);
+            continue;
+          }
           if (e instanceof Halt && e.code !== 'outcome_unknown') throw e;
           const rescued = await this.grabRenderedImage(index, jobs.length, j, { tries: 4 });
           if (rescued?.dataUrl) {
@@ -2916,11 +3111,33 @@ export class Machine {
         if (isNoCostFailure(res) && res.meta?.error !== 'composer_busy_stuck' && freeRetries < MAX_FREE_RETRIES) {
           freeRetries++;
           attempt--;
+          lastError = res.meta?.detail || res.meta?.error || '';
+          noteTrouble({ step: 'images', symptom: 'prompt_not_sent', move: 'retry', detail: `${j.what} · ${lastError}`, by: 'เครื่องผลิต' });
+          /**
+           * ส่งไม่ออกซ้ำ ๆ ที่รูปเดียวกัน = หน้าเว็บค้าง ไม่ใช่จังหวะไม่ดี
+           *
+           * สายภาพเคยมีแต่ "รอแล้วลองใหม่ในหน้าเดิม" ซึ่งได้ผลเดิมทุกรอบเมื่อหน้าเว็บค้างจริง
+           * แล้วหมดโควตาลองใหม่ไปเปล่า ๆ ทั้งที่ท่าที่ปลดได้ยังไม่เคยถูกใช้ — ต่างจากสายข้อความ
+           * ที่มีบันไดครบแล้ว ตรงนี้จึงเติมขั้นเดียวกันให้ ปลอดภัยเพราะภาพที่ผ่านตรวจแล้ว
+           * ถูกบันทึกลงฐานข้อมูลทุกใบ การโหลดหน้าใหม่จึงไม่มีภาพค้างให้เสีย
+           */
+          if (freeRetries >= 2 && !imgUnstuck) {
+            imgUnstuck = true;
+            noteTrouble({ step: 'images', symptom: 'prompt_not_sent', move: 'reload_tab', detail: j.what, by: 'เครื่องผลิต' });
+            const done = await this.reloadChatTab();
+            this.log(done ? 'ok' : 'warn', done
+              ? `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ส่งไม่ออกซ้ำ — โหลดแท็บ ChatGPT ใหม่แล้วสั่งอีกครั้ง`
+              : `ภาพ ${index + 1}/${jobs.length} · ${j.what}: อยากโหลดแท็บใหม่แต่ทำไม่สำเร็จ`);
+            if (done) {
+              this.job.imageThreadStarted = false; // หน้าใหม่แล้ว ต้องเปิดห้องของรอบนี้เอง
+              await sleep(1500);
+              continue;
+            }
+          }
           this.log(
             'warn',
             `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ส่งคำสั่งไม่ออกจากเครื่องเรา (${res.meta?.detail || res.meta?.error}) — ยังไม่เสียโควตา ลองส่งใหม่ ${freeRetries}/${MAX_FREE_RETRIES}`,
           );
-          lastError = res.meta?.detail || res.meta?.error || '';
           await sleep(2500);
           continue;
         }
@@ -3079,6 +3296,7 @@ export class Machine {
          */
         if (res.imageDataUrl && this.usedImageKeys?.has(imageFingerprint(res.imageDataUrl))) {
           dupeHits++;
+          noteTrouble({ step: 'images', symptom: 'image_duplicate', move: 'retry', detail: j.what, by: 'เครื่องผลิต' });
           lastError = 'คว้าได้ภาพเดียวกับรูปก่อนหน้า (ไม่ใช่ภาพใหม่ของรูปนี้)';
           this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ${lastError} — ไม่รับ แล้วสั่งวาดใหม่`);
           if (dupeHits <= 2) attempt--; // ไม่ใช่ความผิดของคำสั่ง ให้โอกาสสั่งวาดใหม่จริง ๆ
@@ -3101,8 +3319,32 @@ export class Machine {
           }
           if (!rawBlob?.size) throw new Error('ไฟล์ภาพว่าง 0 byte');
 
+          /**
+           * เก็บไฟล์ดิบทันทีที่ดึงมาได้ ก่อนตรวจ — ห้ามให้ภาพที่จ่ายโควตาไปแล้วหายไปเฉย ๆ
+           *
+           * เดิมภาพที่ไม่ผ่านตรวจถูกลบทิ้งทั้งใบ แล้วสั่งวาดใหม่ ผู้ใช้เห็นแต่ ChatGPT
+           * วาดภาพเดิมซ้ำแล้วซ้ำอีกโดยไม่รู้ว่าภาพที่วาดมาแล้วหายไปไหนและผิดตรงไหน
+           * ทั้งที่ภาพนั้นอาจใช้ได้จริงในสายตาคน แค่ไม่ผ่านเกณฑ์อัตโนมัติของเราเท่านั้น
+           *
+           * ตอนนี้ไฟล์ดิบถูกวางไว้ในโฟลเดอร์ของเล่มเสมอ ผ่านหรือไม่ผ่านก็ยังอยู่ให้เปิดดูได้
+           * และถ้าเห็นว่าใช้ได้ ก็กด "ดึงรูปจากโฟลเดอร์โครงการ" เอาเข้าเล่มได้เลยโดยไม่ต้องวาดใหม่
+           */
+          const rawName = `${j.name.replace(/\.png$/i, '')}--รอบ${attempt}.png`;
+          const rawPath = await W.saveBookImage(this.book, rawName, rawBlob, { folder: 'generated' });
+
+          /**
+           * ภาพที่คว้ามาหน้าตาเหมือนรูปผู้เขียนที่เราแนบไป = คว้าไฟล์แนบของตัวเองกลับมา
+           * ไม่ใช่ภาพที่โมเดลวาด ต้องปฏิเสธตรงนี้ ไม่ใช่ปล่อยให้ไปโผล่เป็นภาพประกอบในเล่ม
+           */
+          if (this.refHash) {
+            const got = await imageAHash(rawBlob);
+            if (hashDistance(got, this.refHash) < 6) {
+              throw new Error('คว้าได้รูปผู้เขียนที่เราแนบไปกับคำสั่ง ไม่ใช่ภาพที่ ChatGPT วาด — ไม่รับ แล้วสั่งวาดใหม่');
+            }
+          }
+
           const sourceCheck = await validateGeneratedSource(rawBlob, j);
-          if (!sourceCheck.ok) throw new Error(`ไฟล์ต้นฉบับไม่ผ่านตรวจ: ${sourceCheck.reason}`);
+          if (!sourceCheck.ok) throw new Error(`ไฟล์ต้นฉบับไม่ผ่านตรวจ: ${sourceCheck.reason}${rawPath ? ` · ไฟล์ที่วาดมาถูกเก็บไว้ที่ ${rawPath}` : ''}`);
           // crop เยอะ ๆ ไม่ใช่ข้อผิดพลาด แต่ต้องเห็นได้ เผื่อภาพออกมาแล้วองค์ประกอบเบี้ยว
           if (sourceCheck.crop > 0.2) {
             this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ต้นฉบับสัดส่วนไม่ตรงช่อง ตัดขอบออก ${Math.round(sourceCheck.crop * 100)}% แบบกลางภาพ`);
@@ -3124,7 +3366,7 @@ export class Machine {
             },
           };
           const checked = await validatePhase2Asset(candidate, j);
-          if (!checked.ok) throw new Error(`ภาพไม่ผ่านตรวจ: ${checked.reason}`);
+          if (!checked.ok) throw new Error(`ภาพไม่ผ่านตรวจ: ${checked.reason}${rawPath ? ` · ไฟล์ที่วาดมาถูกเก็บไว้ที่ ${rawPath}` : ''}`);
 
           await db.saveAsset(this.book.id, j.name, candidate.blob, candidate.meta);
           const stored = await db.loadAsset(this.book.id, j.name);
@@ -3133,6 +3375,17 @@ export class Machine {
             await db.deleteAsset(this.book.id, j.name);
             throw new Error(`ไฟล์หลังบันทึกไม่ผ่านตรวจ: ${storedCheck.reason}`);
           }
+
+          /**
+           * เก็บสำเนาลงโฟลเดอร์ของเล่มทันทีที่ภาพผ่านตรวจ ไม่ใช่ตอนจบเล่ม
+           *
+           * ภาพหนึ่งใบใช้เวลาสร้างเป็นนาที ทั้งเล่มเป็นชั่วโมง แต่มันอยู่ใน IndexedDB
+           * ซึ่งเป็นแคชของ Chrome profile นั้น — ล้างข้อมูลเว็บ เปลี่ยนโปรไฟล์ หรือ
+           * ติดตั้งส่วนขยายใหม่ แล้วหายทั้งหมดโดยไม่มีสำเนาอยู่ที่ไหนเลย
+           * ไฟล์ในโฟลเดอร์ไม่มีเงื่อนไขพวกนั้น และเปิดดูด้วยตาได้ระหว่างทางว่าได้อะไรมาแล้วบ้าง
+           */
+          const savedPath = await W.saveBookImage(this.book, j.name, candidate.blob);
+          if (savedPath) this.log('ok', `เก็บไฟล์ไว้ที่ ${savedPath}`);
 
           made++;
           saved = true;
@@ -3164,6 +3417,14 @@ export class Machine {
           try { await W.syncProject(this.book.id); } catch {}
         } catch (e) {
           lastError = e?.message || String(e);
+          /**
+           * "ภาพวาดมาแล้วแต่ถูกสั่งวาดใหม่" ต้องอ่านออกจากหน้าจอทันทีว่าเพราะอะไร
+           *
+           * เดิมเหตุผลอยู่ในบันทึกบรรทัดเดียวที่ไหลผ่านไป ผู้ใช้เห็นแต่ ChatGPT
+           * วาดภาพเดิมซ้ำสามสี่รอบโดยไม่มีอะไรบอกว่าภาพที่วาดมาผิดตรงไหน
+           * ฝ่ายธุรการเก็บไว้ให้ จะได้ตอบได้ว่า "ซ้ำที่เดิมกี่ครั้งแล้ว และเพราะเหตุเดียวกันไหม"
+           */
+          noteTrouble({ step: 'images', symptom: 'image_not_grabbed', move: 'retry', detail: `${j.what}: ${lastError}`, by: 'เครื่องผลิต' });
           // อยู่ห้องเดิม — ภาพที่วาดเสร็จแล้วยังอยู่ในห้องนี้ ยังกดดึงเองได้
           this.log('warn', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: รับ/ปรับ/ตรวจไฟล์ไม่สำเร็จ (${lastError})`);
         }
@@ -3469,7 +3730,10 @@ export async function ingestImageDataUrl(book, name, dataUrl) {
   if (!checked.ok) throw new Error(`ภาพไม่ผ่านตรวจ: ${checked.reason}`);
 
   await db.saveAsset(book.id, name, candidate.blob, candidate.meta);
-  return candidate.meta;
+  // ทางมือทุกทาง (กดดึงเอง · อัปโหลดไฟล์ · หยิบจากโฟลเดอร์) ผ่านตรงนี้ที่เดียว
+  // จึงเก็บสำเนาที่นี่ที่เดียวพอ และได้ครบทุกทางโดยไม่ต้องไล่แก้ทีละปุ่ม
+  const savedPath = await W.saveBookImage(book, name, candidate.blob);
+  return { ...candidate.meta, savedPath };
 }
 
 /** Prompt ของช่องภาพหนึ่ง ๆ สำหรับเอาไปสร้างเองที่อื่น */
@@ -3551,7 +3815,15 @@ function fillOutlineGaps(parsed, fiction) {
   return fixed;
 }
 
-const PLACEMENT_LABEL = { top: 'ต้นตอน', middle: 'กลางตอน', bottom: 'ท้ายตอน' };
+/**
+ * ชื่อไทยของตำแหน่งที่ภาพไปแทรก — ต้องใช้คำเดียวกับที่ทั้งระบบใช้จริง
+ *
+ * คำสั่งวางแผนภาพ ตัวแทรกภาพ และตัวตัดเนื้อหารอบ ๆ ภาพ ใช้คำว่า
+ * after_intro / middle / before_conclusion มาตลอด แต่ตารางนี้เขียนว่า top / bottom
+ * ทุกภาพจึงตกไปที่ค่าสำรอง "กลางตอน" หมด ไม่ว่าจริง ๆ จะอยู่ต้นตอนหรือท้ายตอน
+ * — ทั้งบนหน้าจอและในบรรทัด "ภาพนี้ไปอยู่ตรงไหน" ที่ส่งไปกับคำสั่งวาด
+ */
+const PLACEMENT_LABEL = { after_intro: 'ต้นตอน', middle: 'กลางตอน', before_conclusion: 'ท้ายตอน' };
 
 /**
  * ความเข้มของลวดลายพื้นหลังหลังผสมกับกระดาษขาว
@@ -3801,6 +4073,27 @@ export function plannedImageJobs(book) {
  * - browser ต้อง decode เป็นภาพได้จริง
  * - ถ้ามีขนาดช่องล็อกไว้ ภาพหลัง normalize ต้องตรง pixel 300 dpi ที่คำนวณไว้
  */
+/**
+ * ลายมีหมึกอยู่จริงแค่ไหน — วัดจากพิกเซล ไม่ใช่เดาจากสายตาบนจอ
+ * สุ่มอ่านจากภาพย่อ เพราะเราต้องการรู้แค่ว่า "เห็นไหม" ไม่ได้ต้องการความละเอียด
+ */
+async function patternInk(bmp) {
+  const w = 160;
+  const h = Math.max(1, Math.round((bmp.height / bmp.width) * w));
+  const cv = new OffscreenCanvas(w, h);
+  const cx = cv.getContext('2d');
+  cx.drawImage(bmp, 0, 0, w, h);
+  const d = cx.getImageData(0, 0, w, h).data;
+  let darkest = 255;
+  let seen = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    if (g < darkest) darkest = g;
+    if (g < 245) seen++; // เข้มพอที่ตาจะจับได้บนกระดาษ
+  }
+  return { darkest: Math.round(darkest), visible: seen / (d.length / 4) };
+}
+
 async function validatePhase2Asset(asset, job) {
   if (!asset?.blob) return { ok: false, reason: 'ไม่พบไฟล์ภาพ' };
   if (!asset.blob.size || asset.blob.size < 1024) return { ok: false, reason: `ไฟล์เล็กผิดปกติ (${asset.blob.size || 0} bytes)` };
@@ -3814,6 +4107,28 @@ async function validatePhase2Asset(asset, job) {
 
   try {
     if (!bmp.width || !bmp.height) return { ok: false, reason: 'ภาพมีขนาด 0×0' };
+
+    /**
+     * ลายพื้นหลังที่จางจนตาไม่เห็น = ไฟล์ที่ใช้ไม่ได้ ไม่ใช่ไฟล์ที่ผ่าน
+     *
+     * ด่านนี้เคยตรวจแค่ "เปิดได้ไหม" กับ "ขนาดตรงช่องไหม" ลายที่ขาวสนิททั้งใบจึงผ่านฉลุย
+     * แล้วไปโผล่ในเล่มจริงเป็นหน้ากระดาษเปล่า ทุกเล่มที่ทำมาไม่มีพื้นหลังเลยเพราะเหตุนี้
+     * (วัดจาก PDF จริง: สีเข้มที่สุดในลายคือ 248 จาก 255 — ต่างจากขาว 2.7%)
+     *
+     * ตรวจที่นี่ได้กำไรสองต่อ: ลายที่ออกมาจางจะถูกสั่งวาดใหม่ทันทีตั้งแต่รอบแรก
+     * และเล่มเก่าที่มีลายจาง ๆ ค้างอยู่ จะถูกทิ้งแล้วสร้างใหม่ให้เองเมื่อเดินขั้นสร้างภาพอีกครั้ง
+     * โดยที่ผู้ใช้ไม่ต้องรู้ว่าเคยมีบั๊กนี้อยู่
+     */
+    if (job?.kind === 'pattern') {
+      const ink = await patternInk(bmp);
+      if (ink.visible < 0.001) {
+        return {
+          ok: false,
+          reason: `ลายจางจนมองไม่เห็น — สีเข้มที่สุดคือ ${ink.darkest} จาก 255 (ต่างจากขาว ${Math.round(((255 - ink.darkest) / 255) * 100)}%) พิมพ์ออกมาจะเป็นหน้าเปล่า`,
+        };
+      }
+    }
+
     if (job?.widthMm && job?.heightMm) {
       const expectedW = Math.max(1, Math.round((job.widthMm / 25.4) * 300));
       const expectedH = Math.max(1, Math.round((job.heightMm / 25.4) * 300));
@@ -3919,12 +4234,46 @@ async function normalizeGeneratedImage(blob, job) {
    * มันวาดลายสวยแต่เข้มเสมอ ผสมกับกระดาษขาวตรงนี้จึงคุมได้แน่นอนและเห็นผลก่อนพิมพ์
    */
   if (job.kind === 'pattern') {
+    /**
+     * "ความเข้ม 14%" ต้องแปลว่าหมึกจริง 14% ไม่ใช่ 14% ของอะไรก็ไม่รู้ที่จางอยู่แล้ว
+     *
+     * วัดจากไฟล์ที่ส่งออกจริง: ลายในเล่มมีสีเข้มที่สุด 248 จาก 255 — ต่างจากขาว 2.7%
+     * ตาไม่เห็นเลยทั้งบนจอและบนกระดาษ ทุกเล่มที่ทำมาจึงไม่มีพื้นหลังสักเล่ม
+     * ทั้งที่ท่อทั้งเส้นทำงานถูกหมด (ลายถูกฝัง ทึบแสงเต็มที่ อยู่ชั้นล่างสุด ขนาดเต็มหน้าพอดี)
+     *
+     * เหตุคือคูณสองต่อ: ChatGPT วาดลายมาจางอยู่แล้ว (เข้มสุดราว 205 เพราะคำสั่งขอพื้นผิวจาง)
+     * แล้วเราคูณ 0.14 ทับลงไปอีก เหลือ 248 — ตัวเลขความเข้มที่ผู้ใช้ตั้งจึงไม่มีความหมาย
+     *
+     * แก้ด้วยการยืดคอนทราสต์ของต้นฉบับให้เต็มช่วงก่อน แล้วค่อยคูณด้วยความเข้มที่ตั้งไว้
+     * ใช้เปอร์เซ็นไทล์ ไม่ใช่ค่าต่ำสุด เพราะจุดดำหลงมาจุดเดียว (ลายเซ็น · สิ่งแปลกปลอม)
+     * จะทำให้ช่วงกว้างเต็มทันทีแล้วการยืดก็ไม่เกิดขึ้นเลย
+     */
     const alpha = Math.min(0.25, Math.max(0.01, Number(job.patternAlpha) || 0.04));
     const d = cx.getImageData(0, 0, targetW, targetH);
+
+    const hist = new Uint32Array(256);
     for (let i = 0; i < d.data.length; i += 4) {
-      d.data[i] = Math.round(255 + (d.data[i] - 255) * alpha);
-      d.data[i + 1] = Math.round(255 + (d.data[i + 1] - 255) * alpha);
-      d.data[i + 2] = Math.round(255 + (d.data[i + 2] - 255) * alpha);
+      hist[(0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2]) | 0]++;
+    }
+    const total = d.data.length / 4;
+    let seen = 0;
+    let floor = 255;
+    for (let v = 0; v < 256; v++) {
+      seen += hist[v];
+      if (seen >= total * 0.002) { floor = v; break; } // เข้มสุดจริง โดยไม่นับจุดหลง 0.2% แรก
+    }
+    /**
+     * เพดานการขยายกันไม่ให้ไปขยาย noise ของภาพที่แทบไม่มีลายอยู่แล้ว
+     * และกันภาพที่ขาวสนิททั้งใบไม่ให้กลายเป็นรอยด่าง
+     */
+    const gain = Math.min(10, 255 / Math.max(8, 255 - floor));
+
+    for (let i = 0; i < d.data.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        // ยืดเต็มช่วง แล้วลดความเข้มลงตามที่ตั้งไว้ ในขั้นตอนเดียว
+        const ink = (255 - d.data[i + c]) * gain * alpha;
+        d.data[i + c] = Math.max(0, Math.round(255 - ink));
+      }
       d.data[i + 3] = 255;
     }
     cx.putImageData(d, 0, 0);
@@ -4014,6 +4363,41 @@ function normalizeFigureAspect(value) {
  * ลายนิ้วมือของภาพแบบเบา ๆ — ไม่ต้องถอดรหัส base64 ทั้งก้อนซึ่งอาจใหญ่หลาย MB
  * เอาความยาวรวมกับชิ้นส่วนหัว/กลาง/ท้ายก็แยกภาพคนละรูปได้ขาดแล้วในทางปฏิบัติ
  */
+/**
+ * ลายนิ้วมือที่ทนการบีบอัดใหม่ — เทียบ "ภาพเดียวกัน" ไม่ใช่ "ไฟล์เดียวกัน"
+ *
+ * ตัวเทียบไบต์ใช้ไม่ได้กับไฟล์ที่เราแนบไปเอง เพราะหน้าเว็บบีบอัดและย่อใหม่ก่อนแสดง
+ * ไบต์ที่ได้กลับมาจึงไม่มีทางตรงกับต้นฉบับ ทั้งที่ตาเห็นว่าเป็นรูปเดียวกันเป๊ะ
+ * (เห็นกับตา: รูปหน้าผู้เขียนที่แนบไปกับคำสั่ง ถูกบันทึกเป็นภาพประกอบของตอน 2.1)
+ *
+ * ย่อเป็น 8×8 ระดับเทาแล้วเทียบกับค่าเฉลี่ย — วิธีมาตรฐานที่ทนการย่อ บีบอัด และปรับสี
+ * ไม่ใช้เครือข่าย ไม่ใช้โมเดล และให้ผลเดิมทุกครั้งกับภาพเดิม
+ */
+async function imageAHash(blob) {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const cv = new OffscreenCanvas(8, 8);
+    const cx = cv.getContext('2d');
+    cx.drawImage(bmp, 0, 0, 8, 8);
+    bmp.close?.();
+    const d = cx.getImageData(0, 0, 8, 8).data;
+    const grey = [];
+    for (let i = 0; i < d.length; i += 4) grey.push(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+    const avg = grey.reduce((a, b) => a + b, 0) / grey.length;
+    return grey.map((g) => (g >= avg ? '1' : '0')).join('');
+  } catch {
+    return '';
+  }
+}
+
+/** ต่างกันกี่บิต — 0 คือภาพเดียวกัน ต่ำกว่า 6 จาก 64 บิตถือว่าเป็นภาพเดียวกันในทางปฏิบัติ */
+function hashDistance(a, b) {
+  if (!a || !b || a.length !== b.length) return Infinity;
+  let n = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
+  return n;
+}
+
 function imageFingerprint(dataUrl) {
   const s = String(dataUrl || '');
   const mid = Math.floor(s.length / 2);

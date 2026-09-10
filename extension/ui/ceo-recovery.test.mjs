@@ -5,6 +5,9 @@ import { readFile } from 'node:fs/promises';
 import { ceoView } from './ceo-panel.js';
 import { addCeoUsage, ceoUsageLabel } from '../core/ceo-usage.js';
 import { parseSupervisorDecision } from '../core/supervisor.js';
+import { citationGutted } from '../core/extract.js';
+import { noteTrouble } from '../core/dispatch.js';
+import { NO_CITATION_RULE } from '../core/prompts.js';
 const src = await readFile(new URL('./studio.js', import.meta.url), 'utf8');
 const block = src.slice(src.indexOf('async function sendTurn('), src.indexOf('/** ยิงหนึ่งครั้งด้วยสายส่งปัจจุบัน'));
 // เกณฑ์จำนวนขั้นต่ำถูกประกาศไว้ก่อนตัว parser ต้องตัดมาตั้งแต่ตรงนั้น ไม่งั้น parser จะอ้างถึงของที่ไม่มี
@@ -17,6 +20,7 @@ function setup(responses, decision, book = {}) {
     turnErrorMessage: r => r.meta?.error || r.status,
     makeSupervisor: () => async () => { asks++; return decision; },
     addEvent() {}, recentLogLines: () => [], answerEvidence: () => '',
+    citationGutted, NO_CITATION_RULE, noteTrouble,
     parseJson: s => { try { return JSON.parse(s); } catch { return null; } },
     setTimeout: fn => fn() };
   vm.runInNewContext(`${parsers}\n${block}\nglobalThis.run = sendTurn;`, scope);
@@ -95,4 +99,30 @@ test('actual CEO wrapper publishes start/finish and persists both decision and r
   scope.makeTransport=()=>({send:async()=>{throw Error('offline');}});
   await assert.rejects(scope.supervise({step:'setup'}));
   assert.equal(states.at(-1).working,false); assert.match(states.at(-1).detail,/offline/);
+});
+
+/**
+ * คำตอบที่เหลือแต่หมุดอ้างอิงต้องถูกสั่งใหม่ด้วยคำสั่งที่ต่างจากเดิม
+ * ยิงคำสั่งเดิมซ้ำพามันไปที่การตัดสินใจเดิมทุกรอบ — สามรอบได้ผลเหมือนกันทั้งสามรอบ
+ */
+test('หมุดอ้างอิงล้วน: รอบถัดไปต้องสั่งห้ามค้นเว็บ ไม่ใช่คำสั่งเดิม', async () => {
+  const gutted = '{"titles"::contentReference[oaicite:0]{index=0}:contentReference[oaicite:1]{index=1}';
+  const sent = [];
+  const transport = { send: async (prompt) => { sent.push(prompt); return sent.length === 1
+    ? { status: 'ok', text: gutted }
+    : { status: 'ok', text: '{"titles":["หนึ่ง","สอง","สาม","สี่"]}' }; } };
+  const scope = { book: {}, RETRYABLE_TURN_STATUS: new Set(['error','timeout','empty']),
+    turnErrorMessage: r => r.status, makeSupervisor: () => null,
+    addEvent() {}, recentLogLines: () => [], answerEvidence: () => '',
+    citationGutted, NO_CITATION_RULE, noteTrouble,
+    parseJson: s => { try { return JSON.parse(s); } catch { return null; } },
+    setTimeout: fn => fn() };
+  vm.runInNewContext(`${parsers}
+${block}
+globalThis.run = sendTurn;`, scope);
+  const r = await scope.run(transport, 'prompt', {}, { attempts: 2, parse: scope.parseTitleAnswer });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0], 'prompt');
+  assert.match(sent[1], /ห้ามค้นเว็บ/);
+  assert.equal(r.data[0].title, 'หนึ่ง');
 });

@@ -70,6 +70,45 @@
     return document.hasFocus();
   }
   const imageTurns = new Map();
+
+  /**
+   * ห้องแชตเดียวกันหรือเปล่า — ต้องดูที่ตัวห้อง ไม่ใช่ที่ URL ตรงตัว
+   *
+   * ห้องแชตใหม่เริ่มต้นที่ URL ที่ยังไม่มีชื่อห้อง (chatgpt.com/ หรือมี ?model=…)
+   * พอข้อความแรกถูกส่ง ChatGPT เขียน URL ทับเป็น /c/<id> ด้วย history ของหน้าเว็บเอง
+   * เอกสารเดิม ห้องเดิม ข้อความเดิมทุกอย่าง เปลี่ยนแค่ชื่อที่แถบที่อยู่
+   *
+   * แต่หลักฐานของเทิร์นภาพถูกจดไว้ "ตอนส่ง" ซึ่งเกิดก่อนการเขียนทับนั้นเสมอ
+   * การเทียบ URL ตรงตัวจึงไม่ตรงกันทุกครั้งที่เป็นภาพแรกของห้องใหม่ แล้วเราตอบว่า
+   * image_turn_not_available — ตัวคว้าภาพยอมแพ้ทันทีโดยไม่ลองซ้ำ ทั้งที่ภาพวาดเสร็จ
+   * อยู่บนจอตรงหน้า สุดท้ายก็สั่งวาดใหม่ แล้ววนแบบนั้นไปเรื่อย ๆ
+   *
+   * หลักฐานจริงที่ยืนยันว่าเป็นห้องเดิมคือ anchor.isConnected — ข้อความของเราเองยังอยู่ใน
+   * เอกสารนี้ ซึ่งเป็นเงื่อนไขที่แข็งกว่าและถูกตรวจอยู่แล้ว ที่นี่จึงเหลือหน้าที่กันแค่
+   * "คนละเว็บ" กับ "คนละห้องที่มีชื่อคนละชื่อ" ส่วนห้องที่เพิ่งได้ชื่อ ถือเป็นห้องเดิม
+   */
+  const conversationId = (href) => {
+    try {
+      // ไม่ใส่ base โดยตั้งใจ — ค่าที่เก็บไว้เป็น href เต็มเสมอ
+      // ถ้าใส่ base ค่าที่ใช้ไม่ได้ (ว่าง/พัง) จะถูกแปลงเป็น URL ปัจจุบันแล้วผ่านไปเงียบ ๆ
+      return new URL(href).pathname.match(/\/c\/([^/?#]+)/)?.[1] || '';
+    } catch {
+      return '';
+    }
+  };
+  function sameConversation(was) {
+    if (!was) return false; // ไม่มีหลักฐานว่าจดมาจากห้องไหน = ไม่รับ
+    let origin = '';
+    try {
+      origin = new URL(was).origin;
+    } catch {
+      return false;
+    }
+    if (origin !== location.origin) return false;
+    const before = conversationId(was);
+    // ตอนจดยังไม่มีชื่อห้อง = ห้องใหม่ที่เพิ่งถูกตั้งชื่อ ไม่ใช่การย้ายห้อง
+    return !before || before === conversationId(location.href);
+  }
   // จำเฉพาะเทิร์นภาพที่ดึง bytes สำเร็จแล้ว เพื่อปลด spinner ที่ค้างก่อนส่งภาพถัดไปได้อย่างปลอดภัย
   let completedImageTurn = null;
   const normalizePrompt = (text) => String(text || '').replace(/\s+/g, ' ').trim();
@@ -429,7 +468,21 @@
    * รูปที่แนบสำเร็จจะถูกแสดงเป็นภาพย่อที่หน้าเว็บสร้างจาก blob: ในเครื่อง
    * ต่างจากรูปในบทสนทนาซึ่งมาจากเซิร์ฟเวอร์ จึงใช้แยกกันได้ว่าไฟล์เข้าไปแล้วจริง
    */
-  const attachmentThumbs = () => $$('img[src^="blob:"]');
+  const attachmentThumbs = () => {
+    /**
+     * ต้องมองแค่ในกรอบช่องพิมพ์ ไม่ใช่ทั้งหน้า
+     *
+     * ภาพที่ ChatGPT วาดเสร็จก็เป็น blob: เหมือนกัน (ตัวคว้าภาพรองรับเคสนี้อยู่แล้ว)
+     * การนับทั้งหน้าจึงนับภาพในบทสนทนาเป็น "ไฟล์แนบ" ไปด้วย แล้วตัวล้างก็ไปไล่หา
+     * ปุ่มลบของภาพในบทสนทนา ซึ่งไม่มี — เจอ null แล้ว break ออกทันที ไม่ได้ล้างอะไรเลย
+     *
+     * ผลคือรูปผู้เขียนพอกในช่องพิมพ์ทีละใบทุกรอบ (เห็นกับตา: แนบไปสองใบในเทิร์นเดียว)
+     * และ ChatGPT ที่ได้รูปเดียวกันซ้อนกันหลายใบตีความว่าเป็นงานเทียบภาพหรือแก้ภาพ
+     * ไม่ใช่งานวาดใหม่ — แล้วก็หยุดคิดกลางคัน ไม่ได้ภาพสักใบ
+     */
+    const form = $(S.composer)?.closest('form');
+    return form ? $$('img[src^="blob:"]', form) : [];
+  };
   const countAttachmentThumbs = () => attachmentThumbs().length;
 
   /**
@@ -457,6 +510,15 @@
       let btn = null;
       for (let el = thumb; el && el !== document.body && !btn; el = el.parentElement) {
         btn = el.querySelector?.(S.attachmentRemove) || null;
+      }
+      /**
+       * ป้ายกำกับของปุ่มลบเปลี่ยนตามภาษาและตามรุ่นของหน้าเว็บ พึ่งอย่างเดียวไม่พอ
+       * ในกรอบช่องพิมพ์มีปุ่มอยู่ไม่กี่ตัว และปุ่มที่นั่งอยู่กับภาพย่อคือปุ่มลบของมันเอง
+       */
+      if (!btn) {
+        for (let el = thumb; el && el !== document.body && !btn; el = el.parentElement) {
+          btn = [...(el.querySelectorAll?.('button') || [])].find((b) => !b.disabled && !b.contains(thumb)) || null;
+        }
       }
       if (!btn) break;
 
@@ -534,7 +596,22 @@
      */
     let typeError = '';
     try {
-      const typed = await chrome.runtime.sendMessage({ type: 'sw.forceSend', text, send: false });
+      /**
+       * ต้องมีเพดานเวลา เพราะทางนี้ค้างได้แบบไม่มีอะไรมาปลด
+       *
+       * มันวิ่งไปที่ service worker ซึ่งต่อ debugger เข้ากับแท็บแล้วสั่งพิมพ์
+       * chrome.debugger.attach และ chrome.scripting.executeScript ไม่มีเพดานเวลาของตัวเอง
+       * แท็บที่ไม่ตอบสนองจะทำให้ callback ไม่ถูกเรียกเลย แล้ว sendMessage ก็รอไปเรื่อย ๆ
+       * (เห็นจริงในบันทึก: ค้างที่ขั้น "พิมพ์ Prompt ลงช่อง" 584 วินาที จนนาฬิกาใหญ่ตัดที่ 601 วินาที)
+       *
+       * ตัว insertText เป็นคำสั่งเดียวจบไม่ว่าข้อความจะยาวแค่ไหน ช้าได้แค่ตอนต่อ debugger
+       * 45 วินาทีจึงเหลือเฟือสำหรับทางที่ทำงานได้จริง และตัดทางที่ค้างทิ้งเร็วพอ
+       * หมดเวลาแล้วไม่ใช่จุดจบ — ตกไปใช้ทางคลิปบอร์ดต่อ ซึ่งเป็นทางที่เขียนรองรับไว้อยู่แล้ว
+       */
+      const typed = await Promise.race([
+        chrome.runtime.sendMessage({ type: 'sw.forceSend', text, send: false }),
+        new Promise((r) => setTimeout(() => r({ ok: false, error: 'ให้เบราว์เซอร์พิมพ์ให้ไม่ตอบใน 45 วินาที' }), 45000)),
+      ]);
       if (typed?.ok) {
         await frame();
         ok = !!box.innerText.trim();
@@ -638,7 +715,25 @@
    * และรายงานทุกวินาทีว่ารออะไรอยู่ · คืน 'done' | 'stale' (ปุ่มค้างแต่หน้านิ่ง) | 'timeout'
    */
   async function waitForBusyToClear(isBusy, { timeoutMs = 180000, staleMs = 45000, turnId = null, label = '' } = {}) {
-    const sig = () => `${(lastAssistantTurn()?.innerText || '').length}|${$$('img').length}`;
+    /**
+     * สัญญาณชีพของหน้าเว็บ — ต้องจับ "ตอนที่มันกำลังคิด" ให้ได้ด้วย
+     *
+     * ของเดิมอ่านแค่ความยาวข้อความของคำตอบล่าสุดกับจำนวนรูป ซึ่งพังกับโมเดลที่คิดก่อนตอบ:
+     * ระหว่างคิด ยังไม่มีก้อนคำตอบให้อ่านเลย (lastAssistantTurn เป็น null) และยังไม่มีรูป
+     * ค่าจึงค้างเป็น "0|N" ตลอดสองนาทีที่มันกำลังวาดภาพอยู่จริง ๆ
+     * แล้วเราสรุปว่าหน้าเว็บค้าง → กดปุ่มหยุด → ฆ่างานที่กำลังวาดของตัวเอง
+     * (เห็นจริงบนจอ: "Worked for 2m 5s" ได้ภาพ ส่วนเทิร์นถัดมาเป็น "Stopped thinking" ทุกอัน)
+     *
+     * ตัวจับเวลาที่ ChatGPT โชว์ระหว่างคิดเดินทุกวินาที การอ่านข้อความของทั้งกล่องสนทนา
+     * จึงเห็นมันขยับแน่นอน ต่อให้ยังไม่มีคำตอบและยังไม่มีรูปสักใบ
+     */
+    const sig = () => {
+      const box = $(S.turnContainer) || document.body;
+      // textContent ไม่บังคับให้เบราว์เซอร์คำนวณ layout ใหม่ ต่างจาก innerText
+      // ตัวนี้ถูกเรียกทุกวินาทีระหว่างรอ และบทสนทนายาวได้มาก จึงต้องเบาที่สุด
+      const live = (box?.textContent || '').length;
+      return `${live}|${(lastAssistantTurn()?.innerText || '').length}|${$$('img').length}`;
+    };
     const t0 = Date.now();
     let last = sig();
     let lastChangeAt = t0;
@@ -671,6 +766,11 @@
   const STUCK_SILENCE_MS = 120000;
   /** ภาพถูกดึงเก็บสำเร็จแล้ว แต่ ChatGPT ลืมคืนปุ่มส่ง: รอเพียงช่วงสั้นก่อนปลด spinner */
   const CAPTURED_IMAGE_STUCK_SILENCE_MS = 8000;
+  /**
+   * งานภาพรอหน้าเว็บว่างได้แค่นี้ก่อนเปิดห้องใหม่ทับไปเลย
+   * สั้นพอที่จะไม่เสียเวลากับอาการค้าง และยาวพอให้เทิร์นที่กำลังจะจบจริง ๆ ได้จบก่อน
+   */
+  const IMAGE_IDLE_GRACE_MS = 30000;
   /** ปุ่มส่งเป็นวงกลม/disabled โดยไม่มีปุ่ม Stop ไม่ใช่งานสร้างที่ยังเดินอยู่ รอสั้นกว่าได้ */
   const COMPOSER_STUCK_SILENCE_MS = 30000;
 
@@ -709,6 +809,24 @@
      * มันไม่ส่งอะไรใหม่ ไม่ทำให้เกิดงานซ้อน ส่วนภาพที่วาดเสร็จแล้วยังอยู่ในหน้าให้คว้าได้เหมือนเดิม
      */
     report(turnId, 'waiting_idle', 'หน้าเว็บค้างสถานะ “กำลังตอบ” โดยไม่ขยับสองนาที — กดปุ่มหยุดหนึ่งครั้งเพื่อปลดสถานะ');
+    /**
+     * ห้ามกดหยุดถ้าเทิร์นที่ค้างอยู่คือคำสั่งวาดภาพที่ยังไม่ได้ภาพกลับมา
+     *
+     * นี่คือความผิดพลาดที่แพงที่สุดที่เคยเกิด: โมเดลสายคิดก่อนตอบใช้เวลาวาดเป็นนาที
+     * ระหว่างนั้นหน้าเว็บแทบไม่ขยับ เราตัดสินว่าค้างแล้วกดหยุด — ฆ่างานของตัวเอง
+     * ผลบนจอคือ "Stopped thinking" ทุกเทิร์น ไม่ได้ภาพสักใบ แล้ววนสั่งวาดใหม่ไม่จบ
+     * ทุกครั้งที่วนคือจ่ายโควตาภาพใหม่เต็มราคาสำหรับงานที่เราเพิ่งฆ่าไปเอง
+     *
+     * ปล่อยให้มันวาดต่อแล้วรายงานว่ายังไม่ว่าง ปลอดภัยกว่าเสมอ — ชั้นบนรอแล้วลองใหม่ได้
+     */
+    const pendingImage = [...imageTurns.values()].some(
+      (t) => t.anchor?.isConnected && t.anchor === lastUserTurn() && t.anchor !== completedImageTurn?.anchor,
+    );
+    if (pendingImage) {
+      report(turnId, 'waiting_idle', 'เทิร์นที่ค้างอยู่คือคำสั่งวาดภาพที่ยังไม่ได้ภาพกลับมา — ปล่อยให้วาดต่อ ไม่กดหยุดทับงานตัวเอง');
+      return false;
+    }
+
     visibleStopButton()?.click();
     for (let i = 0; i < 20 && stopButtonVisible(); i++) await napMs(150);
     return !stopButtonVisible();
@@ -795,8 +913,17 @@
    * และการกดปุ่มนี้ไม่ส่งอะไรใหม่ ไม่ทำให้เกิดงานซ้อน
    */
   function releaseStuckComposer(box) {
-    const spin = composerSpinner(box);
-    const btn = spin?.closest?.('button:not([disabled])') || visibleStopButton();
+    /**
+     * ห้ามกดปุ่มหยุดตรงนี้เด็ดขาด — ปุ่มหยุดที่มองเห็นแปลว่า "กำลังทำงานอยู่"
+     *
+     * ของเดิมถอยไปกดปุ่มหยุดเมื่อไม่เจอวงกลมในช่องพิมพ์ ซึ่งกลับหัวกลับหางกับเจตนา:
+     * สิ่งที่เราอยากปลดคือช่องพิมพ์ที่ค้างโดยไม่มีงานเดินอยู่ ส่วนปุ่มหยุดคือหลักฐานว่ามีงานเดินอยู่
+     * การกดมันคือการฆ่างานของตัวเองที่กำลังวาดภาพอยู่ แล้วจ่ายโควตาใหม่เพื่อวาดซ้ำ
+     *
+     * ฟังก์ชันนี้ต้องแตะได้แค่วงกลมในกรอบช่องพิมพ์เท่านั้น ไม่เจอก็คือไม่ทำอะไร
+     */
+    if (stopButtonVisible()) return false;
+    const btn = composerSpinner(box)?.closest?.('button:not([disabled])');
     if (!btn) return false;
     btn.click();
     return true;
@@ -819,15 +946,43 @@
   }
 
 
+  /**
+   * หลักฐานว่า "ยังไม่ได้ส่ง" ที่แน่นอนที่สุดเท่าที่หน้าเว็บมีให้
+   *
+   * ChatGPT ล้างช่องพิมพ์ทันทีที่รับข้อความเข้าบทสนทนา ถ้า Prompt ของเรายังอยู่ในช่องครบทุกตัว
+   * และไม่มีปุ่มหยุดโผล่ขึ้นมา แปลว่าการกดส่งไม่ติด ไม่มีอะไรออกไปจากเครื่องเรา
+   * — ไม่ใช่ "ตอบไม่ได้ว่าส่งไปหรือยัง" ซึ่งเป็นรหัสที่กันตัวกู้ทุกตัวออกไปแล้วหยุดทั้งงาน
+   *
+   * ต้องเช็คปุ่มหยุดด้วย เพราะระหว่างที่ ChatGPT เริ่มตอบ หน้าอาจวาดช่องพิมพ์กลับมาพร้อม
+   * ข้อความเดิมได้ชั่วขณะ ถ้าดูแต่ช่องพิมพ์อย่างเดียวจะสรุปผิดว่ายังไม่ส่งแล้วยิงซ้ำ
+   */
+  const nothingWasSent = (prompt) => composerMatches(prompt) && !stopButtonVisible();
+
   const normalizeMessage = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   function userMessageKey(node) {
     return node.getAttribute('data-message-id') ||
       node.closest('[data-testid^="conversation-turn"]')?.getAttribute('data-testid') || '';
   }
+  /**
+   * ลำดับของเทิร์นในบทสนทนา — ตัวเลขที่เพิ่มขึ้นเรื่อย ๆ และไม่ย้อนกลับ
+   *
+   * ใช้แทนการ "นับจำนวนข้อความที่หน้าตาเหมือนกัน" ซึ่งพังเมื่อหน้าเว็บถอดข้อความเก่า
+   * ที่เลื่อนพ้นจอออกจาก DOM (ChatGPT ทำแบบนี้เมื่อบทสนทนายาว) จำนวนที่นับได้จึงลดลง
+   * ทั้งที่มีข้อความใหม่เพิ่มเข้ามาจริง แล้วเราสรุปว่า "ยังไม่มีข้อความใหม่"
+   */
+  const turnIndexOf = (node) => {
+    const id = node?.closest?.('[data-testid^="conversation-turn"]')?.getAttribute('data-testid') || '';
+    const m = id.match(/(\d+)\s*$/);
+    return m ? Number(m[1]) : NaN;
+  };
   function snapshotUserMessages() {
-    return $$('[data-message-author-role="user"]').map(node => ({
+    const rows = $$('[data-message-author-role="user"]').map(node => ({
       key:userMessageKey(node), text:normalizeMessage(node.innerText || node.textContent),
+      turn:turnIndexOf(node),
     }));
+    // ลำดับสูงสุดที่เคยเห็น เก็บติดไปกับก้อนเดียวกัน ผู้เรียกจะได้ไม่ต้องรู้เรื่องนี้เอง
+    rows.maxTurn = rows.reduce((m, r) => (Number.isFinite(r.turn) && r.turn > m ? r.turn : m), -1);
+    return rows;
   }
   /**
    * ใบเสร็จของข้อความที่เราส่ง — เทียบทั้งก้อนไม่ได้ เพราะหน้าเว็บพับข้อความยาว
@@ -844,11 +999,34 @@
     const expected = normalizeMessage(prompt);
     const head = expected.slice(0, 120);
     const sameMessage = (text) => text === expected || (!!head && text.startsWith(head));
-    const matches = $$('[data-message-author-role="user"]').filter(node =>
+    const all = $$('[data-message-author-role="user"]');
+    const matches = all.filter(node =>
       sameMessage(normalizeMessage(node.innerText || node.textContent)));
     const oldKeys = new Set(before.map(row=>row.key).filter(Boolean));
     const identified = matches.find(node => userMessageKey(node) && !oldKeys.has(userMessageKey(node)));
     if (identified) return identified;
+
+    /**
+     * ข้อความล่าสุดที่มีลำดับสูงกว่าที่เคยเห็น = ข้อความใหม่ แน่นอนโดยไม่ต้องนับอะไรเลย
+     *
+     * ทางนับจำนวนข้างล่างพังกับ Phase 2 โดยเฉพาะ เพราะคำสั่งภาพทุกใบในเล่มขึ้นต้น
+     * เหมือนกันเป๊ะ 120 ตัวแรก ("วาดภาพต่อไปนี้ให้หน่อย ตอบกลับมาเป็นภาพอย่างเดียว…")
+     * ทุกใบจึงนับเป็น "ข้อความเดียวกัน" หมด พอบทสนทนายาวขึ้นและหน้าเว็บถอดข้อความเก่า
+     * ที่พ้นจอออกจาก DOM จำนวนที่นับได้จะเท่าเดิมหรือลดลง ทั้งที่เราเพิ่งส่งไปจริง ๆ
+     * ผลคือ "กด Enter แล้วแต่จับข้อความที่ส่งไม่ได้" แล้วหยุดทั้งงานกลาง Phase 2
+     * — ยิ่งเข้าไปลึกยิ่งเจอ เพราะยิ่งลึกยิ่งมีข้อความเก่าถูกถอดออกมาก
+     *
+     * ข้อความล่าสุดอยู่ท้ายจอเสมอ จึงไม่เคยถูกถอด และลำดับเทิร์นก็ไม่ย้อนกลับ
+     */
+    const tail = all[all.length - 1];
+    if (tail && sameMessage(normalizeMessage(tail.innerText || tail.textContent))) {
+      const seen = Number(before?.maxTurn ?? -1);
+      const now = turnIndexOf(tail);
+      if (Number.isFinite(now) && now > seen) return tail;
+      // ไม่มีเลขลำดับให้อ่าน ใช้ "ก่อนหน้านี้ไม่มีข้อความผู้ใช้เลย" เป็นหลักฐานแทน
+      if (!Number.isFinite(now) && !before.length) return tail;
+    }
+
     const oldCount = before.filter(row=>sameMessage(row.text)).length;
     return matches.length > oldCount ? matches.at(-1) : null;
   }
@@ -1254,6 +1432,21 @@
        * เกณฑ์ที่ตรงกับเจตนาจริงคือดูว่ารูปนั้นอยู่ในข้อความฝั่งผู้ใช้หรือเปล่า ไม่เกี่ยวกับ anchor
        */
       if (i.closest('[data-message-author-role="user"]')) continue;
+      /**
+       * เคยเผลอเพิ่ม "ทั้งเทิร์นที่มีข้อความผู้ใช้ = ของที่เราแนบเอง" ตรงนี้ แล้วพังทันที
+       *
+       * หน้าเว็บครอบข้อความของเรากับคำตอบไว้ในกล่อง conversation-turn เดียวกันได้
+       * ภาพที่ ChatGPT วาดจึงถูกตัดทิ้งไปด้วย — เห็นกับตา: ภาพขึ้นเต็มจอแล้ว
+       * แต่บันทึกฟ้องว่า "ภาพในคำตอบ 0 รูป" แล้ววนรอจนหมดเวลา
+       * เป็นกับดักตัวเดียวกับที่คอมเมนต์ข้างบนเตือนไว้ แค่เปลี่ยนจาก anchor เป็น turn
+       *
+       * งานแยก "รูปผู้เขียนที่เราแนบไป" ออกจาก "ภาพที่โมเดลวาด" ไม่ใช่งานของตัวสแกน DOM
+       * เพราะตำแหน่งในหน้าเว็บเปลี่ยนได้ตลอดและเดาผิดแล้วเสียหายทั้งสองทาง
+       * ตัวที่รู้แน่คือลายนิ้วมือของภาพ (imageAHash) ซึ่งเทียบ "ภาพเดียวกัน" ได้แม้ถูกบีบอัดใหม่
+       * และทำงานอยู่ในเครื่องผลิตแล้ว — ตรงนั้นปฏิเสธได้ถูกต้องโดยไม่ต้องเดาจากตำแหน่ง
+       */
+      // ภาพย่อในช่องพิมพ์ยังไม่ได้ถูกส่งด้วยซ้ำ ห้ามนับเด็ดขาด — อันนี้แน่นอนไม่ใช่การเดา
+      if (i.closest('form')?.contains($(S.composer))) continue;
       const w = i.naturalWidth || 0;
       const h = i.naturalHeight || 0;
       const src0 = i.currentSrc || i.src || i.getAttribute('src') || '';
@@ -1277,13 +1470,17 @@
         const dataUrl = /^data:image\//.test(src) ? 1 : 0;
         cand.push({
           src,
+          el: i, // เก็บตัว element ไว้ด้วย เผื่อ fetch ไม่ได้แล้วต้องวาดลงผ้าใบแทน
           score: (hosted ? 1 : 0) * 1000000000000 + fetchable * 100000000000 + dataUrl * 50000000000 + w * h,
         });
       }
     }
 
     cand.sort((a, b) => b.score - a.score);
-    return { images: [...new Set(cand.map((x) => x.src))], seen };
+    // src → element ตัวแรกที่เจอ ใช้ตอนต้องวาดลงผ้าใบแทนการ fetch
+    const nodeBySrc = new Map();
+    for (const c of cand) if (!nodeBySrc.has(c.src)) nodeBySrc.set(c.src, c.el);
+    return { images: [...new Set(cand.map((x) => x.src))], seen, nodeBySrc };
   }
 
   function readImages(before, anchor) {
@@ -1304,7 +1501,40 @@
    * สำคัญกับภาพที่ 2+ เพราะหน้าเว็บบางครั้งให้ blob: URL ซึ่ง Studio/extension page fetch ไม่ได้
    * แต่ content script ที่อยู่กับหน้า ChatGPT ยังเข้าถึง blob นั้นได้
    */
-  async function captureImageData(sources = []) {
+  /**
+   * วาดภาพที่เห็นอยู่บนจอลงผ้าใบแล้วอ่าน bytes ออกมา
+   *
+   * ใช้ตอน fetch ไม่ได้ ซึ่งเกิดจริงบ่อย: blob: URL ที่หมดอายุแล้ว, การตอบ 403 จากที่เก็บไฟล์,
+   * หรือหน้าเว็บถอด src เดิมทิ้งหลังเรนเดอร์เสร็จ ทางนี้ไม่ยุ่งกับเครือข่ายเลย
+   * อ่านจากพิกเซลที่เบราว์เซอร์วาดไว้แล้วตรง ๆ — ถ้าตาเห็นภาพ ทางนี้ก็ได้ภาพ
+   *
+   * ข้อจำกัดเดียวคือผ้าใบจะ "เปื้อน" ถ้าภาพมาจากโดเมนอื่นที่ไม่อนุญาต CORS
+   * กรณีนั้น toBlob จะโยน error ซึ่งเราจับไว้แล้วไปลองทางถัดไป
+   */
+  async function captureFromElement(img) {
+    if (!img?.complete || !img.naturalWidth) throw new Error('element_not_painted');
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    cv.getContext('2d').drawImage(img, 0, 0);
+    const blob = await new Promise((res, rej) =>
+      cv.toBlob((b) => (b ? res(b) : rej(new Error('canvas_to_blob_failed'))), 'image/png'));
+    if (!blob.size) throw new Error('canvas_blob_empty');
+    return blob;
+  }
+
+  /**
+   * ให้ service worker ไปดึงแทน — มันมีสิทธิ์ host ของตัวเอง ไม่ติดกฎของหน้าเว็บ
+   * ใช้ได้เฉพาะ URL แบบ http(s) เพราะ blob: มีความหมายเฉพาะในหน้านั้น
+   */
+  async function captureViaWorker(src) {
+    if (!/^https?:/.test(src)) throw new Error('not_fetchable_by_worker');
+    const r = await chrome.runtime.sendMessage({ type: 'sw.fetchImage', url: src });
+    if (!r?.ok || !r.dataUrl) throw new Error(r?.error || 'worker_fetch_failed');
+    return r.dataUrl;
+  }
+
+  async function captureImageData(sources = [], nodeBySrc = null) {
     const errors = [];
     for (const src of sources) {
       try {
@@ -1331,6 +1561,29 @@
         };
       } catch (e) {
         errors.push(`${String(src).slice(0, 120)} => ${e?.message || e}`);
+        /**
+         * ทางหลักพลาดไม่ใช่จุดจบ — ภาพยังอยู่บนจอตรงหน้า
+         *
+         * "ดึง bytes ไม่ได้" คือความล้มที่แพงที่สุดของทั้งระบบ เพราะภาพถูกวาดเสร็จแล้ว
+         * จ่ายโควตาไปแล้ว แล้วเราทิ้งมันเพราะเอาไฟล์ออกมาไม่ได้ทางเดียวที่ลอง
+         * สองทางข้างล่างใช้กลไกคนละอย่างกับ fetch จึงรอดตอนที่ fetch ไม่รอด
+         */
+        const el = nodeBySrc?.get?.(src);
+        if (el) {
+          try {
+            const blob = await captureFromElement(el);
+            return { dataUrl: await blobToDataUrl(blob), src, type: blob.type || 'image/png',
+              bytes: blob.size, width: el.naturalWidth, height: el.naturalHeight, via: 'canvas' };
+          } catch (e2) {
+            errors.push(`${String(src).slice(0, 60)} (ผ้าใบ) => ${e2?.message || e2}`);
+          }
+        }
+        try {
+          const dataUrl = await captureViaWorker(src);
+          return { dataUrl, src, type: 'image/png', bytes: 0, via: 'worker' };
+        } catch (e3) {
+          errors.push(`${String(src).slice(0, 60)} (service worker) => ${e3?.message || e3}`);
+        }
       }
     }
     return { dataUrl: '', src: '', errors };
@@ -1443,7 +1696,7 @@
 
       const scan = scanImages(before, anchor);
       if (scan.images.length) {
-        const captured = await captureImageData(scan.images);
+        const captured = await captureImageData(scan.images, scan.nodeBySrc);
         // เห็นภาพแล้วแต่ไฟล์ยังดึงไม่ได้ = ยังโหลดไม่เสร็จ รอรอบหน้า ไม่ใช่ความล้มเหลว
         if (captured.dataUrl) return { status: 'ok', images: scan.images, captured, seen: scan.seen };
         // แต่ต้องจำเหตุผลไว้ ถ้าสุดท้ายดึงไม่ได้เลยจะได้บอกได้ว่าติดตรงไหน
@@ -1619,9 +1872,27 @@
       const acceptedSetup = opts.recoverCompletedSetup && acceptedSetupStillCurrent();
       if (acceptedSetup && stopButtonVisible()) opts = {...opts, newThread:true};
       if (opts.newThread) {
-        // Do not navigate away from a turn that is still reasoning or drawing.
-        if (!acceptedSetup && !(await waitUntilIdle(opts.imageTimeoutMs ?? 240000, turnId))) {
+        /**
+         * งานภาพ: ห้องใหม่คือ "ทางออกจากสถานะค้าง" ไม่ใช่สิ่งที่ต้องรอให้หายค้างก่อน
+         *
+         * เดิมรอให้หน้าเว็บว่างก่อนเสมอ นานได้ถึงสี่นาที แล้วถ้ายังไม่ว่างก็ยอมแพ้ด้วย
+         * previous_turn_running — ซึ่งกลับหัวกับสิ่งที่เรากำลังจะทำ เพราะการเปิดห้องใหม่
+         * นั่นแหละคือสิ่งที่ปลดสถานะค้างได้ การรอจึงเป็นการนั่งดูอาการที่เรามีวิธีแก้อยู่ในมือ
+         * (เห็นในบันทึกจริง: waiting_idle · "รอให้ ChatGPT ตอบเทิร์นก่อนหน้าจบ" ซ้ำไม่จบ)
+         *
+         * ยังให้เวลาสั้น ๆ ก่อน เผื่อเทิร์นก่อนหน้ากำลังจะจบอยู่แล้วจริง ๆ — ถ้าจบทันก็ไม่ต้อง
+         * กวนหน้าเว็บให้วาดใหม่ทั้งหน้าโดยไม่จำเป็น แต่ครบเวลาแล้วเดินหน้าเปิดห้องใหม่เลย
+         *
+         * ปลอดภัยเพราะภาพของเทิร์นก่อนถูกไล่คว้าจนสุดทางและเขียนลงโฟลเดอร์ไปแล้ว
+         * ส่วนงานข้อความยังรอเต็มเวลาเหมือนเดิม เพราะที่นั่นการรอคือการรักษาคำตอบไว้จริง ๆ
+         */
+        const idleBudget = opts.wantImages ? IMAGE_IDLE_GRACE_MS : (opts.imageTimeoutMs ?? 240000);
+        const idle = acceptedSetup || (await waitUntilIdle(idleBudget, turnId));
+        if (!idle && !opts.wantImages) {
           return {turnId,status:'error',text:'',meta:{error:'previous_turn_running'}};
+        }
+        if (!idle) {
+          report(turnId, 'new_thread', `หน้าเว็บยังไม่ว่างใน ${IMAGE_IDLE_GRACE_MS / 1000} วินาที — เปิดห้องใหม่เลย เพราะห้องใหม่คือทางออกจากสถานะค้าง`);
         }
         report(turnId, 'new_thread');
         // เทิร์นสร้างภาพบังคับให้ห้องต้องว่างจริง ไม่งั้นเครื่องมือสร้างภาพจะเข้าโหมดแก้ภาพเดิม
@@ -1649,7 +1920,12 @@
 
       // ต้องรอให้เทิร์นก่อนหน้าจบสนิทก่อน ไม่งั้นปุ่มส่งจะยัง disabled แล้ว Prompt จะค้างในช่องพิมพ์
       report(turnId, 'waiting_idle', 'รอให้ ChatGPT ตอบเทิร์นก่อนหน้าจบก่อนส่งงานถัดไป');
-      if (!(await waitUntilIdle(opts.imageTimeoutMs ?? 240000, turnId))) {
+      /**
+       * งานภาพเพิ่งเปิดห้องว่างมาหมาด ๆ ถ้ายังไม่ว่างตรงนี้แปลว่าหน้าเว็บค้างจริง
+       * รอต่ออีกสี่นาทีไม่ได้อะไรกลับมา — ยอมแพ้เร็ว ๆ แล้วให้ชั้นบนสั่งใหม่จะดีกว่า
+       * เพราะรอบใหม่ของงานภาพเปิดห้องใหม่ให้อีกครั้ง ซึ่งเป็นท่าที่ปลดสถานะค้างได้จริง
+       */
+      if (!(await waitUntilIdle(opts.wantImages ? IMAGE_IDLE_GRACE_MS : (opts.imageTimeoutMs ?? 240000), turnId))) {
         return { turnId, status: 'error', text: '', meta: { error: 'previous_turn_running' } };
       }
 
@@ -1749,6 +2025,12 @@
         if (native?.ok) {
           fresh = await waitForDom(()=>findUserReceipt(prompt,userMessagesBefore),{timeoutMs:15000});
           // Enter ถูกกดไปแล้ว ถ้ายังหาใบเสร็จไม่เจอ ผลลัพธ์ไม่แน่นอน ห้ามไปคลิกซ้ำ
+          // Prompt ยังอยู่ในช่องพิมพ์ครบ = Enter ไม่ติด ไม่ต้องเดา และลองใหม่ได้ปลอดภัย
+          if (!fresh && nothingWasSent(prompt)) return {turnId,status:'error',text:'',meta:{
+            error:'send_action_not_accepted',
+            detail:'กด Enter แล้วแต่ Prompt ยังอยู่ในช่องพิมพ์ครบและยังไม่มีการตอบ — คำสั่งไม่ได้ถูกส่ง ลองใหม่ได้',
+            sendMs:Date.now()-sendStartedAt,
+          }};
           if (!fresh) return {turnId,status:'error',text:'',meta:{
             error:'outcome_unknown',
             detail:'เบราว์เซอร์กด Enter แล้ว แต่ยังจับข้อความที่ส่งไม่ได้ — ไม่กดซ้ำเพื่อป้องกันงานซ้อน',
@@ -1787,6 +2069,12 @@
           sendMs:Date.now()-sendStartedAt,
         }};
       }
+      // ทางสำรองก็เช่นกัน — ช่องพิมพ์ที่ยังเต็มคือคำตอบ ไม่ใช่คำถาม
+      if (!fresh && nothingWasSent(prompt)) return {turnId,status:'error',text:'',meta:{
+        error:'send_action_not_accepted',
+        detail:`ส่งไม่ออกและ Prompt ยังอยู่ในช่องพิมพ์ครบ · ${sendError || 'ไม่พบข้อความใหม่'} — คำสั่งไม่ได้ถูกส่ง ลองใหม่ได้`,
+        sendMs:Date.now()-sendStartedAt,
+      }};
       if (!fresh) return {turnId,status:'error',text:'',meta:{
         error:'outcome_unknown',
         detail:`ยังยืนยันข้อความที่ส่งไม่ได้ · ช่องทางสำรอง: ${sendError || 'ไม่พบข้อความใหม่'} · เก็บงานไว้โดยไม่ยิงซ้ำ`,
@@ -1964,7 +2252,7 @@
     if (msg?.type === 'gpt.grabImage') {
       (async () => {
         const source = msg.turnId ? imageTurns.get(msg.turnId) : null;
-        if (msg.turnId && (!source || source.url !== location.href || !source.anchor.isConnected)) {
+        if (msg.turnId && (!source || !sameConversation(source.url) || !source.anchor.isConnected)) {
           sendResponse({ ok: false, error: 'image_turn_not_available' });
           return;
         }
@@ -1974,7 +2262,7 @@
           sendResponse({ ok: false, error: 'ไม่พบภาพในคำตอบล่าสุดของหน้านี้', seen: scan.seen.slice(-6) });
           return;
         }
-        const captured = await captureImageData(scan.images);
+        const captured = await captureImageData(scan.images, scan.nodeBySrc);
         if (!captured.dataUrl) {
           sendResponse({ ok: false, error: `ดึงไฟล์ภาพไม่สำเร็จ: ${captured.errors?.[0] || 'ไม่ทราบสาเหตุ'}` });
           return;
@@ -1982,6 +2270,40 @@
         sendResponse({ ok: true, dataUrl: captured.dataUrl, width: captured.width, height: captured.height, bytes: captured.bytes });
       })();
       return true;
+    }
+
+    /**
+     * เทิร์นหายไปเฉย ๆ — ถามหน้าเว็บว่าเกิดอะไรขึ้นจริง แทนการเดาจากขั้นล่าสุดที่ได้ยิน
+     *
+     * ข้อความความคืบหน้ากับผลลัพธ์วิ่งผ่าน chrome.runtime ซึ่งขาดได้ (service worker หลับ ·
+     * แท็บถูกพักเพราะอยู่หลัง · หน้าวาดใหม่) พอขาดแล้วฝั่ง Studio จะค้างอยู่ที่ขั้นสุดท้าย
+     * ที่ได้ยิน แล้วเข้าใจว่างานหยุดตรงนั้น ทั้งที่ ChatGPT ตอบจนจบไปนานแล้ว
+     * (เห็นจริง: คำตอบเต็ม ๆ อยู่บนจอ แต่บันทึกบอกว่าค้างที่ "พิมพ์ Prompt ลงช่อง" 590 วินาที)
+     *
+     * ตัวหน้าเว็บเองรู้คำตอบทั้งสามข้อ และรู้แน่นอน ไม่ใช่การอนุมาน:
+     *   done         เก็บผลไว้แล้ว — ส่งกลับไปเลย ไม่ต้องสั่งใหม่ ไม่เสียโควตาเพิ่ม
+     *   running      ยังทำอยู่จริง — ห้ามส่งซ้ำเด็ดขาด
+     *   not_sent     ไม่มีข้อความของเราบนหน้าเลย — ยังไม่เคยส่ง ลองใหม่ได้ปลอดภัย
+     *   sent_unknown ข้อความขึ้นไปแล้วแต่ไม่มีผล — ตอบไม่ได้ว่าจบยัง ต้องระวังไว้ก่อน
+     */
+    if (msg?.type === 'gpt.recoverTurn') {
+      const done = completedTurns.get(msg.turnId);
+      if (done) {
+        sendResponse({ state: 'done', result: done });
+        return false;
+      }
+      if (activeTurnId && activeTurnId === msg.turnId) {
+        sendResponse({ state: 'running' });
+        return false;
+      }
+      let posted = false;
+      try {
+        posted = !!findUserReceipt(msg.prompt || '', []);
+      } catch (_) {
+        posted = true; // อ่านหน้าไม่ได้ = ตอบไม่ได้ ต้องถือว่าอาจส่งไปแล้ว
+      }
+      sendResponse({ state: posted ? 'sent_unknown' : 'not_sent' });
+      return false;
     }
 
     if (msg?.type === 'gpt.run') {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import { noteTrouble } from '../core/dispatch.js';
 
 const source = await readFile(new URL('./studio.js', import.meta.url), 'utf8');
 const start = source.indexOf('const AUTO_CONTINUE_TOTAL_MAX =');
@@ -15,6 +16,7 @@ const block = source.slice(start, source.indexOf('\n}', source.indexOf('async fu
 function fixture({ supervisor = null, total = 0 } = {}) {
   const events = [];
   const scope = {
+    noteTrouble, // ฝ่ายธุรการเป็นตัวจริง สายที่ต่อไว้จริงต้องถูกทดสอบด้วย
     makeSupervisor: () => supervisor,
     book: { job: { step: 'write', status: 'paused' } },
     recentLogLines: () => [],

@@ -24,6 +24,8 @@ chrome.runtime.onMessage.addListener((msg) => {
     clearTimeout(p.timer);
     p.resolve(msg);
   } else if (msg.type === 'gpt.progress') {
+    // ขั้นล่าสุดที่ไปถึง = หลักฐานว่าคำสั่งออกจากเครื่องเราไปแล้วหรือยัง ตอนหมดเวลาต้องใช้ตัวนี้ตัดสิน
+    if (msg.phase) p.lastPhase = msg.phase;
     // Reply time starts after acceptance, not while loading or uploading.
     if (msg.phase === 'waiting' && !p.answerStarted) {
       p.answerStarted = true;
@@ -42,6 +44,38 @@ chrome.runtime.onMessage.addListener((msg) => {
  * (อาการที่เจอ: อยู่หน้า "ตรวจ/แก้" รอคนตรวจอยู่ แต่แถบสถานะค้างว่า "กำลังรอ ChatGPT ตอบ")
  */
 export const hasPendingTurn = () => pending.size > 0;
+
+/**
+ * หมดเวลาแล้วเกิดอะไรขึ้นจริง — ถามหน้าเว็บ ไม่ใช่เดาจากขั้นล่าสุดที่ได้ยิน
+ *
+ * เคยคิดว่าขั้นล่าสุดตอบได้ว่าส่งไปหรือยัง (ค้างที่ "พิมพ์ Prompt" = ยังไม่ส่ง) แต่ผิด:
+ * ช่องทางส่งข้อความความคืบหน้าขาดได้เอง พอขาดแล้วขั้นล่าสุดจะค้างอยู่ที่ก่อนส่งตลอด
+ * ทั้งที่ ChatGPT รับงานไปทำจนจบแล้ว — เห็นจริงจากคำตอบเต็ม ๆ ที่อยู่บนจอ
+ * ขณะที่บันทึกบอกว่ายังค้างที่ขั้นพิมพ์มา 590 วินาที การเดาจากขั้นจึงพาไปส่งซ้ำได้
+ *
+ * ตัวหน้าเว็บรู้แน่นอนทั้งสามข้อ: เก็บผลไว้แล้วหรือเปล่า · ยังทำอยู่ไหม · ข้อความของเราขึ้นไปหรือยัง
+ * ถามมันแล้วค่อยตัดสิน ถามไม่ได้ = ตอบไม่ได้ ต้องระวังไว้ก่อน
+ */
+async function probeTurn(turnId, prompt) {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return null;
+  try {
+    return await Promise.race([
+      chrome.runtime.sendMessage({ type: 'sw.recoverTurn', turnId, prompt }),
+      new Promise((r) => setTimeout(() => r(null), 15000)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+const PHASE_LABEL = {
+  waiting_ready: 'รอหน้า ChatGPT พร้อม',
+  new_thread: 'เปิดห้องแชตใหม่',
+  new_thread_failed: 'เปิดห้องแชตใหม่ไม่สำเร็จ',
+  waiting_idle: 'รอเทิร์นก่อนหน้าจบ',
+  attaching: 'แนบไฟล์',
+  typing: 'พิมพ์ Prompt ลงช่อง',
+};
 
 export class ChatGptTabTransport {
   constructor(opts = {}) {
@@ -68,13 +102,58 @@ export class ChatGptTabTransport {
     const imageTimeoutMs = opts.wantImages ? (opts.imageTimeoutMs ?? 240000) : 0;
     // แนบไฟล์คือการอัปโหลดจริงผ่านหน้าเว็บ ต้องเผื่อเวลาให้ ไม่งั้นเทิร์นที่แนบรูปจะถูกตัดจบทั้งที่กำลังอัปโหลดอยู่
     const attachMs = opts.attachments?.length ? 45000 : 0;
-    const outerTimeoutMs = 600000 + attachMs; // bounded preparation, including an existing busy turn
+    // เปิดให้ตั้งค่าได้ เพื่อให้ทดสอบพฤติกรรมตอนหมดเวลาได้จริงโดยไม่ต้องรอสิบนาที
+    const outerTimeoutMs = (opts.outerTimeoutMs ?? 600000) + attachMs; // bounded preparation, including an existing busy turn
     const startedAt = Date.now();
     return new Promise((resolve) => {
       const complete = (result) => resolve({...result, meta:{...result.meta, elapsedMs:Date.now()-startedAt}});
       const expire = () => {
+        const p = pending.get(turnId);
         pending.delete(turnId);
-        complete({ turnId, status: 'timeout', text: '', meta:{error:'outcome_unknown', detail:'ขาดการยืนยันผลจากแท็บ ยังไม่ส่งซ้ำเพื่อป้องกันงานซ้อน'} });
+        /**
+         * หมดเวลาแล้ว "ส่งไปหรือยัง" — คำตอบอยู่ที่ขั้นล่าสุดที่ไปถึง ไม่ใช่คำถามที่ตอบไม่ได้
+         *
+         * เดิมเหมาว่าไม่รู้ทั้งหมด แล้วติดรหัส outcome_unknown ซึ่งเป็นรหัสเดียวในระบบที่
+         * ห้ามลองใหม่เด็ดขาด (อาจส่งไปแล้ว การส่งซ้ำจะได้งานซ้อน) ทุกตัวกู้จึงถูกกันหมด
+         * ทั้งการเปิดห้องใหม่ การโหลดแท็บใหม่ และผู้คุมกระบวนการ — งานหยุดตรงนั้นเสมอ
+         *
+         * แต่ขั้นอย่าง "พิมพ์ Prompt ลงช่อง" เกิดก่อนกดส่งทั้งหมด ค้างตรงนั้นแปลว่า
+         * ข้อความยังอยู่ในช่องพิมพ์ ไม่เคยออกไปไหน ไม่มีอะไรกำกวมให้ต้องระวังเลย
+         * เหมารวมจึงเป็นการทิ้งหลักฐานที่เรามีอยู่ในมือ แล้วหยุดงานทั้งที่กู้ได้ปลอดภัย
+         *
+         * ไม่เคยได้ยินอะไรเลย (ไม่มีขั้นล่าสุด) ยังถือว่าไม่รู้ตามเดิม เพราะอาจเป็นได้ว่า
+         * เทิร์นเดินไปแล้วแต่ข้อความความคืบหน้าหายระหว่างทาง — ตรงนั้นต้องระวังไว้ก่อน
+         */
+        const phase = p?.lastPhase || '';
+        const where = PHASE_LABEL[phase] || phase || 'ไม่ทราบขั้น';
+        probeTurn(turnId, prompt).then((found) => {
+          /**
+           * ผลอยู่ที่แท็บอยู่แล้ว แค่ข้อความแจ้งผลหายระหว่างทาง — เอากลับมาใช้ ไม่ต้องสั่งใหม่
+           * นี่คือเทิร์นที่จ่ายโควตาไปแล้วและทำงานสำเร็จแล้ว การทิ้งมันคือการจ่ายซ้ำเปล่า ๆ
+           */
+          if (found?.state === 'done' && found.result) {
+            complete({ ...found.result, meta: { ...found.result.meta, recoveredAfterTimeout: true } });
+            return;
+          }
+          if (found?.state === 'not_sent') {
+            complete({ turnId, status: 'error', text: '', meta: {
+              error: 'prompt_not_sent',
+              stuckPhase: phase,
+              detail: `ค้างที่ขั้น "${where}" จนหมดเวลา · ถามแท็บแล้วไม่มีข้อความของเราบนหน้าเลย — ยังไม่เคยส่ง ลองใหม่ได้โดยไม่มีงานซ้อน`,
+            } });
+            return;
+          }
+          const why = found?.state === 'running'
+            ? 'แท็บบอกว่ายังทำเทิร์นนี้อยู่'
+            : found?.state === 'sent_unknown'
+              ? 'ข้อความของเราขึ้นไปบนหน้าแล้วแต่ยังไม่ได้ผลกลับมา'
+              : 'ถามแท็บไม่ได้';
+          complete({ turnId, status: 'timeout', text: '', meta: {
+            error: 'outcome_unknown',
+            stuckPhase: phase,
+            detail: `ค้างที่ขั้น "${where}" จนหมดเวลา · ${why} — ยังไม่ส่งซ้ำเพื่อป้องกันงานซ้อน`,
+          } });
+        });
       };
       const timer = setTimeout(expire, outerTimeoutMs);
 

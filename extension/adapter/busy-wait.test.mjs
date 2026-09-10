@@ -76,3 +76,60 @@ test('ขยับครั้งเดียวตอนต้น แล้ว�
   const how = await waitForBusyToClear(() => true, { timeoutMs: 6000, staleMs: 1500 });
   assert.equal(how, 'stale');
 });
+
+/**
+ * วงกลมที่ปุ่มส่งค้าง — ต้องปลดเองได้โดยไม่ต้องรอโหมด CEO
+ *
+ * มาถึงรหัส composer_busy_stuck ได้ก็ต่อเมื่อ adapter ตรวจครบทุกด่านและกดปลดไปแล้วหนึ่งครั้ง
+ * เรารู้แน่ว่าหน้าเว็บค้างและคำสั่งยังไม่เคยถูกส่ง โหลดหน้าใหม่จึงปลอดภัยเสมอ
+ * เดิมท่านี้สั่งได้เฉพาะทางผู้คุมกระบวนการ ปิด CEO ไว้ = ตรวจเจอแต่ไม่มีใครลงมือ
+ */
+test('ทั้งเครื่องผลิตและปุ่มบนหน้า Studio โหลดหน้าใหม่เองได้เมื่อปุ่มส่งค้าง', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const machine = await readFile(new URL('../core/machine.js', import.meta.url), 'utf8');
+  const turn = machine.slice(machine.indexOf('async turnWithRetry('), machine.indexOf('/** บันทึกล่าสุดของงานนี้'));
+  assert.match(turn, /composer_busy_stuck/);
+  assert.match(turn, /if \(!unstuck\)/);
+  assert.match(turn, /sw\.reloadChat/);
+  // ครั้งเดียวต่อเทิร์น แล้วต้องตกไปทางเดิม ไม่ใช่วนโหลดไม่จบ
+  assert.match(turn, /i = MAX_RETRIES;\s*\n\s*break;/);
+
+  const studio = await readFile(new URL('../ui/studio.js', import.meta.url), 'utf8');
+  const send = studio.slice(studio.indexOf('async function sendTurn('), studio.indexOf('async function superviseFailure('));
+  assert.match(send, /composer_busy_stuck' && !unstuck/);
+  assert.match(send, /sw\.reloadChat/);
+});
+
+/**
+ * บันไดกู้ต้องเป็นบันได ไม่ใช่การยิงซ้ำเงื่อนไขเดิม
+ * ห้องเดิม → ห้องใหม่ (ล้างบทสนทนา) → โหลดแท็บใหม่ (ล้างสถานะหน้าเว็บ) — คนละอาการ คนละท่า
+ */
+test('ห้องใหม่แล้วยังไม่หาย ต้องขึ้นขั้นโหลดแท็บใหม่ ทั้งสองเส้นทาง', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const machine = await readFile(new URL('../core/machine.js', import.meta.url), 'utf8');
+  const turn = machine.slice(machine.indexOf('async turnWithRetry('), machine.indexOf('/** บันทึกล่าสุดของงานนี้'));
+  assert.match(turn, /if \(freshRoom\) \{[\s\S]*?triedNewThread = true;/);
+  assert.match(turn, /if \(triedNewThread && !unstuck\)/);
+
+  const studio = await readFile(new URL('../ui/studio.js', import.meta.url), 'utf8');
+  const send = studio.slice(studio.indexOf('async function sendTurn('), studio.indexOf('async function superviseFailure('));
+  assert.match(send, /!opts\.newThread\) \{\s*\n\s*opts = \{ \.\.\.opts, newThread: true \};/);
+  assert.match(send, /\} else if \(!unstuck\) \{/);
+});
+
+/**
+ * โหลดแท็บได้เฉพาะตอนที่งานวิ่งผ่านหน้าเว็บจริง
+ * เล่มที่เขียนด้วย API ไม่มีแท็บให้โหลด และ ensureChatTab จะ "สร้าง" แท็บให้ ซึ่งไม่มีใครขอ
+ */
+test('โหมด API ต้องไม่ถูกเปิดแท็บ ChatGPT ขึ้นมาเพราะบันไดกู้', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const machine = await readFile(new URL('../core/machine.js', import.meta.url), 'utf8');
+  const helper = machine.slice(machine.indexOf('async reloadChatTab()'), machine.indexOf('async turnWithRetry('));
+  assert.match(helper, /this\.tr\?\.kind !== 'chatgpt_tab'/);
+  assert.match(helper, /typeof chrome === 'undefined'/);
+
+  const studio = await readFile(new URL('../ui/studio.js', import.meta.url), 'utf8');
+  const send = studio.slice(studio.indexOf('async function sendTurn('), studio.indexOf('async function superviseFailure('));
+  assert.match(send, /transport\.kind !== 'chatgpt_tab'/);
+  assert.match(send, /composer_busy_stuck' && !unstuck && transport\.kind === 'chatgpt_tab'/);
+});
