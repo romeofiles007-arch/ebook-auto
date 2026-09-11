@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ebook Auto",
   "version": "0.1.0",
-  "version_name": "0.1.0 build 20260910-2127",
+  "version_name": "0.1.0 build 20260912-0100",
   "description": "ให้หัวข้อ แล้วสร้างหนังสือทั้งเล่มผ่านหน้าเว็บ ChatGPT เรียงพิมพ์ด้วย Typst ในเบราว์เซอร์ คุมจำนวนหน้าได้จริง",
   "minimum_chrome_version": "114",
 

@@ -399,3 +399,58 @@ export function recoverBody(raw, { minChars = 400 } = {}) {
   if (/^(ขอโทษ|ผมไม่สามารถ|I(?:'m| am) sorry|I can(?:'t|not))/i.test(t)) return null;
   return t;
 }
+
+/**
+ * ตัดหัวข้อที่ทวนชื่อตอนของตัวเองออกจากต้นเนื้อหา
+ *
+ * ตัวเรียงพิมพ์พิมพ์ชื่อตอนให้อยู่แล้วทุกตอน (PDF พิมพ์ชื่อเปล่า · DOCX พิมพ์เลขตอนนำหน้า)
+ * ถ้าตัวเนื้อหาขึ้นต้นด้วยหัวข้อชื่อเดียวกันอีกที ผู้อ่านจะเห็นชื่อเดียวกันสองบรรทัดติดกัน
+ * ต่างกันแค่ขนาดกับเลขตอน — เห็นจริงบนหน้ากระดาษ:
+ *   ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก
+ *   1.3 ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก
+ * ซึ่งอ่านแล้วเหมือนเล่มทำมาไม่เรียบร้อย
+ *
+ * เกิดได้สองทาง: โมเดลเขียนหัวข้อทวนชื่อตอนมาเอง หรือเนื้อหาเคยผ่าน DOCX
+ * แล้วบรรทัดหัวข้อที่ใส่เลขตอนไว้ให้จับคู่กลับตอนนำเข้า ติดกลับเข้ามาเป็นเนื้อหา
+ *
+ * ตัดเฉพาะหัวข้อแรกสุดและเฉพาะตอนที่ข้อความตรงกับชื่อตอนจริง ๆ เท่านั้น
+ * หัวข้อย่อยที่คนเขียนตั้งใจใส่ไว้กลางตอนไม่ถูกแตะ
+ */
+export function stripEchoedHeading(md, section = {}) {
+  const text = String(md || '');
+  const title = String(section.title || '').trim();
+  if (!text.trim() || !title) return text;
+
+  // เทียบแบบไม่สนเลขตอนนำหน้า ช่องว่าง และเครื่องหมายคั่น เพราะสองฝั่งเขียนคนละแบบกันได้
+  const key = (s) =>
+    String(s)
+      .replace(/^\s*\**\s*/, '')
+      .replace(/^(?:บทที่|Chapter)\s*\d+[.:·\-\s]*/i, '')
+      .replace(/^\d+(?:\.\d+)*[.):·\-\s]+/, '')
+      .replace(/[\s·:.\-—–_*#]/g, '')
+      .toLowerCase();
+
+  const want = key(title);
+  const wantWithId = section.id ? key(`${section.id} ${title}`) : want;
+  if (!want) return text;
+
+  const lines = text.split('\n');
+  let i = 0;
+  while (i < lines.length && !lines[i].trim()) i++;
+  if (i >= lines.length) return text;
+
+  const first = lines[i].trim();
+  const heading = /^#{1,6}\s+/.test(first)
+    ? first.replace(/^#{1,6}\s+/, '')
+    : /^\*\*[^*]+\*\*$/.test(first)
+      ? first.slice(2, -2)
+      : null;
+  if (heading === null) return text;
+
+  const got = key(heading);
+  if (got !== want && got !== wantWithId) return text;
+
+  lines.splice(0, i + 1);
+  while (lines.length && !lines[0].trim()) lines.shift();
+  return lines.join('\n');
+}

@@ -8,7 +8,21 @@ export async function collectReferences({query,selected=[],minimum=5,search,choo
     if(!next || searched.has(next.toLowerCase())) continue;
     searched.add(next.toLowerCase()); searches++;
     onProgress([...accepted.values()],`ค้นเพิ่มรอบ ${searches}/${maxSearches}: ${next} · ได้ ${accepted.size}/${minimum} แหล่ง`);
-    const found=(await search(next)).filter(s=>s.abstract?.length>=100 && !seen.has(s.doi));
+    /**
+     * ค้นรอบหนึ่งล้ม ต้องข้ามไปคำค้นถัดไป ไม่ใช่ล้มทั้งงาน
+     *
+     * ตัวค้นคุยกับบริการภายนอก (Crossref) ซึ่งช้าและล่มได้เป็นปกติ
+     * เดิมข้อผิดพลาดของรอบเดียวถูกโยนขึ้นไปจนหยุดการสร้างหนังสือทั้งเล่มกลางทาง
+     * ทั้งที่บรรณานุกรมเป็นของเสริม และแหล่งที่คัดได้ก่อนหน้านั้นยังอยู่ครบ
+     * (เห็นจริง: หยุดที่วินาทีที่ 26 หลังได้คำค้นใหม่มา ตรงกับเพดานเวลา 25 วินาทีพอดี)
+     */
+    let found;
+    try {
+      found=(await search(next)).filter(s=>s.abstract?.length>=100 && !seen.has(s.doi));
+    } catch (e) {
+      onProgress([...accepted.values()],`ค้นรอบ ${searches} ไม่สำเร็จ (${e?.message || e}) — ข้ามไปคำค้นถัดไป · เก็บ ${accepted.size}/${minimum} แหล่งที่คัดได้แล้วไว้`);
+      continue;
+    }
     found.forEach(s=>seen.add(s.doi));
     const result=await choose(found,{selected:[...accepted.keys()],remaining:minimum-accepted.size,queries:[...searched]});
     const dois=Array.isArray(result?.dois)?result.dois:[];

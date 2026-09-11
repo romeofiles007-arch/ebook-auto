@@ -85,3 +85,72 @@ test('ไฟล์เดิมที่ไม่ผ่านด่าน ต้�
   assert.match(loop, /await db\.deleteAsset\(this\.book\.id, j\.name\)/);
   assert.match(loop, /ไฟล์เดิมไม่ผ่านตรวจ/);
 });
+
+/**
+ * หน้าบรรณานุกรมต้องอ่านเป็นรายการอ้างอิง ไม่ใช่เนื้อหาอีกบทหนึ่ง
+ *
+ * หัวข้อเคยพิมพ์ชื่อรูปแบบอ้างอิงต่อท้ายว่า "บรรณานุกรม (IEEE)"
+ * ซึ่งเป็นข้อมูลของคนทำเล่ม ไม่ใช่ของคนอ่าน — ค่า referenceStyle ยังใช้จัดรูปแบบตัวรายการตามเดิม
+ */
+test('หัวข้อบรรณานุกรมไม่บอกชื่อรูปแบบอ้างอิง และตัวอักษรเล็กลง', async () => {
+  const template = await readFile(new URL('../typeset/template.js', import.meta.url), 'utf8');
+  const back = template.slice(template.indexOf("if (has('references')) {"), template.indexOf("const bio = String(book.aboutAuthor"));
+  assert.match(back, /const title = 'บรรณานุกรม';/);
+  assert.ok(!/บรรณานุกรม \(\$\{REFERENCE_STYLES/.test(back), 'ต้องไม่มีวงเล็บบอกสไตล์แล้ว');
+  // ย่อด้วยหน่วย em เพื่อให้เล็กลงตามขนาดตัวอักษรของเล่มนั้น ไม่ใช่ตัวเลขตายตัว
+  assert.match(back, /#set text\(size: 0\.82em\)/);
+  // ต้องครอบไว้ ไม่งั้นขนาดจะรั่วไปถึงหน้าเกี่ยวกับผู้เขียนที่ต่อท้ายกัน
+  assert.match(back, /#block\(breakable: true\)\[/);
+
+  const refs = await readFile(new URL('./references.js', import.meta.url), 'utf8');
+  assert.match(refs, /sections\.push\(\{ title: 'บรรณานุกรม', lines \}\)/);
+});
+
+/**
+ * ชื่อตอนโผล่สองบรรทัดติดกัน — ตัวหนึ่งจากตัวเรียงพิมพ์ อีกตัวจากในเนื้อหาเอง
+ *
+ * เห็นจริงบนหน้ากระดาษ:
+ *   ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก
+ *   1.3 ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก
+ * ต่างกันแค่ขนาดกับเลขตอน ซึ่งอ่านแล้วเหมือนเล่มทำมาไม่เรียบร้อย
+ */
+test('หัวข้อที่ทวนชื่อตอนของตัวเองถูกตัดออกก่อนเรียงพิมพ์', async () => {
+  const { stripEchoedHeading } = await import('./extract.js');
+  const s = { id: '1.3', title: 'ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก' };
+
+  // ทวนพร้อมเลขตอน (เส้นทางที่มาจาก DOCX) และทวนเปล่า ๆ
+  assert.equal(stripEchoedHeading('### 1.3 ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก\n\nเนื้อหา', s), 'เนื้อหา');
+  assert.equal(stripEchoedHeading('# ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก\nเนื้อหา', s), 'เนื้อหา');
+  // บรรทัดตัวหนาล้วนก็ทำหน้าที่เป็นหัวข้อในสายตาผู้อ่านเหมือนกัน
+  assert.equal(stripEchoedHeading('**ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก**\n\nเนื้อหา', s), 'เนื้อหา');
+
+  // หัวข้อย่อยที่คนเขียนตั้งใจใส่ ห้ามแตะ
+  const keep = '### หัวข้อย่อยที่ตั้งใจใส่\n\nเนื้อหา';
+  assert.equal(stripEchoedHeading(keep, s), keep);
+  assert.equal(stripEchoedHeading('เนื้อหาเริ่มเลย', s), 'เนื้อหาเริ่มเลย');
+  // ตัดแค่หัวข้อแรกสุด หัวข้อกลางตอนที่บังเอิญชื่อซ้ำต้องอยู่ต่อ
+  assert.match(stripEchoedHeading('# ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก\n\nก\n\n## ขั้นที่ 2 ทำฐานให้เท่ากันก่อนบอกว่าอันไหนถูก', s), /^ก\n/);
+});
+
+test('ทั้ง PDF และ DOCX ใช้ตัวตัดหัวข้อซ้ำตัวเดียวกัน', async () => {
+  const template = await readFile(new URL('../typeset/template.js', import.meta.url), 'utf8');
+  const docx = await readFile(new URL('./docx.js', import.meta.url), 'utf8');
+  assert.match(template, /stripEchoedHeading\(rec\?\.md, s\)/);
+  assert.match(docx, /stripEchoedHeading\(byId\.get\(s\.id\)\?\.md \|\| '', s\)/);
+});
+
+/**
+ * การอ้างในเนื้อหาต้องสั้น — DOI กับ URL อยู่ในหน้าบรรณานุกรมแล้ว
+ * เคยได้ของแบบนี้คากลางย่อหน้า: (Haws & Bearden, 2006, DOI: 10.1086/508435; …)
+ */
+test('บอกรูปแบบการอ้างในเนื้อหาตามสไตล์ที่เล่มนั้นเลือก และห้าม DOI', async () => {
+  const { referenceContext } = await import('./references.js');
+  const mk = (referenceStyle) =>
+    referenceContext({ backMatter: ['references'], referenceStyle, referenceSources: [{ title: 'T', year: 2006, doi: '10.1086/508435' }] });
+
+  assert.match(mk('apa'), /เขียนสั้นแบบนี้เท่านั้น \(Atkins & Gershell, 2002\)/);
+  assert.match(mk('ieee'), /เขียนสั้นแบบนี้เท่านั้น \[1\]/);
+  assert.match(mk('apa'), /ห้ามใส่ DOI, URL, ชื่อวารสาร, เลขหน้า/);
+  // doi ยังต้องส่งไปให้โมเดลรู้ว่าแหล่งไหนคือแหล่งไหน แค่ห้ามพิมพ์ลงเนื้อหา
+  assert.match(mk('apa'), /10\.1086\/508435/);
+});

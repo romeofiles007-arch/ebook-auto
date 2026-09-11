@@ -39,6 +39,41 @@
     'ใช้ครบแล้ว',
   ];
 
+  /**
+   * โควตาภาพหมด — ประกาศที่ไม่เหมือนลิมิตอื่นเลยสองอย่าง
+   *
+   * หนึ่ง มันมาเป็น "คำตอบของ ChatGPT" ในกล่องสนทนา ไม่ใช่แถบแจ้งเตือนนอกกล่อง
+   * ตัวจับลิมิตเดิมจึงมองไม่เห็น เพราะมันตัดทุกอย่างที่อยู่ในข้อความสนทนาทิ้งตั้งแต่ต้น
+   * (ซึ่งถูกแล้วสำหรับกรณีอื่น เพราะเนื้อหาหนังสือเองก็พูดถึงคำว่า usage limit ได้)
+   *
+   * สอง มันบอกเวลาเป็นตัวเลข "try again in 4 hours" ไม่ใช่ "try again later"
+   * วลีเดิมทุกตัวจึงไม่ตรงสักตัว
+   *
+   * ผลที่เกิดจริงคือเราอ่านมันเป็นคำตอบธรรมดาที่บังเอิญไม่มีภาพ แล้วสั่งวาดใหม่วนไป
+   * ทั้งที่อีกสี่ชั่วโมงข้างหน้าไม่มีทางได้ภาพสักใบ
+   */
+  const IMAGE_QUOTA_PATTERNS = [
+    /out of image generation/i,
+    /image generation (?:messages|limit)/i,
+    /no more image generations?/i,
+    /(?:reached|hit) [^.]{0,40}image generation/i,
+    /โควตา[^.\n]{0,20}(?:ภาพ|รูป)/,
+    /สร้าง(?:ภาพ|รูป)[^.\n]{0,20}ครบ/,
+  ];
+
+  /**
+   * คืนข้อความประกาศถ้าคำตอบนี้คือ "โควตาภาพหมด" ไม่ใช่คำตอบจริง
+   *
+   * กันจับผิดตัวด้วยความยาวก่อนเสมอ: ประกาศของหน้าเว็บเป็นประโยคเดียวสั้น ๆ
+   * ส่วนคำตอบจริงที่พูดถึงเรื่องโควตาได้ (เช่นเนื้อหาหนังสือ) จะยาวกว่านี้มาก
+   * และตัวนี้ถูกเรียกเฉพาะตอนเทิร์นวาดภาพไม่ได้ภาพกลับมาเท่านั้น
+   */
+  function imageQuotaNotice(text) {
+    const t = String(text || '').trim();
+    if (!t || t.length > 400) return '';
+    return IMAGE_QUOTA_PATTERNS.some((re) => re.test(t)) ? t.replace(/\s+/g, ' ').slice(0, 200) : '';
+  }
+
   let S = { ...DEFAULT_SELECTORS };
   let LIMITS = [...DEFAULT_LIMIT_PATTERNS];
 
@@ -1199,6 +1234,20 @@
         const turn = assistantAfter(anchor);
         if (!turn) return;
 
+        /**
+         * ประกาศโควตาภาพหมดมาแทนภาพ — จบทันที ไม่ต้องรอจนหมดเพดาน
+         *
+         * มันเป็นคำตอบที่สมบูรณ์แล้วในตัวเอง ไม่มีภาพตามมาทีหลังแน่นอน
+         * รอต่ออีกเก้าสิบวินาทีจึงเป็นการนั่งดูคำตอบที่อ่านจบไปแล้ว
+         */
+        if (!turn.querySelector('img')) {
+          const quota = imageQuotaNotice(turn.innerText);
+          if (quota) {
+            report(turnId, 'received', `ChatGPT แจ้งว่าโควตาสร้างภาพหมด: ${quota}`);
+            return finish('rate_limited');
+          }
+        }
+
         // ยังคิดอยู่ ไม่ว่าหน้าเว็บจะนิ่งแค่ไหนก็ยังไม่ใช่คำตอบ
         if (isThinkingOnly(turn) && !turn.querySelector('img')) return;
 
@@ -2105,11 +2154,27 @@
           idleGiveUpMs: opts.imageIdleMs ?? 90000,
           startMs: opts.startMs ?? 120000,
         });
-        if (r.status === 'rate_limited') return { turnId, status: 'rate_limited', text: '' };
+        if (r.status === 'rate_limited') {
+          // ข้อความที่หน้าเว็บบอก (เช่น "อีก 4 ชั่วโมงค่อยลองใหม่") คือข้อมูลเดียวที่วางแผนต่อได้
+          const said = readAnswer(anchor).text;
+          return { turnId, status: 'rate_limited', text: said, meta: { limit: imageQuotaNotice(said) } };
+        }
 
         const { text: imgText, blocks: imgBlocks } = readAnswer(anchor);
         const captured = r.captured || { dataUrl: '', src: '', errors: [] };
         const images = r.images || [];
+
+        /**
+         * ไม่ได้ภาพ + คำตอบคือประกาศโควตาภาพหมด = หยุด ไม่ใช่ลองใหม่
+         *
+         * ต่างจากความล้มอื่นตรงที่ลองใหม่ไม่มีทางสำเร็จ หน้าเว็บบอกเวลามาแล้วว่าอีกกี่ชั่วโมง
+         * ปล่อยให้วนต่อคือเผาเวลาและเทิร์นข้อความไปกับงานที่รู้อยู่แล้วว่าทำไม่ได้
+         */
+        const quota = captured.dataUrl ? '' : imageQuotaNotice(imgText);
+        if (quota) {
+          report(turnId, 'received', `ChatGPT แจ้งว่าโควตาสร้างภาพหมด — หยุดงานภาพไว้ก่อน: ${quota}`);
+          return { turnId, status: 'rate_limited', text: imgText, meta: { limit: quota } };
+        }
         if (captured.dataUrl) completedImageTurn = { anchor, at: Date.now(), src: captured.src || images[0] || '' };
         report(
           turnId,

@@ -11,6 +11,7 @@
 
 import { stripZwsp } from './thai.js';
 import { backMatterSections } from './references.js';
+import { stripEchoedHeading } from './extract.js';
 
 const MM_TO_TWIP = 56.6929;
 const tw = (mm) => Math.round(mm * MM_TO_TWIP);
@@ -66,7 +67,8 @@ export async function buildDocx({ book, outline, sections }) {
     for (const s of ch.sections) {
       // ใส่เลขตอนไว้หน้าชื่อ เพื่อให้จับคู่กลับได้ตอนนำเข้า และตัดออกก่อนทำ PDF
       body.push(para(`${s.id} ${esc(s.title)}`, { style: 'Heading2', font: head, size: size * 1.25, bold: true }));
-      const md = stripZwsp(byId.get(s.id)?.md || '');
+      // หัวข้อของตอนถูกพิมพ์ไปแล้วบรรทัดบน เนื้อหาไม่ต้องทวนชื่อตัวเองอีก
+      const md = stripZwsp(stripEchoedHeading(byId.get(s.id)?.md || '', s));
       if (!md.trim()) {
         body.push(para('(ยังไม่มีเนื้อหา)', { font, size, color: '999999' }));
         continue;

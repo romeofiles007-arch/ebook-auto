@@ -57,6 +57,7 @@ function showCrew(crew) {
   if (!activeIds.length) return;
   crewState = { ...crew, id: activeIds[0], ids: activeIds };
   const el = $('panelCrew');
+  el.dataset.room = activeIds[0];
   const art = el.querySelector('.crew-active-art');
   art.innerHTML = activeIds.map((id) => crewMarkup(id, 'crew-art')).join('');
   const backdrop = el.querySelector('.crew-backdrop .crew-strip');

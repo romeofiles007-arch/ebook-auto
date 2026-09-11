@@ -144,5 +144,15 @@ export async function selectReferencesAutomatically(choose) {
         : `ค้น ${result.searches} รอบ ได้ ${selected.length} แหล่งจากเป้า ${MIN_REFERENCES} — ใช้เท่าที่มีจริง ไม่เติมให้ครบเอง`,
     );
     return { found: selected.length, searches: result.searches };
+  } catch (e) {
+    /**
+     * ด่านสุดท้าย — ขั้นคัดแหล่งต้องล้มโดยไม่พาการสร้างหนังสือล้มตาม
+     *
+     * บรรณานุกรมเป็นของเสริมที่ผู้ใช้ติ๊กเพิ่ม ไม่ใช่ส่วนที่ขาดไม่ได้ของเล่ม
+     * ข้างในมีทั้งบริการภายนอกและเทิร์นโมเดล ซึ่งล้มได้หลายทางกว่าที่เดาไว้ล่วงหน้าไหว
+     * แหล่งที่คัดได้ก่อนหน้ายังอยู่ครบ ผู้เรียกจึงเดินต่อด้วยเท่าที่มีได้ทันที
+     */
+    message(`คัดแหล่งอัตโนมัติไม่สำเร็จ: ${e?.message || e} — ใช้ ${selected.length} แหล่งที่คัดได้แล้ว แล้วเดินต่อ`);
+    return { found: selected.length, searches: 0, error: String(e?.message || e) };
   } finally {lock(false);}
 }

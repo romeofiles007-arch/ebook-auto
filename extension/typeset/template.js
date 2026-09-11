@@ -9,6 +9,7 @@
 import { prepareForTypeset, THAI_GAP } from '../core/thai.js';
 import { coverTextBaked, backCoverTextBaked } from '../core/prompts.js';
 import { referenceLines, REFERENCE_STYLES } from '../core/references.js';
+import { stripEchoedHeading } from '../core/extract.js';
 
 const mm = (v) => `${round(v)}mm`;
 const pt = (v) => `${round(v)}pt`;
@@ -326,7 +327,8 @@ export function buildDocument({ book, outline, sections, opts = {} }) {
     for (let sceneIndex = 0; sceneIndex < ch.sections.length; sceneIndex++) {
       const s = ch.sections[sceneIndex];
       const rec = secById.get(s.id);
-      const md = rec?.md?.trim();
+      // ตัวเรียงพิมพ์พิมพ์ชื่อตอนให้อยู่แล้ว เนื้อหาไม่ต้องทวนชื่อตัวเองอีกบรรทัด
+      const md = stripEchoedHeading(rec?.md, s).trim();
       if (!isFiction) body.push(`== ${inline(prepareForTypeset(s.title, lang))}`, '');
       else if (sceneIndex > 0) body.push('#align(center)[• • •]', '');
       if (md) {
@@ -343,7 +345,7 @@ export function buildDocument({ book, outline, sections, opts = {} }) {
   return `
 #set document(title: ${str(outline.title)}, author: ${str(book.author || '')})
 
-#set page(
+${patternPreamble(opts)}#set page(
   width: ${mm(trim.widthMm + bleed * 2)},
   height: ${mm(trim.heightMm + bleed * 2)},
   margin: (
@@ -388,7 +390,7 @@ export function buildDocument({ book, outline, sections, opts = {} }) {
 
 // บทใหม่ขึ้นหน้าขวาเสมอ และเว้นช่วงนำสายตาโดยไม่ดันหัวข้อให้ต่ำเกินไป
 #show heading.where(level: 1): it => {
-  pagebreak(to: "odd", weak: true)
+  pagebreak(to: "odd", weak: true)${markPatternPage(opts)}
   v(${round((trim.heightMm - t.marginsMm.top - t.marginsMm.bottom) * 0.16)}mm)
   block(text(size: ${pt(t.sizePt * 1.6)}, weight: 600, it.body))
   v(1em)
@@ -469,7 +471,7 @@ export function buildItemsDocument({ book, outline, items, opts = {} }) {
     const theme = (outline.themes || []).find((x) => String(x.n) === String(n));
     if (multiTheme && theme) {
       body.push(`#pagebreak(to: "odd", weak: true)
-#page(numbering: none)[
+#page(numbering: none)[${markPatternPage(opts, { markup: true })}
   #align(center + horizon)[
     #text(size: ${pt(size * 1.15)}, weight: 600)[${inline(prepareForTypeset(theme.title, lang))}]
   ]
@@ -489,7 +491,7 @@ export function buildItemsDocument({ book, outline, items, opts = {} }) {
   return `
 #set document(title: ${str(outline.title)}, author: ${str(book.author || '')})
 
-#set page(
+${patternPreamble(opts)}#set page(
   width: ${mm(trim.widthMm + bleed * 2)},
   height: ${mm(trim.heightMm + bleed * 2)},
   margin: (
@@ -581,14 +583,45 @@ ${mdToTypst(prepareForTypeset(sampleText, lang))}
 }
 
 /**
- * ลวดลายพื้นหลังที่พิมพ์ใต้ตัวหนังสือทุกหน้า
+ * ลวดลายพื้นหลัง — ลงเฉพาะหน้าที่ขึ้นหัวข้อ ไม่ใช่ทุกหน้า
  *
- * ไฟล์ถูกลดความเข้มมาแล้วตั้งแต่ตอนบันทึก จึงวางเต็มหน้าได้เลยโดยไม่ต้องลดความทึบซ้ำ
- * ใส่เฉพาะตอนที่มีไฟล์จริง ไม่งั้นคอมไพเลอร์จะล้มทั้งเล่มเพราะหาไฟล์ไม่เจอ
+ * เดิมปูทั้งเล่ม ซึ่งทำให้หน้าเนื้อหาธรรมดามีลายวิ่งอยู่ใต้ตัวหนังสือตลอดเวลา
+ * ลายที่ตั้งใจให้เป็นจุดเปลี่ยนบท กลายเป็นพื้นผิวประจำของทุกหน้าแล้วหมดความหมาย
+ * ตอนนี้ลายทำหน้าที่บอกว่า "ตรงนี้เริ่มของใหม่" หน้าเนื้อหาจึงสะอาดและอ่านง่ายขึ้น
+ *
+ * วิธีทำ: จดเลขหน้าที่หัวข้อไปตกไว้ใน state แล้วพื้นหลังของแต่ละหน้าค่อยถามว่า
+ * หน้านี้อยู่ในรายการนั้นไหม — พื้นหลังไม่ดันเนื้อหา การวนคำนวณของ Typst จึงลงตัวเสมอ
  */
+const PATTERN_FILE = 'page-pattern.png';
+const hasPattern = (opts) => (opts?.assetNames || []).includes(PATTERN_FILE);
+
+/** ประกาศที่ต้องอยู่ก่อน #set page — ไม่มีไฟล์ลายก็ไม่ต้องประกาศอะไรเลย */
+function patternPreamble(opts) {
+  return hasPattern(opts) ? `#let chapter-pages = state("chapter-pages", ())\n` : '';
+}
+
+/**
+ * ตัวจดว่าหัวข้อนี้ไปตกอยู่หน้าไหน
+ * ในกฎแสดงผลของหัวข้อเป็นโค้ดอยู่แล้ว แต่ในบล็อก markup ต้องมี # นำหน้า
+ */
+function markPatternPage(opts, { markup = false } = {}) {
+  return hasPattern(opts)
+    ? `
+  ${markup ? '#' : ''}context {
+    let p = here().page()
+    chapter-pages.update(pages => if pages.contains(p) { pages } else { pages + (p,) })
+  }`
+    : '';
+}
+
 function pageBackground(opts) {
-  return (opts?.assetNames || []).includes('page-pattern.png')
-    ? `\n  background: image("/img/page-pattern.png", width: 100%, height: 100%, fit: "cover"),`
+  return hasPattern(opts)
+    ? `
+  background: context {
+    if chapter-pages.final().contains(here().page()) {
+      image("/img/${PATTERN_FILE}", width: 100%, height: 100%, fit: "cover")
+    }
+  },`
     : '';
 }
 
@@ -827,17 +860,34 @@ ${body}`);
       return true;
     });
     if (unique.length) {
-      const title = `บรรณานุกรม (${REFERENCE_STYLES[book.referenceStyle || 'apa'] || 'APA 7'})`;
+      /**
+       * หัวหน้าบรรณานุกรมไม่ต้องประกาศว่าใช้รูปแบบอ้างอิงอะไร
+       * ชื่อสไตล์ในวงเล็บเป็นข้อมูลของคนทำเล่ม ไม่ใช่ของคนอ่าน — คนอ่านต้องการรู้แค่ว่า
+       * นี่คือรายการแหล่งที่มา ส่วนรูปแบบดูออกเองจากตัวรายการอยู่แล้ว
+       * ค่า book.referenceStyle ยังใช้จัดรูปแบบตัวรายการตามเดิม แค่ไม่ต้องพิมพ์ชื่อมันออกมา
+       */
+      const title = 'บรรณานุกรม';
       const lines = unique.map((r) => {
         if (typeof r === 'string') return T(r);
         const label = [r.publisher, r.title, r.date].filter(Boolean).join(' · ');
         const url = r.url ? ` \\\ ${T(r.url)}` : '';
         return `- ${T(label || r.url || 'แหล่งข้อมูล')}${url}`;
       }).join('\n\n');
+      /**
+       * ตัวอักษรเล็กลงและบรรทัดชิดขึ้น ให้อ่านเป็นรายการอ้างอิง ไม่ใช่เนื้อหาอีกบทหนึ่ง
+       * ใช้หน่วย em เพื่อให้ย่อตามขนาดตัวอักษรของเล่มนั้นเอง ไม่ใช่ผูกกับตัวเลขตายตัว
+       * ครอบไว้ใน #block เพื่อไม่ให้ขนาดนี้รั่วไปถึงหน้าเกี่ยวกับผู้เขียนที่ต่อท้ายกัน
+       */
+      const indent = (t) => String(t).split('\n').map((l) => (l ? `  ${l}` : l)).join('\n');
+      const seed = book.trendSeed?.trend ? `${T(`หัวข้อตั้งต้น: ${book.trendSeed.trend}`)}\n\n` : '';
       parts.push(`#pagebreak(to: "odd", weak: true)
 = ${title}
 
-${book.trendSeed?.trend ? `${T(`หัวข้อตั้งต้น: ${book.trendSeed.trend}`)}\n\n` : ''}${lines}`);
+#block(breakable: true)[
+  #set text(size: 0.82em)
+  #set par(leading: 0.5em, spacing: 0.8em, first-line-indent: 0pt)
+${indent(seed + lines)}
+]`);
     }
   }
 

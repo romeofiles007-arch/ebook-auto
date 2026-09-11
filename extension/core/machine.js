@@ -83,6 +83,58 @@ const SHORT_GIVEUP = 2;
  * การนับรวมมันเข้าไปในเพดานเดียวกัน ทำให้ระบบยอมแพ้ทั้งที่ยังไม่เคยได้คุยกับ ChatGPT ด้วยซ้ำ
  * — นี่คือสาเหตุที่งานหยุดบ่อยแล้วต้องมากดปุ่มเองทั้งที่ไม่มีอะไรเสียหาย
  */
+/**
+ * เพดานตัวอักษรของคำสั่งด่านตรวจภาพหนึ่งก้อน
+ *
+ * วัดจากของที่ระบบนี้พิมพ์ลงช่องของ ChatGPT สำเร็จอยู่แล้วทุกเล่ม ไม่ใช่จากความรู้สึก:
+ * styleTokenPrompt ยาว 12,300 ตัวอักษร และเป็นเทิร์นที่อยู่ก่อนงานภาพหนึ่งขั้นพอดี
+ * งานที่เดินมาถึงหน้าประตูภาพได้ แปลว่าเพิ่งพิมพ์ข้อความขนาดนั้นผ่านมาหมาด ๆ
+ *
+ * เพดานจึงไม่ใช่ "ยิ่งเล็กยิ่งดี" — เวลาส่วนใหญ่หมดไปกับค่าคงที่ต่อเทิร์น (รอหน้าเว็บว่าง
+ * เปิดห้องใหม่ รอคำตอบ) ก้อนเล็กเกินไปคือจ่ายค่านั้นซ้ำโดยไม่ได้อะไรกลับมา
+ * ที่พังจริงคือก้อนเดียวสองหมื่นกว่าตัวอักษร ซึ่งใหญ่กว่านี้เกือบสองเท่า
+ */
+const AUDIT_BATCH_CHARS = 12000;
+
+/**
+ * ลายเซ็นสั้น ๆ ของข้อความ — ใช้จำว่าคำสั่งฉบับนี้ผ่านการตรวจไปแล้ว
+ *
+ * เทียบด้วยความยาวอย่างเดียวไม่ได้ เพราะคำสั่งที่ถูกแก้โดยยาวเท่าเดิมจะถูกนับว่า "ของเดิม"
+ * แล้วผลตรวจของฉบับก่อนหน้าจะถูกเอามาใช้กับข้อความที่ไม่เคยมีใครอ่าน
+ */
+const promptKey = (text) => {
+  const s = String(text || '');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${s.length}.${(h >>> 0).toString(36)}`;
+};
+
+/**
+ * ซอยรายการเป็นก้อนตามงบ ไม่ใช่ตามจำนวนชิ้น
+ *
+ * ของที่ซอยคือคำสั่งภาพซึ่งยาวไม่เท่ากันเลย ตัดที่ "สองฉบับต่อก้อน" จึงได้ก้อนที่ใหญ่เกิน
+ * เมื่อคำสั่งยาว และเล็กเกินจำเป็นเมื่อคำสั่งสั้น วัดขนาดจริงของก้อนแล้วตัดตรงนั้นดีกว่า
+ *
+ * ชิ้นที่ใหญ่เกินงบตั้งแต่ชิ้นเดียวยังต้องได้ไป เพราะซอยต่อไม่ได้แล้ว — ส่งไปแล้วปล่อยให้
+ * ด่านล่างจัดการ ดีกว่าเงียบหายไปโดยไม่มีใครอ่าน
+ */
+export function batchByBudget(items, sizeOf, budget) {
+  const out = [];
+  let cur = [];
+  for (const it of items) {
+    if (cur.length && sizeOf([...cur, it]) > budget) {
+      out.push(cur);
+      cur = [];
+    }
+    cur.push(it);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
 const NO_COST_ERRORS = new Set([
   'prompt_not_sent',
   'new_thread_not_ready',
@@ -106,6 +158,36 @@ const MAX_FREE_RETRIES = 4;
  */
 const MAX_BUSY_WAITS = 4;
 const BUSY_WAIT_MS = 20000;
+
+/**
+ * รอบนี้ยังไม่ได้ภาพ — ห้ามเปิดห้องแชตใหม่ทันที
+ *
+ * รอบใหม่ทุกรอบเริ่มด้วยการเปิดห้องแชตใหม่ และห้องเก่าที่ถูกทิ้งไว้พาภาพในห้องนั้นไปด้วย
+ * เห็นกับตา: รายการแชตมีห้อง "วาดภาพ..." ที่ยังหมุนอยู่ค้างเรียงกันหลายห้อง
+ * แล้วภาพที่วาดเสร็จในห้องเหล่านั้นไม่เคยถูกเก็บเลยสักใบ ทั้งที่จ่ายโควตาไปเต็มราคา
+ *
+ * ต้นเหตุคือจังหวะ ไม่ใช่ตัวคว้าภาพ: โมเดลสายคิดก่อนตอบวาดเสร็จช้ากว่าที่เทิร์นจบ
+ * ฝั่งเราจึงอ่านว่า "ไม่มีภาพ" ทั้งที่ภาพกำลังจะขึ้นในอีกไม่กี่สิบวินาที
+ * ด่านนี้จึงยืนรออยู่ในห้องเดิมอีกหนึ่งนาที แล้วไล่คว้าเป็นระยะก่อนยอมทิ้งห้อง
+ * ได้ภาพเมื่อไรก็ไปต่อทันที ไม่ต้องรอจนครบ — เพดานนี้เป็นเวลาที่ยอมเสียตอนไม่ได้ภาพเท่านั้น
+ * การรอและการคว้าไม่ส่งอะไรใหม่ ไม่กินโควตา — ต่างจากการวาดซ้ำที่จ่ายเต็มราคาทุกใบ
+ */
+const LATE_IMAGE_GRACE_MS = 60000;
+const LATE_IMAGE_GAP_MS = 5000;
+
+/**
+ * คว้าภาพได้แล้วก็ยังห้ามรีบ — หยุดพักก่อนไปเปิดห้องใหม่ของรูปถัดไป
+ *
+ * "ได้ไฟล์แล้ว" ไม่เท่ากับ "ห้องนั้นทำงานเสร็จแล้ว" หน้าเว็บยังปิดท้ายเทิร์นของมันอยู่
+ * (เขียน URL ห้องใหม่ · ตั้งชื่อห้อง · คืนช่องพิมพ์) แล้วเราเด้งไปเปิดห้องใหม่ทับทันที
+ * ผลที่เห็น: ห้องชื่อเดียวกันโผล่ซ้อนกันสองห้องในรายการแชต ห้องหนึ่งค้างไม่จบ
+ * และรอบถัดไปมักเจอ "ยังทำเทิร์นก่อนหน้าอยู่" เพราะเข้าไปจังหวะที่หน้าเว็บยังไม่ว่าง
+ *
+ * ครึ่งนาทีตรงนี้ไม่กินโควตา และซื้อความเป็นระเบียบของห้องแชตทั้งรอบงานกลับมา
+ */
+const POST_IMAGE_SETTLE_MS = 30000;
+
+
 
 const isNoCostFailure = (res) =>
   res?.status !== 'ok' && NO_COST_ERRORS.has(String(res?.meta?.error || ''));
@@ -275,7 +357,7 @@ export class Machine {
       throw new Halt(res.meta.detail || 'ยังยืนยันผลเทิร์นไม่ได้ หยุดเพื่อป้องกันการส่งซ้ำ', 'outcome_unknown');
     if (res.meta?.error === 'previous_turn_running')
       throw new Halt('ChatGPT ยังทำเทิร์นก่อนหน้าอยู่ — ไม่กดหยุดหรือส่งงานทับ รอเทิร์นนั้นจบแล้วทำต่อ', 'previous_turn_running');
-    if (res.status === 'rate_limited') throw new RateLimited();
+    if (res.status === 'rate_limited') throw new RateLimited(res.meta?.limit || '');
     if (res.status === 'wrong_model')
       throw new Halt(
         `เว็บสลับโมเดลเป็น "${res.meta?.model}" ซึ่งไม่ตรงกับที่ตั้งไว้ — หยุดไว้ก่อน เพราะเนื้อหาคนละโมเดลจะโทนไม่เท่ากัน`,
@@ -611,9 +693,12 @@ ${P.NO_CITATION_RULE}
         // ตอนนี้หยุดสนิทและรอให้คนสั่งทำต่อ งานทั้งหมดถูกบันทึกไว้แล้ว
         this.job.status = 'rate_limited';
         this.job.resumeAt = null;
+        this.job.error = e.message || '';
         this.log(
           'warn',
-          `ชนลิมิตข้อความของ ChatGPT ที่ข้อความที่ ${this.turnNo} — หยุดแล้ว ไม่ลองต่อเอง กดทำต่อได้เมื่อโควตากลับมา`,
+          `ชนลิมิตของ ChatGPT ที่ข้อความที่ ${this.turnNo} — หยุดแล้ว ไม่ลองต่อเอง กดทำต่อได้เมื่อโควตากลับมา` +
+            // หน้าเว็บมักบอกมาด้วยว่าอีกกี่ชั่วโมง ซึ่งเป็นข้อมูลเดียวที่ใช้วางแผนต่อได้จริง
+            (e.message ? `\nChatGPT แจ้งว่า: ${e.message}` : ''),
         );
       } else if (e instanceof Halt) {
         this.job.status = 'paused';
@@ -1495,7 +1580,21 @@ ${P.NO_CITATION_RULE}
    * "ครบ" ต้องพิสูจน์ได้ ไม่ใช่เชื่อเอา จึงบังคับให้ตอบคำตัดสินรายตอนกลับมาทุกตอน
    * แล้วเทียบกับรายชื่อที่ส่งไป ตอนไหนไม่มีคำตัดสินคือตอนที่ยังไม่ถูกอ่าน ต้องถามซ้ำ
    */
-  static CONSISTENCY_BATCH_CHARS = 24000;
+  /**
+   * ก้อนที่ส่งให้บรรณาธิการอ่าน ต้องอยู่ใต้เส้นที่พิมพ์ลงช่องได้จริง
+   *
+   * เดิม 24,000 ตัวอักษร ซึ่งเกือบสองเท่าของคำสั่งที่ยาวที่สุดที่พิมพ์ผ่านทุกเล่ม
+   * (คำสั่งออกแบบปก 12,657 ตัวอักษร) และอยู่เหนือเส้นที่เคยพังจริงไปแล้ว
+   * อาการของการพังคือคำตอบกลับมาเป็นค่าว่าง ไม่ใช่ error ที่อ่านออก
+   * เห็นจริง: "ผลตรวจรอบที่ 2 อ่านเป็น JSON ไม่ได้ (ยาว 0 ตัวอักษร) · คำตอบว่างเปล่า"
+   *
+   * ตัวเลขนี้เป็นงบของ "เนื้อหา" อย่างเดียว หัวคำสั่งกินอีกราว 1,800 ตัวอักษร
+   * ตั้งไว้ 10,000 ทั้งฉบับจึงราว 11,800 ซึ่งอยู่ใต้เส้นที่พิมพ์ผ่านจริงทุกเล่ม
+   *
+   * ก้อนเล็กลงแปลว่าบทยาว ๆ ถูกซอยเป็นสองเทิร์นแทนหนึ่ง แพงขึ้นหนึ่งข้อความ
+   * แต่ถูกกว่าการส่งไปแล้วได้ค่าว่างกลับมา หรือค้างอยู่ที่ขั้นพิมพ์จนหมดเวลาสิบนาที
+   */
+  static CONSISTENCY_BATCH_CHARS = 10000;
 
   async consistency() {
     const chapters = this.book.outline.chapters;
@@ -1505,8 +1604,31 @@ ${P.NO_CITATION_RULE}
       const recs = [];
       for (const s of ch.sections) recs.push((await db.loadSection(this.book.id, s.id)) || s);
 
-      const r = await this.reviewChapterFully(ch, recs);
-      if (r) {
+      /**
+       * ด่านสุดท้ายของแผนกตรวจ — ล้มยังไงก็ต้องไม่ลากหนังสือทั้งเล่มล้มตาม
+       *
+       * ธงข้ามจาก reviewChapterFully ครอบแค่กรณี "อ่านผลไม่ออก" แต่ทางที่ล้มจริงมีมากกว่านั้น
+       * และทางที่แพงที่สุดคือเทิร์นค้างอยู่ที่ขั้นพิมพ์ Prompt จนหมดเวลาสิบนาที
+       * แล้วโยน Halt ทะลุขึ้นไปหยุดทั้งเล่ม (เห็นจริง: Turn 26 timeout ที่ 600.0 วินาที
+       * ตามด้วย "หยุดไว้ก่อน" ทั้งที่เนื้อหาที่เขียนเสร็จแล้วถูกบันทึกไว้ครบ)
+       *
+       * ผู้ใช้กดหยุดเอง กับโควตาหมด เป็นเรื่องของทั้งระบบ ไม่ใช่ของแผนกนี้ — สองอย่างนั้นยังหยุดจริง
+       */
+      let r;
+      try {
+        r = await this.reviewChapterFully(ch, recs);
+      } catch (e) {
+        if (e instanceof RateLimited || this.stopRequested) throw e;
+        r = { skipped: true, reason: `ตรวจบทนี้ไม่สำเร็จ (${e?.message || e})` };
+      }
+      if (r?.skipped) {
+        this.book.review ||= {};
+        this.book.review[ch.n] = {
+          coverage: { sections: recs.length, reviewed: 0, missed: recs.map((x) => String(x.id)), skipped: true, reason: r.reason },
+        };
+        noteTrouble({ step: 'consistency', symptom: 'review_unreadable', move: 'skip', detail: `บทที่ ${ch.n}: ${r.reason}`, by: 'เครื่องผลิต' });
+        this.log('warn', `บทที่ ${ch.n}: ${r.reason} — ข้ามการตรวจบทนี้ไว้ก่อน แล้วทำบทถัดไปต่อ · ด่านก่อนส่งออกจะเตือนให้ตรวจใหม่`);
+      } else if (r) {
         B.setChapterSummary(this.book.bible, ch.n, r.chapter_summary || '');
         const issues =
           (r.duplicates?.length || 0) +
@@ -1643,7 +1765,18 @@ ${P.NO_CITATION_RULE}
           if (await run(batch, act === 'new_thread' ? 'ตรวจใหม่ในห้องแชตใหม่' : 'ตรวจใหม่อีกรอบ', act === 'new_thread')) any = true;
         }
       }
-      if (!any) throw new Halt(`บรรณาธิการบทที่ ${ch.n} ยังไม่ส่งผลตรวจที่อ่านได้ — กดทำต่อเพื่อตรวจใหม่`);
+      /**
+       * อ่านผลตรวจไม่ได้ = ข้ามการตรวจบทนี้ ไม่ใช่หยุดหนังสือทั้งเล่ม
+       *
+       * แผนกนี้ไม่ได้ผลิตเนื้อหาลงในเล่มสักบรรทัด มันทำให้เนื้อหาที่เขียนเสร็จแล้วดีขึ้น
+       * การหยุดทั้งเล่มเพราะมันอ่านผลไม่ออก จึงเป็นการทิ้งงานที่เขียนเสร็จแล้วไว้กลางทาง
+       * เพื่อรอสิ่งที่ไม่ได้ขาดไม่ได้ (เห็นจริง: ค้างที่บทที่ 2 อยู่ 1,727 วินาที
+       * เพราะคำตอบกลับมาเป็นค่าว่าง 0 ตัวอักษรสองรอบติด)
+       *
+       * แต่ห้ามนับว่าบทนี้ผ่านการตรวจแล้วเด็ดขาด — บันทึกไว้ว่าข้าม
+       * แล้วด่านก่อนส่งออกจะปัดกลับมาเองพร้อมบอกว่าต้องตรวจบทไหนใหม่
+       */
+      if (!any) return { skipped: true, reason: `บรรณาธิการไม่ส่งผลตรวจที่อ่านได้สองรอบติด${lastReviewText ? '' : ' (คำตอบว่างเปล่า)'}` };
     }
 
     /**
@@ -1667,7 +1800,9 @@ ${P.NO_CITATION_RULE}
 
     const finalGot = new Set((merged.section_verdicts || []).map((v) => String(v?.section || '')));
     const stillMissed = want.filter((id) => !finalGot.has(id));
-    if (stillMissed.length) throw new Halt(`บรรณาธิการยังตรวจไม่ครบ: ${stillMissed.join(', ')} — หยุดก่อนนับว่าผ่าน กดทำต่อเพื่อตรวจบทนี้ใหม่`);
+    // ตรวจไม่ครบ = บันทึกตามจริงแล้วเดินต่อ ด่านก่อนส่งออกอ่าน coverage นี้แล้วปัดกลับเอง
+    if (stillMissed.length)
+      this.log('warn', `บทที่ ${ch.n}: ยังไม่ได้คำตัดสินของตอน ${stillMissed.join(', ')} — บันทึกไว้ว่ายังไม่ได้ตรวจ แล้วทำบทถัดไปต่อ · ด่านก่อนส่งออกจะเตือนให้ตรวจใหม่`);
     merged.coverage = {
       sections: want.length,
       reviewed: want.length - stillMissed.length,
@@ -2583,7 +2718,17 @@ ${P.NO_CITATION_RULE}
    * เป็นเทิร์นข้อความล้วน ไม่กินโควตาภาพ และจำผลไว้ ถ้าคำสั่งชุดเดิมไม่เปลี่ยนก็ไม่ยิงซ้ำ
    */
   async auditImagePrompts(jobs) {
-    const sig = jobs.map((j) => `${j.name}:${j.prompt.length}`).join('|');
+    /**
+     * ตรวจ "ข้อความที่จะถูกส่งจริง" ไม่ใช่ฉบับดิบที่เก็บไว้
+     *
+     * เทิร์นวาดภาพส่ง compactImagePrompt(prompt) ออกไป ไม่ใช่ prompt เต็ม แต่ด่านนี้เคยอ่าน
+     * ฉบับเต็ม ผลคือมันตรวจคนละข้อความกับที่ออกไปจริง และบางข้อที่มันทักก็คือท่อนที่ตัวบีบอัด
+     * จะตัดทิ้งอยู่แล้ว — เสียเทิร์นไปกับปัญหาที่ไม่มีวันเกิด
+     *
+     * อ่านฉบับเดียวกับที่ส่งจึงได้สองอย่างพร้อมกัน: ตรวจตรงกับความจริง และสั้นลงมาก
+     * เพราะทุกฉบับถูกตัดมาไม่เกินเพดานของตัวบีบอัดแล้ว
+     */
+    const views = jobs.map((j) => ({ job: j, text: P.compactImagePrompt(j.prompt) }));
     const apply = (fixes = {}) => {
       let n = 0;
       for (const j of jobs) {
@@ -2601,77 +2746,164 @@ ${P.NO_CITATION_RULE}
       return n;
     };
 
-    const cached = this.book.imagePromptAudit;
-    if (cached?.sig === sig) {
-      const n = apply(cached.fixes);
-      this.log('ok', `แผนกพิสูจน์คำสั่งภาพ: ใช้ผลตรวจเดิมของคำสั่งชุดนี้${n ? ` · แก้ ${n} ฉบับ` : ' · ไม่มีอะไรต้องแก้'}`);
-      return;
-    }
-
-    this.log('ok', `แผนกพิสูจน์คำสั่งภาพ: กำลังอ่านคำสั่งทั้ง ${jobs.length} ฉบับก่อนเริ่มวาด (เทิร์นข้อความ ไม่กินโควตาภาพ)`);
-
-    let parsed = null;
-    try {
-      const res = await this.turnWithRetry(P.imagePromptAuditPrompt(this.book, jobs, this.book.outline), {
-        label: 'พิสูจน์คำสั่งภาพ',
-        newThread: this.wantNewThread(true),
-      });
-      parsed = X.parseJson(res.text);
-    } catch (e) {
-      if (e instanceof RateLimited || e instanceof Halt) throw e;
-      this.log('warn', `แผนกพิสูจน์คำสั่งภาพ: ตรวจไม่สำเร็จ (${e?.message || e}) — ใช้คำสั่งเดิมไปก่อน`);
-      return;
-    }
-
-    const checks = Array.isArray(parsed?.checks) ? parsed.checks : null;
-    if (!checks) {
-      this.log('warn', 'แผนกพิสูจน์คำสั่งภาพ: อ่านคำตอบไม่ออก — ใช้คำสั่งเดิมไปก่อน');
-      return;
-    }
-
+    /**
+     * จำเป็น "รายฉบับ" ไม่ใช่จำทั้งชุด
+     *
+     * ของเดิมจำด้วยลายเซ็นรวมของทุกฉบับ แก้คำสั่งใบเดียวก็ต้องตรวจใหม่ทั้งชุด
+     * ทั้งที่อีกหกใบเป็นข้อความเดิมเป๊ะที่เพิ่งผ่านการตรวจไปเมื่อกี้
+     * จำรายฉบับแล้วรอบที่สองของเล่มเดียวกันแทบไม่ต้องส่งอะไรเลย
+     */
+    const store = (this.book.imagePromptAudit ||= {});
+    const seen = (store.seen ||= {});
     const fixes = {};
-    const findings = [];
-    for (const c of checks) {
-      const job = jobs.find((j) => j.name === c?.name);
-      if (!job) continue;
-      const issues = (Array.isArray(c.issues) ? c.issues : []).filter(Boolean);
-      const fixed = String(c.fixed_prompt || '').trim();
+    const findings = Array.isArray(store.findings) ? store.findings.slice(0, 0) : [];
+    const todo = [];
+    let reused = 0;
+    for (const v of views) {
+      const hit = seen[promptKey(v.text)];
+      if (!hit) {
+        todo.push(v);
+        continue;
+      }
+      reused++;
+      if (hit.fix) fixes[v.job.name] = hit.fix;
+    }
 
-      /**
-       * คำสั่งที่แก้แล้วต้องยาวพอจะเป็นคำสั่งจริง ไม่ใช่คำแนะนำสั้น ๆ
-       *
-       * ถ้าโมเดลตอบกลับมาเป็น "ควรตัดท่อนที่ขัดกันออก" แล้วเราเอาไปใช้แทนคำสั่งเต็ม
-       * เราจะส่งข้อความสามบรรทัดเข้าเครื่องมือสร้างภาพแทนบรีฟทั้งฉบับ
-       * ด่านที่ตั้งมาเพื่อกันของพัง จะกลายเป็นตัวทำพังเสียเอง
-       */
-      const usable = fixed && fixed.length >= 200 && fixed.length >= job.prompt.length * 0.3;
-      if (fixed && !usable) {
-        findings.push({ name: job.name, what: job.what, issues, rejected: true });
+    if (!todo.length) {
+      const n = apply(fixes);
+      this.log('ok', `แผนกพิสูจน์คำสั่งภาพ: คำสั่งทั้ง ${jobs.length} ฉบับเคยตรวจแล้ว ไม่ต้องส่งซ้ำ${n ? ` · ใช้ฉบับที่แก้ไว้ ${n} ฉบับ` : ''}`);
+      return;
+    }
+
+    /**
+     * ซอยเป็นก้อนที่พิมพ์ลงช่องของ ChatGPT ได้จริง
+     *
+     * คำสั่งของด่านนี้คือคำสั่งภาพทุกฉบับต่อกัน = ข้อความยาวที่สุดที่ระบบเคยพิมพ์
+     * เจ็ดใบรวมกันได้สองหมื่นกว่าตัวอักษร ซึ่งเกินเส้นที่เคยพังจริง (แปดพัน) ไปเกือบสามเท่า
+     * แล้วจบที่ ProseMirror รับไม่ครบ · เทียบข้อความไม่ตรง · วนพิมพ์ใหม่จนหมดเวลา
+     *
+     * เพดานตั้งไว้ใต้เส้นนั้น และซอยตามงบตัวอักษรไม่ใช่จำนวนใบ เพราะคำสั่งยาวไม่เท่ากัน
+     * ไม่ซอยเล็กกว่านี้เพราะเวลาส่วนใหญ่หมดไปกับค่าคงที่ต่อเทิร์น (รอหน้าเว็บว่าง เปิดห้อง
+     * รอคำตอบ) ก้อนเล็กเกินไปคือจ่ายค่านั้นซ้ำโดยไม่ได้อะไรกลับมา
+     */
+    const batches = batchByBudget(
+      todo,
+      (group) => P.imagePromptAuditPrompt(this.book, group.map((v) => ({ ...v.job, prompt: v.text })), this.book.outline).length,
+      AUDIT_BATCH_CHARS,
+    );
+
+    this.log(
+      'ok',
+      `แผนกพิสูจน์คำสั่งภาพ: อ่านคำสั่ง ${todo.length} ฉบับก่อนเริ่มวาด` +
+        `${reused ? ` (อีก ${reused} ฉบับเคยตรวจแล้ว)` : ''}` +
+        ` · ซอยเป็น ${batches.length} ก้อน (เทิร์นข้อความ ไม่กินโควตาภาพ)`,
+    );
+
+    const notes = [];
+    let audited = 0;
+    for (let b = 0; b < batches.length; b++) {
+      const group = batches[b];
+      let parsed = null;
+      try {
+        const res = await this.turnWithRetry(
+          P.imagePromptAuditPrompt(this.book, group.map((v) => ({ ...v.job, prompt: v.text })), this.book.outline),
+          { label: 'พิสูจน์คำสั่งภาพ', newThread: this.wantNewThread(true) },
+        );
+        parsed = X.parseJson(res.text);
+      } catch (e) {
+        /**
+         * แผนกนี้ต้องล้มโดยไม่พาใครล้มตาม
+         *
+         * เดิม Halt ถูกส่งต่อขึ้นไป แปลว่างานทั้งเล่มหยุดเพราะด่านตรวจที่ตัวมันเองไม่ได้ผลิต
+         * อะไรลงในเล่มสักบรรทัด และเป็นด่านที่ล้มง่ายที่สุดด้วย — เห็นจริงบนจอ: ค้างที่ขั้น
+         * "พิมพ์ Prompt ลงช่อง" เกือบห้านาที ทั้งที่ภาพทุกใบมีคำสั่งพร้อมวาดอยู่แล้ว
+         *
+         * ผลตรวจเป็นของที่ "มีแล้วดีขึ้น" ไม่ใช่ของที่ขาดไม่ได้ ไม่มีก็ใช้คำสั่งเดิมไปวาดต่อ
+         * และก้อนที่ล้มต้องไม่ลากก้อนที่เหลือลงไปด้วย เพราะแต่ละก้อนเป็นงานคนละชิ้นกัน
+         * ยกเว้นโควตาหมด ซึ่งเป็นเรื่องของทั้งระบบ ไม่ใช่ของแผนกนี้ — อันนั้นต้องหยุดจริง
+         */
+        if (e instanceof RateLimited) throw e;
         this.log(
           'warn',
-          `แผนกพิสูจน์คำสั่งภาพ · ${job.what}: ส่งคำสั่งที่แก้แล้วมาสั้นผิดปกติ (${fixed.length} ตัวอักษร จากเดิม ${job.prompt.length}) — ไม่รับ ใช้ของเดิมแทน`,
+          `แผนกพิสูจน์คำสั่งภาพ · ก้อนที่ ${b + 1}/${batches.length}: ตรวจไม่สำเร็จ (${e?.message || e}) — ข้ามก้อนนี้ ใช้คำสั่งเดิมไปวาดต่อ`,
         );
         continue;
       }
-      if (usable) fixes[job.name] = fixed;
-      if (issues.length || usable) findings.push({ name: job.name, what: job.what, issues, fixed: !!usable });
-      if (issues.length) {
-        this.log(
-          usable ? 'ok' : 'warn',
-          `แผนกพิสูจน์คำสั่งภาพ · ${job.what}: ${issues.join(' · ')}${usable ? ' — แก้คำสั่งให้แล้ว' : ' — ไม่ได้แก้ ปล่อยผ่านไปก่อน'}`,
-        );
+
+      const checks = Array.isArray(parsed?.checks) ? parsed.checks : null;
+      if (!checks) {
+        this.log('warn', `แผนกพิสูจน์คำสั่งภาพ · ก้อนที่ ${b + 1}/${batches.length}: อ่านคำตอบไม่ออก — ใช้คำสั่งเดิมไปก่อน`);
+        continue;
+      }
+      if (parsed.notes) notes.push(String(parsed.notes));
+
+      /**
+       * "ไม่ถูกทัก" ก็คือผ่าน — ต้องจำไว้ด้วย ไม่ใช่จำเฉพาะฉบับที่มีคำตอบกลับมา
+       *
+       * โมเดลตอบเป็นรายฉบับก็จริง แต่มันข้ามฉบับที่ไม่มีอะไรจะพูดได้เสมอ
+       * ถ้าจำเฉพาะฉบับที่ถูกทัก ฉบับที่สะอาดที่สุดจะกลายเป็นฉบับที่ถูกส่งไปตรวจซ้ำทุกรอบ
+       */
+      audited += group.length;
+      for (const v of group) seen[promptKey(v.text)] ||= { ok: true };
+
+      for (const c of checks) {
+        const v = group.find((x) => x.job.name === c?.name);
+        if (!v) continue;
+        const job = v.job;
+        const issues = (Array.isArray(c.issues) ? c.issues : []).filter(Boolean);
+        const fixed = String(c.fixed_prompt || '').trim();
+
+        /**
+         * คำสั่งที่แก้แล้วต้องยาวพอจะเป็นคำสั่งจริง ไม่ใช่คำแนะนำสั้น ๆ
+         *
+         * ถ้าโมเดลตอบกลับมาเป็น "ควรตัดท่อนที่ขัดกันออก" แล้วเราเอาไปใช้แทนคำสั่งเต็ม
+         * เราจะส่งข้อความสามบรรทัดเข้าเครื่องมือสร้างภาพแทนบรีฟทั้งฉบับ
+         * ด่านที่ตั้งมาเพื่อกันของพัง จะกลายเป็นตัวทำพังเสียเอง
+         *
+         * เทียบกับความยาวของ "ฉบับที่ให้มันอ่าน" ไม่ใช่ฉบับดิบ ไม่งั้นเกณฑ์จะเข้มเกินจริง
+         * ตามส่วนที่ตัวบีบอัดตัดทิ้งไปก่อนแล้ว
+         */
+        const usable = fixed && fixed.length >= 200 && fixed.length >= v.text.length * 0.3;
+        if (fixed && !usable) {
+          findings.push({ name: job.name, what: job.what, issues, rejected: true });
+          this.log(
+            'warn',
+            `แผนกพิสูจน์คำสั่งภาพ · ${job.what}: ส่งคำสั่งที่แก้แล้วมาสั้นผิดปกติ (${fixed.length} ตัวอักษร จากเดิม ${v.text.length}) — ไม่รับ ใช้ของเดิมแทน`,
+          );
+          continue;
+        }
+        if (usable) fixes[job.name] = fixed;
+
+        /**
+         * จำทั้งฉบับที่ตรวจแล้ว และฉบับที่แก้ออกมา
+         *
+         * ฉบับที่แก้แล้วจะกลายเป็น prompt ตัวใหม่ของงานนี้ ถ้าไม่จำไว้ว่ามันผ่านแล้ว
+         * รอบถัดไปจะเห็นเป็นข้อความที่ไม่เคยตรวจ แล้วส่งไปตรวจซ้ำงานที่เพิ่งทำเสร็จ
+         */
+        seen[promptKey(v.text)] = usable ? { fix: fixed } : { ok: true };
+        if (usable) seen[promptKey(P.compactImagePrompt(fixed))] = { ok: true };
+
+        if (issues.length || usable) findings.push({ name: job.name, what: job.what, issues, fixed: !!usable });
+        if (issues.length) {
+          this.log(
+            usable ? 'ok' : 'warn',
+            `แผนกพิสูจน์คำสั่งภาพ · ${job.what}: ${issues.join(' · ')}${usable ? ' — แก้คำสั่งให้แล้ว' : ' — ไม่ได้แก้ ปล่อยผ่านไปก่อน'}`,
+          );
+        }
       }
     }
 
     const n = apply(fixes);
-    this.book.imagePromptAudit = { sig, at: Date.now(), fixes, findings, notes: String(parsed.notes || '') };
+    store.at = Date.now();
+    store.findings = findings;
+    store.notes = notes.join(' · ');
     await this.save();
-    if (parsed.notes) this.log('ok', `แผนกพิสูจน์คำสั่งภาพ · ข้อสังเกตรวม: ${parsed.notes}`);
+    if (store.notes) this.log('ok', `แผนกพิสูจน์คำสั่งภาพ · ข้อสังเกตรวม: ${store.notes}`);
     this.log(
       'ok',
       n
         ? `แผนกพิสูจน์คำสั่งภาพ: แก้คำสั่ง ${n} จาก ${jobs.length} ฉบับก่อนส่งออก`
-        : `แผนกพิสูจน์คำสั่งภาพ: คำสั่งทั้ง ${jobs.length} ฉบับผ่าน ไม่ต้องแก้`,
+        : `แผนกพิสูจน์คำสั่งภาพ: อ่านแล้ว ${audited} ฉบับ ไม่มีอะไรต้องแก้`,
     );
   }
 
@@ -2794,8 +3026,26 @@ ${P.NO_CITATION_RULE}
     this.job.imageThreadStarted = false;
     await this.save();
 
-    // ด่านตรวจคำสั่งก่อนเสียโควตาภาพแม้แต่รูปเดียว
-    await this.auditImagePrompts(jobs);
+    /**
+     * แผนกพิสูจน์คำสั่งภาพถูกปิดไว้ — ราคาไม่คุ้มกับสิ่งที่ได้
+     *
+     * มันส่งคำสั่งภาพ "ทุกฉบับ" เข้าไปให้อ่าน (ฉบับละไม่เกิน 2,600 ตัวอักษร คูณจำนวนภาพ)
+     * แล้วฉบับไหนถูกทัก มันต้องเขียนคำสั่งฉบับเต็มที่แก้แล้วกลับมาทั้งฉบับ
+     * คำตอบจึงยาวพอ ๆ กับที่ส่งไป และโมเดลสายคิดก่อนตอบเขียนช้ามาก
+     * เล่มหนึ่งกินเวลาเป็นชั่วโมงก่อนจะได้เริ่มวาดภาพใบแรกด้วยซ้ำ
+     * ถ้าคำตอบถูกตัดจน JSON พัง ก็ลองใหม่อีกรอบเต็ม ๆ แล้วอาจไม่ได้อะไรกลับมาเลย
+     *
+     * และมันไม่ได้ผลิตอะไรลงในเล่มสักบรรทัด — เป็นของที่ "มีแล้วดีขึ้น" ไม่ใช่ของที่ขาดไม่ได้
+     * ส่วนงานตรวจไฟล์ภาพที่ได้จริงก่อนประกอบเล่มยังอยู่ครบ นั่นเป็นโค้ดในเครื่อง ไม่เสียเวลา
+     *
+     * โค้ดกับคำสั่งยังอยู่ทั้งชุด เปิดกลับมาได้ด้วย book.auditImagePrompts = true
+     * ถ้าวันหนึ่งเจอคำสั่งที่เขียนเป็นงานแก้ภาพหลุดไปบ่อยจนคุ้มที่จะจ่ายเวลาตรงนี้
+     */
+    if (this.book.auditImagePrompts === true) {
+      await this.auditImagePrompts(jobs);
+    } else {
+      this.log('ok', `ข้ามแผนกพิสูจน์คำสั่งภาพ — ใช้คำสั่งที่เตรียมไว้ไปวาดเลย (เริ่มวาดได้ทันที ไม่ต้องรออ่านคำสั่ง ${jobs.length} ฉบับ)`);
+    }
 
     // ตัวทดสอบเครื่องมือสร้างภาพ ยิงครั้งเดียวต่อหนึ่งรอบงาน ไม่ใช่ต่อหนึ่งรูป
     for (let index = 0; index < jobs.length; index++) {
@@ -3052,7 +3302,10 @@ ${P.NO_CITATION_RULE}
             continue;
           }
           if (e instanceof Halt && e.code !== 'outcome_unknown') throw e;
-          const rescued = await this.grabRenderedImage(index, jobs.length, j, { tries: 4 });
+          const rescued = await this.grabRenderedImage(index, jobs.length, j, {
+            tries: Math.max(1, Math.round(LATE_IMAGE_GRACE_MS / LATE_IMAGE_GAP_MS)),
+            gapMs: LATE_IMAGE_GAP_MS,
+          });
           if (rescued?.dataUrl) {
             this.log(
               'ok',
@@ -3201,6 +3454,32 @@ ${P.NO_CITATION_RULE}
             this.log(
               'ok',
               `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ตัวตรวจจับไม่เห็นภาพ แต่ไปคว้าจากหน้าแชตมาได้เอง${grabbed.width ? ` (${grabbed.width}×${grabbed.height}px)` : ''}`,
+            );
+          }
+        }
+
+        /**
+         * ด่านสุดท้ายก่อนทิ้งห้องนี้ — ยืนรอในห้องเดิมอีกหนึ่งนาทีแล้วไล่คว้าเป็นระยะ
+         *
+         * ถึงตรงนี้แปลว่าทั้งตัวตรวจจับและการไล่คว้ารอบแรกยังไม่ได้ภาพ
+         * ก้าวถัดไปตามโค้ดคือขึ้นรอบใหม่ ซึ่งเปิดห้องแชตใหม่ทันที แล้วภาพที่ยังวาดอยู่
+         * ในห้องนี้จะหายไปพร้อมห้องโดยไม่มีใครได้เห็น (ผู้ใช้เห็นเป็นห้องหมุนค้างเรียงกัน)
+         * รอตรงนี้ไม่กินโควตาสักหน่วย แต่กันไม่ให้โควตาที่จ่ายไปแล้วสูญเปล่า
+         */
+        if (!url && !res.imageDataUrl && !useApi && !this.stopRequested) {
+          this.log(
+            'warn',
+            `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ยังไม่ได้ภาพ — ยังไม่เปิดห้องใหม่ รอในห้องเดิมอีก ${LATE_IMAGE_GRACE_MS / 1000} วินาทีแล้วไล่คว้าซ้ำ เพราะห้องเก่าถูกทิ้งแล้วภาพที่วาดเสร็จทีหลังจะหายไปด้วย`,
+          );
+          const late = await this.grabRenderedImage(index, jobs.length, j, {
+            tries: Math.max(1, Math.round(LATE_IMAGE_GRACE_MS / LATE_IMAGE_GAP_MS)),
+            gapMs: LATE_IMAGE_GAP_MS,
+          });
+          if (late?.dataUrl) {
+            res.imageDataUrl = late.dataUrl;
+            this.log(
+              'ok',
+              `ภาพ ${index + 1}/${jobs.length} · ${j.what}: ภาพวาดเสร็จช้ากว่าที่เทิร์นจบ — รอแล้วคว้ามาได้ก่อนเปิดห้องใหม่${late.width ? ` (${late.width}×${late.height}px)` : ''}`,
             );
           }
         }
@@ -3415,6 +3694,16 @@ ${P.NO_CITATION_RULE}
           };
           await this.save();
           try { await W.syncProject(this.book.id); } catch {}
+
+          /**
+           * ได้ภาพแล้วค่อย ๆ ถอยออกจากห้อง อย่าเด้งไปเปิดห้องใหม่ทันที
+           * รูปสุดท้ายไม่มีห้องใหม่ตามมา จึงไม่มีอะไรให้รอ
+           */
+          if (!useApi && index + 1 < jobs.length && !this.stopRequested) {
+            this.emit({ type: 'image.progress', stage: 'settle', current: index + 1, total: jobs.length, name: j.name, what: j.what });
+            this.log('ok', `ภาพ ${index + 1}/${jobs.length} · ${j.what}: เก็บภาพเรียบร้อย — พัก ${POST_IMAGE_SETTLE_MS / 1000} วินาทีให้ห้องนี้ปิดงานของมันก่อน แล้วค่อยเปิดห้องใหม่ของรูปถัดไป`);
+            await sleep(POST_IMAGE_SETTLE_MS);
+          }
         } catch (e) {
           lastError = e?.message || String(e);
           /**
@@ -4411,6 +4700,12 @@ class Halt extends Error {
     this.code = code;
   }
 }
+/**
+ * ชนลิมิต — พกเหตุผลที่หน้าเว็บบอกมาด้วย
+ *
+ * "ชนลิมิตข้อความ" กับ "โควตาสร้างภาพหมด อีกสี่ชั่วโมงค่อยมาใหม่" เป็นคนละเรื่องกัน
+ * และผู้ใช้ตัดสินใจต่างกันด้วย ข้อความที่หน้าเว็บบอกมาจึงต้องไปถึงหน้าจอ ไม่ใช่หายระหว่างทาง
+ */
 class RateLimited extends Error {}
 
 /**

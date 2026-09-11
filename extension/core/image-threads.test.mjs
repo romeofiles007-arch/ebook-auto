@@ -75,11 +75,21 @@ test('ลายพื้นหลังไปถึงเอกสารรา�
   assert.match(items, /pageCount\(isrc, ifiles\)/);
 });
 
-test('พื้นหลังถูกวางไว้หลังข้อความของหน้าเนื้อหา', async () => {
+test('พื้นหลังถูกวางไว้หลังข้อความ และลงเฉพาะหน้าที่ขึ้นหัวข้อ', async () => {
   const template = await readFile(new URL('../typeset/template.js', import.meta.url), 'utf8');
   // background ของ #set page คือชั้นที่อยู่ใต้เนื้อหาเสมอ และต้องอยู่ทั้งเอกสารร้อยแก้วและรายชิ้น
   assert.equal((template.match(/numbering: none,\$\{pageBackground\(opts\)\}/g) || []).length, 2);
-  assert.match(template, /background: image\("\/img\/page-pattern\.png"/);
+  assert.match(template, /image\("\/img\/\$\{PATTERN_FILE\}"/);
+  /**
+   * ลายเป็นเครื่องหมายว่า "ตรงนี้เริ่มของใหม่" ถ้าปูทุกหน้ามันก็ไม่ได้บอกอะไรอีก
+   * หน้าไหนได้ลายจึงต้องมาจากรายการหน้าที่หัวข้อไปตกจริง ไม่ใช่ปูดะทั้งเล่ม
+   */
+  assert.match(template, /background: context \{/);
+  assert.match(template, /chapter-pages\.final\(\)\.contains\(here\(\)\.page\(\)\)/);
+  // ตัวจดหน้าต้องอยู่ในกฎแสดงผลของหัวข้อ ไม่งั้นรายการจะว่างแล้วทั้งเล่มไม่มีลายเลย
+  assert.match(template, /pagebreak\(to: "odd", weak: true\)\$\{markPatternPage\(opts\)\}/);
+  // ประกาศ state ต้องมาก่อน #set page ทั้งสองเอกสาร ไม่งั้นคอมไพล์ไม่ผ่าน
+  assert.equal((template.match(/\$\{patternPreamble\(opts\)\}#set page\(/g) || []).length, 2);
 });
 
 
