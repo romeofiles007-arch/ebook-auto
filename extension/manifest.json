@@ -19,6 +19,7 @@
     "debugger"
   ],
   "host_permissions": [
+    "http://127.0.0.1/*",
     "https://api.crossref.org/*",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",

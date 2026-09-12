@@ -75,6 +75,24 @@ async function ensureStudioTab(focus = false) {
   return tab;
 }
 
+/**
+ * รีโหลดส่วนขยายด้วยตัวเอง = ฆ่าหน้า Studio ที่เปิดค้างอยู่ไปด้วย
+ *
+ * หน้า Studio คือสมองของทั้งระบบ (MV3 ฆ่า service worker ทุกสามสิบวินาที) ถ้าไม่มีใครเปิดคืน
+ * งานจะนอนค้างอยู่อย่างนั้นจนกว่าคนจะมาเปิดเอง ซึ่งพังจุดประสงค์ของการสั่งรีโหลดจากระยะไกลทั้งหมด
+ * ฝั่งที่สั่งจึงฝากธงไว้ก่อนเสมอ แล้วเราเปิดคืนให้ทันทีที่ฟื้น — ธงถูกล้างทิ้งหลังใช้ครั้งเดียว
+ * และหมดอายุเองถ้าค้างข้ามวัน เพื่อไม่ให้การเปิด Chrome ครั้งหน้าเด้งหน้านี้ขึ้นมาโดยไม่มีเหตุ
+ */
+(async () => {
+  try {
+    const { reopenStudioAfterReload: at } = await chrome.storage.local.get('reopenStudioAfterReload');
+    if (!at) return;
+    await chrome.storage.local.remove('reopenStudioAfterReload');
+    if (Date.now() - at > 300000) return;
+    await ensureStudioTab(false);
+  } catch (_) {}
+})();
+
 async function ensureChatTab() {
   let tab = null;
 

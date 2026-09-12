@@ -31,6 +31,7 @@ import { readReferenceSettings, validateBackMatterSetup, resetReferenceSources, 
 import { MIN_REFERENCES } from '../core/references.js';
 import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage, isModernCoverDesign, clearFigurePlan } from '../core/machine.js';
 import { makeTransport, hasPendingTurn } from '../transport/index.js';
+import { startControlLink } from './control-link.js';
 import {
   MODEL_PRICES,
   DEFAULT_TEXT_MODEL,
@@ -6615,3 +6616,61 @@ chrome.runtime
   .sendMessage({ type: 'sw.registerStudio', watchdog: true })
   .then((r) => handleUiCommand(r?.pending))
   .catch(() => {});
+
+// ---------- ท่อคุมจากเครื่องตัวเอง ----------
+/**
+ * ปุ่มที่ต้องกดตอนงานสะดุดอยู่ใน Chrome ทั้งหมด และหน้า chrome://extensions ก็แตะไม่ได้เลย
+ * เล่มที่ค้างตอนไม่มีคนเฝ้าจึงนอนรอจนกว่าจะมีคนมานั่งกด ท่อนี้เปิดทางให้สั่งจากบรรทัดคำสั่งแทน
+ * โดย Studio เป็นฝ่ายถามออกไปเอง — ไม่มีใครรับสาย = ไม่มีท่อ ซึ่งเป็นสภาพปกติของเครื่อง
+ */
+startControlLink({
+  snapshot: () => ({
+    step: book?.job?.step || '',
+    stepName: STEP_NAMES[book?.job?.step] || '',
+    status: book?.job?.status || '',
+    title: book?.meta?.title || book?.title || '',
+    error: book?.job?.error || '',
+    busy: machineBusy,
+    pendingTurn: hasPendingTurn(),
+    phase: lastProgressPhase || '',
+    quietSec: lastProgressAt ? Math.round((Date.now() - lastProgressAt) / 1000) : null,
+    idleSec: lastActivityAt ? Math.round((Date.now() - lastActivityAt) / 1000) : null,
+    unattended,
+    ceoStopped,
+    log: recentLogLines(),
+  }),
+  onNote: (why) => addEvent('system', why, 'สั่งจากท่อคุมบนเครื่องนี้'),
+  actions: {
+    /**
+     * เงื่อนไขเดียวกับปุ่ม "ทำต่อ" ของแผงข้างทุกประการ ไม่ใช่ทางลัดที่หลวมกว่า
+     * งานที่ยังวิ่งอยู่ต้องไม่ถูกสั่งซ้อน ไม่งั้นจะมีเครื่องผลิตสองตัวทำเล่มเดียวกัน
+     */
+    continue: async () => {
+      if (machineBusy || hasPendingTurn()) throw new Error('มีงานกำลังทำอยู่ — ไม่สั่งซ้อน');
+      if (!book?.job && !$('resume').dataset.bookId) throw new Error('ไม่มีงานค้างให้ทำต่อ');
+      resumeGo().catch(fail);
+      return `สั่งทำต่อจากขั้น ${STEP_NAMES[book?.job?.step] || book?.job?.step || '-'}`;
+    },
+    images: async () => {
+      if (machineBusy || hasPendingTurn() || phase2Running) throw new Error('มีงานกำลังทำอยู่ — ไม่สั่งซ้อน');
+      const step = book?.job?.step;
+      if (!['images', 'gate_images'].includes(step)) throw new Error(`ตอนนี้อยู่ขั้น ${STEP_NAMES[step] || step || '-'} ไม่ใช่ขั้นสร้างภาพ`);
+      startPhase2().catch(fail);
+      return 'สั่งทำต่อขั้นสร้างภาพ';
+    },
+    focus: async () => {
+      await focusChat();
+      return 'เปิดแท็บ ChatGPT ให้พร้อมแล้ว';
+    },
+    /**
+     * รีโหลดส่วนขยายจะฆ่าหน้านี้ทิ้งไปด้วย จึงต้องฝากไว้ก่อนว่า "ตั้งใจรีโหลด"
+     * ให้ service worker เปิด Studio คืนให้เองหลังฟื้น ไม่งั้นท่อจะขาดตรงนั้นและไม่มีใครต่อกลับได้
+     */
+    reload: async () => {
+      if (machineBusy || hasPendingTurn()) throw new Error('มีงานกำลังทำอยู่ — รีโหลดตอนนี้จะทิ้งงานกลางคัน');
+      await chrome.storage.local.set({ reopenStudioAfterReload: Date.now() });
+      setTimeout(() => chrome.runtime.reload(), 300);
+      return 'กำลังรีโหลดส่วนขยาย แล้วจะเปิด Studio คืนให้เอง';
+    },
+  },
+});
