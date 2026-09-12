@@ -15,7 +15,8 @@
  *   node extension/tools/control.mjs stop             สั่งหยุดรอบที่กำลังเดิน
  *   node extension/tools/control.mjs images           กดทำต่อขั้นสร้างภาพ
  *   node extension/tools/control.mjs focus            เปิดแท็บ ChatGPT ให้พร้อม
- *   node extension/tools/control.mjs reload           รีโหลดส่วนขยาย แล้วเปิด Studio คืนให้
+ *   node extension/tools/control.mjs refresh          โหลดหน้า Studio ใหม่ (รับโค้ดใหม่ฝั่ง Studio · ท่อต่อกลับเอง)
+ *   node extension/tools/control.mjs reload           รีโหลดทั้งส่วนขยาย (ต้องใช้เมื่อแก้ sw.js หรือสคริปต์ในหน้า ChatGPT)
  *
  * ตั้งพอร์ตอื่นได้ด้วย EBOOK_CONTROL_PORT (ต้องตั้งให้ตรงกับฝั่ง Studio ด้วย)
  */
@@ -24,7 +25,7 @@ import http from 'node:http';
 
 const PORT = Number(process.env.EBOOK_CONTROL_PORT || 8787);
 const HOST = '127.0.0.1';
-const COMMANDS = ['open', 'continue', 'images', 'fullauto', 'focus', 'stop', 'reload'];
+const COMMANDS = ['open', 'continue', 'images', 'fullauto', 'focus', 'stop', 'refresh', 'reload'];
 
 function serve() {
   /** คิวคำสั่ง — ตั้งใจให้ตื้น เพราะคำสั่งพวกนี้กินเวลาเป็นนาที การกองไว้เป็นสิบไม่มีความหมาย */
