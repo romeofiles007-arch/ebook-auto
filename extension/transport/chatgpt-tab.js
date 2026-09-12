@@ -128,7 +128,8 @@ export class ChatGptTabTransport {
        * running จึงเป็นสถานะที่จบเองเสมอ ไม่ใช่สถานะที่ค้างถาวร เราแค่ถามซ้ำทุกนาทีว่ายังทำอยู่ไหม
        * และยังมีเพดานรวมกันไว้ เผื่อกรณีที่หน้าเว็บถูกแช่แข็งจนไม่มีอะไรเดินต่อได้จริง ๆ
        */
-      const RUNNING_RECHECK_MS = 60000;
+      // เปิดให้ตั้งค่าได้ด้วยเหตุผลเดียวกับ outerTimeoutMs — ทดสอบพฤติกรรมตอนต่อเวลาได้โดยไม่ต้องนั่งรอสิบห้านาที
+      const runningRecheckMs = opts.runningRecheckMs ?? 60000;
       const runningMaxExtraMs = opts.runningMaxExtraMs ?? 900000;
       let extendedMs = 0;
       const expire = () => {
@@ -174,7 +175,7 @@ export class ChatGptTabTransport {
            * ไม่งั้นแถบสถานะจะนับ "ไม่ได้รับสัญญาณมา N วินาที" ต่อไปเรื่อย ๆ เหมือนไม่มีใครดูอยู่
            */
           if (found?.state === 'running' && extendedMs < runningMaxExtraMs) {
-            const add = Math.min(RUNNING_RECHECK_MS, runningMaxExtraMs - extendedMs);
+            const add = Math.min(runningRecheckMs, runningMaxExtraMs - extendedMs);
             extendedMs += add;
             p.timer = setTimeout(expire, add);
             p.onProgress({
