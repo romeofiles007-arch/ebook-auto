@@ -869,6 +869,14 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
   if (parse === parseTitleAnswer) opts = {...opts, expectedJsonKeys:['titles']};
   else if (parse === parseTrendAnswer) opts = {...opts, expectedJsonKeys:['topics','trends']};
   else if (opts.label === 'เสนอสารบัญหลายทาง') opts = {...opts, expectedJsonKeys:['directions']};
+  /**
+   * ขั้นเตรียมเล่มไม่เขียนอะไรลงเล่มเลย การส่งซ้ำจึงไม่ใช่ความเสี่ยงเดียวกับการเขียนเนื้อหา
+   *
+   * ดูกระแส · คิดชื่อ · เสนอสารบัญ ทั้งสามขั้นแค่ขอความเห็นกลับมาให้เลือก ยังไม่มีเล่ม
+   * ยังไม่มีตอน ยังไม่มีอะไรถูกบันทึก ต่อให้ส่งซ้ำจริงก็ได้แค่ชุดตัวเลือกเกินมาหนึ่งชุด
+   * ซึ่งเราหยิบชุดเดียวไปใช้อยู่แล้ว — ต่างจากขั้นเขียนเนื้อหาที่งานซ้อนแปลว่าเนื้อหาซ้อน
+   */
+  const prepStep = parse === parseTitleAnswer || parse === parseTrendAnswer || opts.label === 'เสนอสารบัญหลายทาง';
   let last = null;
   let bestPartial = null;
   let bestPartialWhy = '';
@@ -914,7 +922,24 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
     let fatal = false;
     if (res.status !== 'ok') {
       res.error = turnErrorMessage(res);
-      fatal = ['outcome_unknown','previous_turn_running'].includes(res.meta?.error) || !RETRYABLE_TURN_STATUS.has(res.status);
+      /**
+       * "ยืนยันผลไม่ได้" ลัดวงจรบันไดกู้ที่สร้างมาเพื่อกรณีนี้โดยเฉพาะ
+       *
+       * บันไดข้างล่าง (ห้องเดิม → ห้องใหม่ → โหลดแท็บใหม่) มีไว้แก้อาการนี้ตรง ๆ
+       * โดยเฉพาะขั้น "ห้องใหม่" ซึ่งลบความกำกวมทิ้งทั้งหมด: ห้องว่างไม่มีข้อความเก่าให้สับสน
+       * และของที่ค้างอยู่ในห้องเดิมก็ถูกทิ้งไว้ที่นั่น ไม่ตามมากวน
+       * แต่รหัสนี้ทำให้ return ออกไปก่อนถึงบันไดเสมอ ทุกขั้นจึงได้ลองแค่ครั้งเดียวจริง ๆ
+       *
+       * ผลที่เห็นจริง: โหมดอัตโนมัติเต็มรูปแบบตายที่ขั้นคิดชื่อ ยังไม่ได้เขียนสักตัวอักษร
+       * แล้วนอนค้างทั้งคืนโดยไม่มีใครมากู้ เพราะตัวกดต่อให้เองต้องมี job ก่อน ซึ่งยังไม่เกิด
+       *
+       * ความระวังเดิมยังอยู่ครบสำหรับขั้นที่ส่งซ้ำแล้วเสียหายจริง — ที่นี่ปลดเฉพาะขั้นเตรียมเล่ม
+       */
+      const unknownSubmission = ['outcome_unknown','previous_turn_running'].includes(res.meta?.error);
+      fatal = unknownSubmission ? !prepStep : !RETRYABLE_TURN_STATUS.has(res.status);
+      if (unknownSubmission && prepStep) {
+        addEvent('system', 'ยืนยันผลไม่ได้ แต่ขั้นนี้ลองใหม่ได้', `ขั้น ${opts.label || '-'} · ยังไม่มีอะไรถูกเขียนลงเล่ม — ไล่บันไดกู้ต่อ แทนที่จะหยุดทั้งรอบ`);
+      }
     } else if (parse) {
       let out;
       try {
@@ -6689,6 +6714,20 @@ startControlLink({
       if (!['images', 'gate_images'].includes(step)) throw new Error(`ตอนนี้อยู่ขั้น ${STEP_NAMES[step] || step || '-'} ไม่ใช่ขั้นสร้างภาพ${book?.job ? '' : ' (ยังไม่ได้หยิบเล่มกลับมา — สั่ง open ก่อน)'}`);
       startPhase2().catch(fail);
       return 'สั่งทำต่อขั้นสร้างภาพ';
+    },
+    /**
+     * เริ่มอัตโนมัติทั้งเล่ม — ปุ่มเดียวกับ 🚀 บนหน้าจอ ใช้ค่าที่ตั้งไว้ในฟอร์มทั้งหมด
+     * เป็นทางเดียวที่กู้รอบที่ตายก่อนมีเล่มได้ เพราะตอนนั้นยังไม่มี job ให้ "ทำต่อ"
+     */
+    fullauto: async () => {
+      if (machineBusy || hasPendingTurn()) throw new Error('มีงานกำลังทำอยู่ — ไม่สั่งซ้อน');
+      runFullAuto().catch(fail);
+      return 'สั่งเริ่มอัตโนมัติทั้งเล่ม';
+    },
+    /** หยุดรอบที่กำลังเดิน — งานถูกบันทึกไว้ครบ กลับมาทำต่อได้ */
+    stop: async () => {
+      stopRun('สั่งหยุดจากท่อคุมบนเครื่องนี้');
+      return 'สั่งหยุดแล้ว';
     },
     focus: async () => {
       await focusChat();

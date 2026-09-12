@@ -9,7 +9,10 @@
  *
  *   node extension/tools/control.mjs serve            เปิดท่อ (ค้างไว้ในหน้าต่างนี้)
  *   node extension/tools/control.mjs state            ดูว่า Studio กำลังทำอะไรอยู่
+ *   node extension/tools/control.mjs open             หยิบเล่มที่ยังไม่จบกลับมา
  *   node extension/tools/control.mjs continue         กด "ทำต่อ"
+ *   node extension/tools/control.mjs fullauto         กดเริ่มอัตโนมัติทั้งเล่ม
+ *   node extension/tools/control.mjs stop             สั่งหยุดรอบที่กำลังเดิน
  *   node extension/tools/control.mjs images           กดทำต่อขั้นสร้างภาพ
  *   node extension/tools/control.mjs focus            เปิดแท็บ ChatGPT ให้พร้อม
  *   node extension/tools/control.mjs reload           รีโหลดส่วนขยาย แล้วเปิด Studio คืนให้
@@ -21,7 +24,7 @@ import http from 'node:http';
 
 const PORT = Number(process.env.EBOOK_CONTROL_PORT || 8787);
 const HOST = '127.0.0.1';
-const COMMANDS = ['continue', 'images', 'focus', 'reload'];
+const COMMANDS = ['open', 'continue', 'images', 'fullauto', 'focus', 'stop', 'reload'];
 
 function serve() {
   /** คิวคำสั่ง — ตั้งใจให้ตื้น เพราะคำสั่งพวกนี้กินเวลาเป็นนาที การกองไว้เป็นสิบไม่มีความหมาย */
