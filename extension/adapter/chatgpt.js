@@ -88,7 +88,28 @@
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-  const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+  /**
+   * รอหนึ่งเฟรม — แต่ต้องเดินต่อได้แม้แท็บไม่ได้วาดเฟรมเลย
+   *
+   * requestAnimationFrame ผูกกับการวาดจอ แท็บที่ถูกซ่อน (อยู่หลังแท็บอื่น · หน้าต่างย่อลง ·
+   * จอดับ · ต่อผ่าน Remote Desktop ที่ตัดการวาด) จะไม่วาดเฟรมสักเฟรมเดียว callback จึงไม่ถูกเรียก
+   * และ await ตรงนี้ค้างถาวร ไม่มีอะไรมาปลดได้เลย
+   *
+   * ตัวนี้ถูกเรียกอยู่กลางขั้นพิมพ์ Prompt (injectText · clearComposer) ซึ่งเป็นขั้นที่ไม่มีเพดานเวลาของตัวเอง
+   * อาการที่ออกมาจึงตรงกับที่เห็นในบันทึกเป๊ะ ๆ: ค้างที่ขั้น "พิมพ์ Prompt ลงช่อง" 599 วินาที
+   * โดยแท็บยังตอบคำถามเราได้ปกติและยืนยันว่า "ยังทำเทิร์นนี้อยู่" — เพราะตัวรับข้อความยังทำงานดี
+   * มีแต่คิวของ runTurn เท่านั้นที่นอนรอเฟรมที่ไม่มีวันมา และนี่คือเหตุผลที่งานหยุดตอนไม่มีคนนั่งเฝ้า
+   * ซึ่งเป็นเวลาเดียวที่ระบบนี้ถูกออกแบบมาให้ทำงาน
+   *
+   * เดินด้วยนาฬิกาเป็นตัวสำรอง: แท็บที่เห็นอยู่ยังได้เฟรมจริงเหมือนเดิม (เร็วกว่า 250 มิลลิวินาทีเสมอ)
+   * ส่วนแท็บที่ถูกซ่อนก็ได้เดินต่อ ไม่ใช่ค้างรอ
+   */
+  const frame = () => new Promise((r) => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; r(); } };
+    requestAnimationFrame(fin);
+    setTimeout(fin, 250);
+  });
 
   /**
    * รอให้หน้านี้ได้โฟกัสจริง ก่อนจะแตะคลิปบอร์ด
@@ -2069,7 +2090,20 @@
        * สร้างใหม่หรือค้างเป็นวงกลมระหว่างที่เรากำลังหา element
        */
       try {
-        const native = await chrome.runtime.sendMessage({type:'sw.forceSend',text:prompt,requireDraft:true});
+        /**
+         * ต้องมีเพดานเวลาเหมือนฝั่งพิมพ์ ด้วยเหตุผลเดียวกันทุกประการ
+         *
+         * ปลายทางคือ chrome.debugger.attach ที่ไม่มีเพดานของตัวเอง แท็บที่ไม่ตอบสนองทำให้ callback
+         * ไม่ถูกเรียก แล้ว sendMessage รอไปเรื่อย ๆ — ตรงนี้เคยเป็น await เปล่า ๆ จึงค้างได้ถาวร
+         * ที่ขั้น "กดส่ง Prompt" ซึ่งเป็นอาการเดียวกับที่ฝั่งพิมพ์เคยเป็นและแก้ไปแล้ว
+         *
+         * หมดเวลาแล้วไม่ใช่จุดจบ: นับเป็น "ช่องทางเบราว์เซอร์ปฏิเสธก่อนแตะ input" แล้วตกไปใช้
+         * ปุ่มบนหน้าเป็นทางสำรอง ซึ่งเขียนรองรับไว้อยู่แล้วและตรวจใบเสร็จก่อนเสมอ จึงไม่ส่งซ้ำ
+         */
+        const native = await Promise.race([
+          chrome.runtime.sendMessage({type:'sw.forceSend',text:prompt,requireDraft:true}),
+          new Promise((r) => setTimeout(() => r({ ok: false, error: 'ให้เบราว์เซอร์กดส่งให้ไม่ตอบใน 45 วินาที' }), 45000)),
+        ]);
         sendError = native?.error || '';
         if (native?.ok) {
           fresh = await waitForDom(()=>findUserReceipt(prompt,userMessagesBefore),{timeoutMs:15000});

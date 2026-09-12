@@ -106,10 +106,34 @@ export class ChatGptTabTransport {
     const outerTimeoutMs = (opts.outerTimeoutMs ?? 600000) + attachMs; // bounded preparation, including an existing busy turn
     const startedAt = Date.now();
     return new Promise((resolve) => {
-      const complete = (result) => resolve({...result, meta:{...result.meta, elapsedMs:Date.now()-startedAt}});
+      const complete = (result) => {
+        pending.delete(turnId);
+        resolve({...result, meta:{...result.meta, elapsedMs:Date.now()-startedAt}});
+      };
+      /**
+       * "แท็บยังทำเทิร์นนี้อยู่" ไม่ใช่คำตอบที่แปลว่าให้ยอมแพ้ — มันแปลว่าให้รอต่อ
+       *
+       * เพดานรอบนอกสิบนาทีสั้นกว่าความยาวจริงของเทิร์นสร้างภาพ ทั้งที่ทุกช่วงเป็นการทำงานปกติ:
+       * รอหน้าพร้อม 60 + รอห้องว่าง 240 + แนบไฟล์ 45 + พิมพ์ 45 + รอคำตอบ 300 + รอภาพเรนเดอร์ 240
+       * บวกกันแล้วเกินสิบนาทีได้สบาย ๆ โดยไม่มีขั้นไหนค้างเลยสักขั้นเดียว
+       *
+       * พอครบเพดาน เราถามแท็บแล้วมันตอบว่า running ซึ่งเป็นคำตอบที่ชัดที่สุดในบรรดาสี่คำตอบ
+       * (แท็บเทียบ turnId กับเทิร์นที่มันถืออยู่ตรง ๆ ไม่ใช่การอนุมานจากสิ่งที่เห็นบนหน้าจอ)
+       * แต่เดิมเรายุบมันรวมกับ "ถามแท็บไม่ได้" เป็น outcome_unknown ซึ่งเป็นรหัสที่สั่งหยุดทั้งเล่ม
+       * และห้ามลองใหม่ทุกทาง งานภาพจึงถูกทิ้งกลางคันทุกครั้งที่เทิร์นยาวเกินสิบนาที
+       * ทั้งที่อีกไม่กี่สิบวินาทีก็ได้ภาพแล้ว แถมโควตาที่จ่ายไปกับเทิร์นนั้นก็สูญเปล่าไปด้วย
+       * (เห็นจริงในบันทึก: ค้างที่ขั้น "พิมพ์ Prompt ลงช่อง" 599 วินาที · แท็บบอกว่ายังทำอยู่ · หยุดไว้ก่อน)
+       *
+       * รอต่อได้อย่างปลอดภัย เพราะ runTurn ฝั่งหน้าเว็บมี try/catch ครอบทั้งตัวและทุกการรอมีเพดานของมันเอง
+       * running จึงเป็นสถานะที่จบเองเสมอ ไม่ใช่สถานะที่ค้างถาวร เราแค่ถามซ้ำทุกนาทีว่ายังทำอยู่ไหม
+       * และยังมีเพดานรวมกันไว้ เผื่อกรณีที่หน้าเว็บถูกแช่แข็งจนไม่มีอะไรเดินต่อได้จริง ๆ
+       */
+      const RUNNING_RECHECK_MS = 60000;
+      const runningMaxExtraMs = opts.runningMaxExtraMs ?? 900000;
+      let extendedMs = 0;
       const expire = () => {
         const p = pending.get(turnId);
-        pending.delete(turnId);
+        if (!p) return;
         /**
          * หมดเวลาแล้ว "ส่งไปหรือยัง" — คำตอบอยู่ที่ขั้นล่าสุดที่ไปถึง ไม่ใช่คำถามที่ตอบไม่ได้
          *
@@ -124,9 +148,11 @@ export class ChatGptTabTransport {
          * ไม่เคยได้ยินอะไรเลย (ไม่มีขั้นล่าสุด) ยังถือว่าไม่รู้ตามเดิม เพราะอาจเป็นได้ว่า
          * เทิร์นเดินไปแล้วแต่ข้อความความคืบหน้าหายระหว่างทาง — ตรงนั้นต้องระวังไว้ก่อน
          */
-        const phase = p?.lastPhase || '';
+        const phase = p.lastPhase || '';
         const where = PHASE_LABEL[phase] || phase || 'ไม่ทราบขั้น';
         probeTurn(turnId, prompt).then((found) => {
+          // ผลจริงวิ่งกลับมาระหว่างที่เรากำลังถามแท็บ (ถามได้นานถึง 15 วินาที) — เทิร์นจบไปแล้ว ไม่มีอะไรต้องตัดสิน
+          if (!pending.has(turnId)) return;
           /**
            * ผลอยู่ที่แท็บอยู่แล้ว แค่ข้อความแจ้งผลหายระหว่างทาง — เอากลับมาใช้ ไม่ต้องสั่งใหม่
            * นี่คือเทิร์นที่จ่ายโควตาไปแล้วและทำงานสำเร็จแล้ว การทิ้งมันคือการจ่ายซ้ำเปล่า ๆ
@@ -143,8 +169,24 @@ export class ChatGptTabTransport {
             } });
             return;
           }
+          /**
+           * ยังทำอยู่จริง = ต่อเวลาให้ ไม่ใช่ทิ้ง — และต้องบอกหน้าจอด้วยว่าต่อเพราะอะไร
+           * ไม่งั้นแถบสถานะจะนับ "ไม่ได้รับสัญญาณมา N วินาที" ต่อไปเรื่อย ๆ เหมือนไม่มีใครดูอยู่
+           */
+          if (found?.state === 'running' && extendedMs < runningMaxExtraMs) {
+            const add = Math.min(RUNNING_RECHECK_MS, runningMaxExtraMs - extendedMs);
+            extendedMs += add;
+            p.timer = setTimeout(expire, add);
+            p.onProgress({
+              type: 'gpt.progress',
+              turnId,
+              phase,
+              detail: `ครบเพดานเวลาแล้ว แต่ถามแท็บแล้วยืนยันว่ายังทำเทิร์นนี้อยู่ (ขั้น "${where}") — รอต่ออีก ${Math.round(add / 1000)} วินาที · ต่อเวลาไปแล้วรวม ${Math.round(extendedMs / 1000)} วินาที`,
+            });
+            return;
+          }
           const why = found?.state === 'running'
-            ? 'แท็บบอกว่ายังทำเทิร์นนี้อยู่'
+            ? `แท็บบอกว่ายังทำเทิร์นนี้อยู่ แต่ต่อเวลาให้จนครบ ${Math.round(runningMaxExtraMs / 1000)} วินาทีแล้วก็ยังไม่จบ`
             : found?.state === 'sent_unknown'
               ? 'ข้อความของเราขึ้นไปบนหน้าแล้วแต่ยังไม่ได้ผลกลับมา'
               : 'ถามแท็บไม่ได้';
