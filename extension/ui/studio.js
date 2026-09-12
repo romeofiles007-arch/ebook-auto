@@ -6643,14 +6643,17 @@ chrome.runtime
   .catch(() => {});
 
 // ---------- ท่อคุมจากเครื่องตัวเอง ----------
-/** เล่มที่ยังไม่จบและถูกแตะล่าสุด — ตรงกับเล่มที่คนจะเลือกเองจากประวัติโครงการ */
+/**
+ * เล่มที่ควรอยู่ในมือตอนนี้ — เล่มที่ยังไม่จบก่อน ถ้าไม่มีก็เล่มที่แตะล่าสุด
+ *
+ * "จบแล้ว" ไม่ได้แปลว่าไม่ต้องใช้อีก ขั้นส่งออกล้มแยกจากตัวเล่มได้ (เช่นประกอบปกไม่ผ่าน)
+ * แล้วเล่มที่เพิ่งเขียนเสร็จก็จะหยิบกลับมาสั่งซ้ำไม่ได้เลย ทั้งที่นั่นคือเล่มเดียวที่ต้องการ
+ */
 async function newestUnfinishedBook() {
-  const rows = await db.listBooks().catch(() => []);
-  return (
-    rows
-      .filter((b) => b?.job && b.job.step && b.job.step !== 'done')
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null
-  );
+  const rows = (await db.listBooks().catch(() => []))
+    .filter((b) => b?.job && b.job.step)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return rows.find((b) => b.job.step !== 'done') || rows[0] || null;
 }
 
 /**
