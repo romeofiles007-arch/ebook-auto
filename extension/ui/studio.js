@@ -6744,6 +6744,16 @@ startControlLink({
       setTimeout(() => location.reload(), 300);
       return 'กำลังโหลดหน้า Studio ใหม่ — ท่อจะต่อกลับเองในไม่กี่วินาที';
     },
+    /**
+     * ส่งออกไฟล์ — ปุ่มเดียวกับแถวส่งออกบนหน้าจอ (cover · book · interior · screen · epub · project · prompts)
+     * จำเป็นเพราะขั้นส่งออกอัตโนมัติล้มแยกจากตัวเล่มได้ แล้วเล่มที่เสร็จแล้วจะไม่มีทางสั่งซ้ำเลย
+     */
+    export: async ({ kind = 'cover' } = {}) => {
+      if (machineBusy || hasPendingTurn()) throw new Error('มีงานกำลังทำอยู่ — ไม่สั่งซ้อน');
+      if (!book?.id) throw new Error('ยังไม่มีเล่มอยู่ในมือ — สั่ง open ก่อน');
+      await runExport(kind);
+      return `สั่งส่งออก ${kind} · ${$('exportLog')?.textContent || ''}`;
+    },
     focus: async () => {
       await focusChat();
       return 'เปิดแท็บ ChatGPT ให้พร้อมแล้ว';

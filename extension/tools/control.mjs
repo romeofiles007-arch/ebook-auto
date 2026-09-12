@@ -25,7 +25,7 @@ import http from 'node:http';
 
 const PORT = Number(process.env.EBOOK_CONTROL_PORT || 8787);
 const HOST = '127.0.0.1';
-const COMMANDS = ['open', 'continue', 'images', 'fullauto', 'focus', 'stop', 'refresh', 'reload'];
+const COMMANDS = ['open', 'continue', 'images', 'fullauto', 'focus', 'stop', 'export', 'refresh', 'reload'];
 
 function serve() {
   /** คิวคำสั่ง — ตั้งใจให้ตื้น เพราะคำสั่งพวกนี้กินเวลาเป็นนาที การกองไว้เป็นสิบไม่มีความหมาย */
@@ -121,7 +121,8 @@ if (arg === 'serve') {
   const r = await ask('/state');
   console.log(JSON.stringify(r, null, 2));
 } else if (COMMANDS.includes(arg)) {
-  const r = await ask('/cmd', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd: arg }) });
+  const args = arg === 'export' ? { kind: process.argv[3] || 'cover' } : {};
+  const r = await ask('/cmd', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd: arg, args }) });
   console.log(JSON.stringify(r, null, 2));
 } else {
   console.log(`ใช้: node extension/tools/control.mjs <serve|state|${COMMANDS.join('|')}>`);

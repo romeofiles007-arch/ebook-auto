@@ -160,6 +160,43 @@ export async function exportBookPdf(book, sections) {
 }
 
 /** ปกกางเต็ม — ความกว้างคำนวณจากจำนวนหน้าสุดท้าย ไม่ใช่จำนวนหน้าเป้าหมาย */
+/**
+ * ภาพปกต้องเข้า Typst ทางเดียวกับภาพในเล่ม คือเป็นไฟล์จริง ไม่ใช่สตริง data URL
+ *
+ * ของเดิมยัด "data:image/png;base64,iVBOR..." ทั้งก้อนเข้า image.decode() ซึ่งรับได้แค่
+ * ไบต์ของภาพจริงหรือ SVG เป็นข้อความ พอได้สตริง data URL มามันจึงอ่านเป็นตัวอักษร ASCII
+ * แล้วตอบว่า "unknown image format" — ปกอัตโนมัติจึงล้มทุกครั้งไม่ว่าภาพจะดีแค่ไหน
+ * (ตัวเล่มไม่เจอปัญหานี้เพราะใช้ packAssets วางไฟล์ไว้ที่ /img/ แล้วอ้างด้วย #image ตามปกติ)
+ *
+ * นามสกุลไฟล์เอาจากชนิดจริงในหัว data URL ไม่ใช่เดาจากชื่อ asset ที่ลงท้าย .png ไว้เฉย ๆ
+ * เพราะภาพที่ดึงจากหน้า ChatGPT เป็น webp หรือ jpeg ก็ได้ และ Typst ดูนามสกุลเป็นตัวตัดสิน
+ */
+const EXT_BY_MIME = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+};
+
+function dataUrlToFile(name, dataUrl) {
+  const m = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(String(dataUrl || ''));
+  if (!m) return null;
+  const mime = (m[1] || 'image/png').toLowerCase();
+  const body = m[3] || '';
+  let bytes;
+  try {
+    bytes = m[2]
+      ? Uint8Array.from(atob(body), (c) => c.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(body));
+  } catch (_) {
+    return null;
+  }
+  if (!bytes.length) return null;
+  return { path: `/img/${name}.${EXT_BY_MIME[mime] || 'png'}`, bytes: bytes.buffer };
+}
+
 export async function exportCover(book, { frontDataUrl, backDataUrl, authorDataUrl } = {}) {
   const pages = book.finalPages || book.lastCompile?.pages || book.targetPages;
   const geo = coverGeometry({
@@ -169,13 +206,23 @@ export async function exportCover(book, { frontDataUrl, backDataUrl, authorDataU
     paper: book.paper || 'white',
     bleedMm: book.trim.bleedMm || 3,
   });
-  const src = coverTypst(book, geo, { frontDataUrl, backDataUrl, authorDataUrl });
-  const blob = await toPdf(src);
+  const files = [];
+  const place = (name, dataUrl) => {
+    const f = dataUrl ? dataUrlToFile(name, dataUrl) : null;
+    if (!f) return '';
+    files.push(f);
+    return f.path;
+  };
+  const frontPath = place('cover-front', frontDataUrl);
+  const backPath = place('cover-back', backDataUrl);
+  const authorPath = place('cover-author', authorDataUrl);
+  const src = coverTypst(book, geo, { frontPath, backPath, authorPath });
+  const blob = await toPdf(src, files);
   await download(blob, outFile(book, 'ปกกางเต็ม', 'pdf'));
   return { size: blob.size, geo };
 }
 
-function coverTypst(book, geo, { frontDataUrl, backDataUrl, authorDataUrl }) {
+function coverTypst(book, geo, { frontPath, backPath, authorPath }) {
   const baked = coverTextBaked(book);
   const bleed = book.trim.bleedMm || 3;
   const t = book.typography;
@@ -218,19 +265,19 @@ function coverTypst(book, geo, { frontDataUrl, backDataUrl, authorDataUrl }) {
   const titleHeightPct = (estimatedTitleLines * t.sizePt * titleZone.size * 1.12 / 72 * 25.4) / (Number(book.trim.heightMm) || 210) * 100;
   subtitleZone.y = Math.min(authorZone.y - 14, Math.max(subtitleZone.y, titleZone.y + titleHeightPct + 2.5));
 
-  const img = (dataUrl, w, h) =>
-    dataUrl
-      ? `#image.decode(${JSON.stringify(dataUrl)}, width: ${w}mm, height: ${h}mm, fit: "cover")`
+  const img = (path, w, h) =>
+    path
+      ? `#image(${JSON.stringify(path)}, width: ${w}mm, height: ${h}mm, fit: "cover")`
       : `#rect(width: ${w}mm, height: ${h}mm, fill: rgb("${accent}"))`;
 
   const fullW = geo.widthMm;
   const fullH = geo.heightMm;
   const panelW = book.trim.widthMm;
   const panelH = book.trim.heightMm;
-  const showAuthorPhoto = !!(book.authorPhotoOnCover && authorDataUrl);
+  const showAuthorPhoto = !!(book.authorPhotoOnCover && authorPath);
   const backTextY = bleed + (showAuthorPhoto ? 66 : 30);
   const authorPhotoBlock = showAuthorPhoto
-    ? `#place(top + left, dx: ${bleed + 12}mm, dy: ${bleed + 14}mm)[\n        #image.decode(${JSON.stringify(authorDataUrl)}, width: 30mm, height: 38mm, fit: \"cover\")\n      ]`
+    ? `#place(top + left, dx: ${bleed + 12}mm, dy: ${bleed + 14}mm)[\n        #image(${JSON.stringify(authorPath)}, width: 30mm, height: 38mm, fit: \"cover\")\n      ]`
     : '';
 
   return `
@@ -241,7 +288,7 @@ function coverTypst(book, geo, { frontDataUrl, backDataUrl, authorDataUrl }) {
   #stack(dir: ltr,
     // ---- ปกหลัง ----
     box(width: ${panelW + bleed}mm, height: ${fullH}mm)[
-      ${img(backDataUrl, panelW + bleed, fullH)}
+      ${img(backPath, panelW + bleed, fullH)}
       ${authorPhotoBlock}
       // คำโปรยต้องมีพื้นทึบรอง ไม่งั้นตัวอักษรจะจมไปกับลายของภาพปกหลัง
       // ถ้าภาพปกหลังวาดตัวอักษรมาให้แล้ว ก็ไม่ต้องวางซ้ำ
@@ -269,7 +316,7 @@ function coverTypst(book, geo, { frontDataUrl, backDataUrl, authorDataUrl }) {
     // ---- ปกหน้า ----
     // ปกที่ ChatGPT วาดตัวหนังสือมาให้แล้ว วางแค่ภาพ ไม่งั้นชื่อเรื่องจะซ้อนกันสองชั้น
     box(width: ${panelW + bleed}mm, height: ${fullH}mm)[
-      ${img(frontDataUrl, panelW + bleed, fullH)}
+      ${img(frontPath, panelW + bleed, fullH)}
       ${baked ? '' : `#place(top + left, dx: ${panelW * titleZone.x / 100}mm, dy: ${bleed + panelH * titleZone.y / 100}mm)[
         #box(width: ${panelW * titleZone.width / 100}mm)[
           #align(${titleZone.align})[
