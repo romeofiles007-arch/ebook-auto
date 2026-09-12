@@ -6618,6 +6618,16 @@ chrome.runtime
   .catch(() => {});
 
 // ---------- ท่อคุมจากเครื่องตัวเอง ----------
+/** เล่มที่ยังไม่จบและถูกแตะล่าสุด — ตรงกับเล่มที่คนจะเลือกเองจากประวัติโครงการ */
+async function newestUnfinishedBook() {
+  const rows = await db.listBooks().catch(() => []);
+  return (
+    rows
+      .filter((b) => b?.job && b.job.step && b.job.step !== 'done')
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null
+  );
+}
+
 /**
  * ปุ่มที่ต้องกดตอนงานสะดุดอยู่ใน Chrome ทั้งหมด และหน้า chrome://extensions ก็แตะไม่ได้เลย
  * เล่มที่ค้างตอนไม่มีคนเฝ้าจึงนอนรอจนกว่าจะมีคนมานั่งกด ท่อนี้เปิดทางให้สั่งจากบรรทัดคำสั่งแทน
@@ -6637,24 +6647,46 @@ startControlLink({
     idleSec: lastActivityAt ? Math.round((Date.now() - lastActivityAt) / 1000) : null,
     unattended,
     ceoStopped,
+    resumeCardId: $('resume')?.dataset.bookId || '',
     log: recentLogLines(),
   }),
   onNote: (why) => addEvent('system', why, 'สั่งจากท่อคุมบนเครื่องนี้'),
   actions: {
+    /**
+     * หน้า Studio ที่เพิ่งโหลดใหม่ยังไม่รู้จักเล่มไหนเลย — ปุ่มทำต่อจึงไม่มีอะไรให้ทำต่อ
+     *
+     * ปกติคนจะหยิบเล่มคืนเองจาก "ดูประวัติโครงการ" ซึ่งเป็นการกดบนหน้าจอที่สั่งจากนอกไม่ได้
+     * และเป็นจุดที่ทำให้การรีโหลดส่วนขยายกลายเป็นทางตัน: ฟื้นหน้ามาได้ แต่ไม่มีเล่มอยู่ในมือ
+     * ตัวนี้หยิบเล่มที่ยังไม่จบและถูกแตะล่าสุดกลับมา ซึ่งตรงกับสิ่งที่คนจะเลือกเองอยู่แล้ว
+     */
+    open: async ({ id = '' } = {}) => {
+      if (machineBusy || hasPendingTurn()) throw new Error('มีงานกำลังทำอยู่ — ไม่สั่งซ้อน');
+      const picked = id ? await db.loadBook(id).catch(() => null) : await newestUnfinishedBook();
+      if (!picked) throw new Error('ไม่มีเล่มที่ยังไม่จบเก็บไว้เลย');
+      book = picked;
+      showResume(picked);
+      return `หยิบ "${picked.outline?.title || picked.topic || picked.id}" กลับมาแล้ว · ค้างที่ขั้น ${STEP_NAMES[picked.job?.step] || picked.job?.step || '-'}`;
+    },
     /**
      * เงื่อนไขเดียวกับปุ่ม "ทำต่อ" ของแผงข้างทุกประการ ไม่ใช่ทางลัดที่หลวมกว่า
      * งานที่ยังวิ่งอยู่ต้องไม่ถูกสั่งซ้อน ไม่งั้นจะมีเครื่องผลิตสองตัวทำเล่มเดียวกัน
      */
     continue: async () => {
       if (machineBusy || hasPendingTurn()) throw new Error('มีงานกำลังทำอยู่ — ไม่สั่งซ้อน');
-      if (!book?.job && !$('resume').dataset.bookId) throw new Error('ไม่มีงานค้างให้ทำต่อ');
+      // ไม่มีเล่มในมือ = หยิบกลับมาก่อน ดีกว่าตอบว่า "ไม่มีงานค้าง" ทั้งที่มันอยู่ครบใน IndexedDB
+      if (!book?.job && !$('resume').dataset.bookId) {
+        const picked = await newestUnfinishedBook();
+        if (!picked) throw new Error('ไม่มีงานค้างให้ทำต่อ');
+        book = picked;
+        showResume(picked);
+      }
       resumeGo().catch(fail);
       return `สั่งทำต่อจากขั้น ${STEP_NAMES[book?.job?.step] || book?.job?.step || '-'}`;
     },
     images: async () => {
       if (machineBusy || hasPendingTurn() || phase2Running) throw new Error('มีงานกำลังทำอยู่ — ไม่สั่งซ้อน');
       const step = book?.job?.step;
-      if (!['images', 'gate_images'].includes(step)) throw new Error(`ตอนนี้อยู่ขั้น ${STEP_NAMES[step] || step || '-'} ไม่ใช่ขั้นสร้างภาพ`);
+      if (!['images', 'gate_images'].includes(step)) throw new Error(`ตอนนี้อยู่ขั้น ${STEP_NAMES[step] || step || '-'} ไม่ใช่ขั้นสร้างภาพ${book?.job ? '' : ' (ยังไม่ได้หยิบเล่มกลับมา — สั่ง open ก่อน)'}`);
       startPhase2().catch(fail);
       return 'สั่งทำต่อขั้นสร้างภาพ';
     },
