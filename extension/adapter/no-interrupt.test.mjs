@@ -12,7 +12,8 @@ test('quiet reasoning with a visible Stop button is not returned as a finished a
  const turn={innerText:'partial answer',querySelector:()=>null};
  const run=vm.runInNewContext('('+extract('waitForAnswer',false)+')',{
   $:()=>null,$$:()=>[turn],S:{},document:{body:{}},Date:{now:()=>time},
-  assistantAfter:()=>turn,hitLimit:()=>false,streamErrorAfter:()=>null,isThinkingOnly:()=>false,stopButtonVisible:()=>busy,actionBarFor:()=>bar,
+  assistantAfter:()=>turn,assistantTurnsAfter:()=>[turn],filledAssistantAfter:()=>turn,turnHasContent:t=>!!(t?.innerText||'').trim(),
+  hitLimit:()=>false,streamErrorAfter:()=>null,isThinkingOnly:()=>false,stopButtonVisible:()=>busy,actionBarFor:()=>bar,
   setupJson:()=>'',report(){},imageQuotaNotice:()=>'',MutationObserver:class {observe(){} disconnect(){}},
   setInterval:fn=>{hb=fn;return 1},clearInterval(){},setTimeout:()=>2,clearTimeout(){},BAR_STUCK_MS:2500,BAR_CONFIRM_MS:500,
  });
@@ -45,7 +46,8 @@ test('complete expected setup JSON can finish with stuck Stop; partial, unrelate
  const code={get textContent(){return raw}};
  const turn={innerText:'JSON',querySelector:()=>null};
  const scope={S:{codeBlock:'code'},$$:s=>s==='code'?[code]:[turn],$:()=>null,document:{body:{}},Date:{now:()=>time},
-  assistantAfter:()=>turn,hitLimit:()=>false,streamErrorAfter:()=>null,isThinkingOnly:()=>false,stopButtonVisible:()=>true,actionBarFor:()=>false,
+  assistantAfter:()=>turn,assistantTurnsAfter:()=>[turn],filledAssistantAfter:()=>turn,turnHasContent:t=>!!(t?.innerText||'').trim(),
+  hitLimit:()=>false,streamErrorAfter:()=>null,isThinkingOnly:()=>false,stopButtonVisible:()=>true,actionBarFor:()=>false,
   report(){},imageQuotaNotice:()=>'',MutationObserver:class {observe(){} disconnect(){}},setInterval:fn=>{hb=fn;return 1},clearInterval(){},setTimeout:()=>2,clearTimeout(){},BAR_STUCK_MS:2500};
  vm.createContext(scope);vm.runInContext(extract('setupJson',false)+'\n'+extract('waitForAnswer',false),scope);
  const p=scope.waitForAnswer('t',{}, {expectedJsonKeys:['titles']}).then(v=>{finished=true;return v});

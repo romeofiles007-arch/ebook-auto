@@ -21,8 +21,10 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
     (r?.coverage && r.coverage.reviewed < r.coverage.sections));
   if (incompleteReviews.length) fail('review_coverage', 'ยังตรวจคุณภาพไม่ครบ',
     `ตรวจบท ${incompleteReviews.map(([id]) => id).join(', ')} ใหม่ก่อนส่งออก`);
-  if (book.contentMode === 'items' && book.itemQuality?.passed === false)
-    fail('item_quality', 'รายชิ้นยังไม่ผ่านการตรวจคุณภาพ', (book.itemQuality.issues || []).slice(0,5).map(x=>`${x.id}: ${x.reason}`).join(' · '));
+  if (book.contentMode === 'items' && book.itemQuality?.passed === false) {
+    const deferred = book.automation?.mode === 'full' && book.itemQuality.deferred && !book.itemQuality.pending;
+    (deferred ? warn : fail)('item_quality', deferred ? 'รายชิ้นมีข้อเสนอแก้ไข เก็บไว้ให้ตรวจหลังจบงาน' : 'รายชิ้นยังไม่ผ่านการตรวจคุณภาพ', (book.itemQuality.issues || []).slice(0,5).map(x=>`${x.id}: ${x.reason}`).join(' · '));
+  }
 
   const tol = book.pageTolerance ?? 2;
   const target =

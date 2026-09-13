@@ -27,6 +27,7 @@ function runState(kind, reason, action = '', actionLabel = '') {
 }
 import { productionSettings } from '../core/production-mode.js';
 import { crewMarkup } from './crew-sprites.js';
+import { createProgressTracker, stepNumber, STEP_COUNT, formatEta } from './overall-progress.js';
 import { readReferenceSettings, validateBackMatterSetup, resetReferenceSources, selectReferencesAutomatically } from './references-ui.js';
 import { MIN_REFERENCES } from '../core/references.js';
 import { Machine, plannedImageJobs, ingestImageDataUrl, promptForImage, isModernCoverDesign, clearFigurePlan } from '../core/machine.js';
@@ -67,7 +68,8 @@ import { noteTrouble as recordTrouble, troubleSummary, startTrouble } from '../c
 const noteTrouble = (o) => { recordTrouble(o); renderDeskNote(); };
 import { addCeoUsage, ceoUsageLabel } from '../core/ceo-usage.js';
 import * as B from '../core/bible.js';
-import { ITEM_KINDS, planItems, suggestItemSize } from '../core/items.js';
+import { isItemBook, syncItemEdit, itemReviewView } from '../core/item-edit.js';
+import { ITEM_KINDS, planItems, suggestItemSize, itemBatchPrompt, extractItems } from '../core/items.js';
 import { countUnits } from '../core/thai.js';
 import { preflight } from '../core/preflight.js';
 import { compileBook } from '../typeset/compiler.js';
@@ -112,7 +114,6 @@ let outlineOrigin = 'auto';
 let inspirePolishRound = 0;
 let coverPreviewUrl = null;
 
-const STEP_ORDER = ['health', 'calibrate', 'outline', 'write', 'figures', 'consistency', 'fit', 'style', 'gate_images', 'images', 'done'];
 const STEP_NAMES = {
   health: 'ตรวจระบบ',
   calibrate: 'วัดรูปเล่ม',
@@ -134,6 +135,27 @@ const STEP_NAMES = {
  */
 let currentMode = '';
 let crewWorking = false;
+/**
+ * ทีมงาน "กำลังทำงานจริง" ไหม — ไม่ใช่แค่ป้ายโหมดบอกว่าทำงาน
+ *
+ * ป้ายโหมดของขั้นตรวจ/แก้ตั้งไว้ว่าไม่ทำงาน (busy: false) เพราะเป็นประตูรอคน
+ * แต่ขั้นเตรียม Prompt ภาพเดินอยู่ในช่วงนั้นจริงและรอ ChatGPT ตอบอยู่
+ * กรอบเรืองแสงของแผนกจึงดับ ทั้งที่แผงข้างแสดงหุ่นกำลังทำงาน (แผงข้างดูจากความเคลื่อนไหวจริง)
+ * นับเครื่องที่กำลังเดินและเทิร์นที่ค้างอยู่ด้วย — เงื่อนไขเดียวกับที่ตัวเฝ้าความเงียบใช้
+ * try/catch กันกรณีถูกเรียกระหว่างโหลดสคริปต์ ก่อนตัวแปร machineBusy จะถูกประกาศ
+ */
+function crewBusy() {
+  try {
+    return crewWorking || machineBusy || hasPendingTurn();
+  } catch {
+    return crewWorking;
+  }
+}
+// สถานะแถบความคืบหน้ารวม (paintProgress) — ประกาศไว้ตรงนี้เพราะ setMode อ่านค่านี้ด้วย
+const progressTracker = createProgressTracker();
+let progressStep = '';
+let progressFraction = 0;
+let progressLabel = '';
 let activitySerial = 0;
 let lastProgressLog = '';
 let lastProgressLogAt = 0;
@@ -170,6 +192,7 @@ function publishActivity(message, level = 'info', crew = null) {
 function setMode(label = '', { busy = false } = {}) {
   currentMode = label;
   crewWorking = busy;
+  $('progressMeter')?.classList.toggle('working', busy && progressStep !== 'done');
   const el = $('mode');
   if (!el) return;
   el.textContent = label ? `โหมด: ${label}` : '';
@@ -291,12 +314,34 @@ function addEvent(direction, label, text, meta = '') {
   feed.scrollTop = feed.scrollHeight;
 }
 
-function setPhase(name, detail = '') {
+/**
+ * แถบความคืบหน้ารวม — เปอร์เซ็นต์ของทั้งเล่ม ไม่ใช่ลำดับขั้น
+ * ตัวเลขภายในขั้น (ชุดที่ x/y · รอบที่ x) มาจาก event 'progress' ของเครื่อง ดู overall-progress.js
+ */
+function paintProgress(step, { fraction, label } = {}) {
+  if (!step) return;
+  if (step !== progressStep) { progressStep = step; progressFraction = 0; progressLabel = ''; }
+  if (Number.isFinite(fraction)) progressFraction = fraction;
+  if (label != null) progressLabel = label;
+  const { percent, etaMs } = progressTracker.update(step, progressFraction);
+  const shown = step === 'done' ? 100 : Math.min(99, Math.floor(percent));
+  const n = stepNumber(step);
+  $('bar').style.width = `${percent.toFixed(1)}%`;
+  $('pmPct').textContent = String(shown);
+  $('pmStep').textContent = step === 'done' ? 'เสร็จครบทุกขั้น' : `${n ? `ขั้น ${n}/${STEP_COUNT} · ` : ''}${STEP_NAMES[step] || step}`;
+  $('pmSub').textContent = step === 'done' ? '' : progressLabel;
+  $('pmEta').textContent = step !== 'done' && etaMs ? `เหลือประมาณ ${formatEta(etaMs)}` : '';
+  const meter = $('progressMeter');
+  meter.setAttribute('aria-valuenow', String(shown));
+  meter.classList.toggle('done', step === 'done');
+  meter.classList.toggle('working', step !== 'done' && crewBusy());
+}
+
+function setPhase(name, detail = '', progress = null) {
   $('phase').textContent = STEP_NAMES[name] || name || 'กำลังทำงาน';
   $('detail').textContent = detail || '';
   publishActivity(`${STEP_NAMES[name] || name} · ${detail || 'เริ่มขั้นตอน'}`);
-  const idx = Math.max(0, STEP_ORDER.indexOf(name));
-  $('bar').style.width = `${Math.min(99, Math.round((idx / (STEP_ORDER.length - 1)) * 100))}%`;
+  paintProgress(name, progress || {});
   const dept = DEPT_OF_STEP.get(name);
   if (dept != null) {
     if (name === 'done') completedDepts.add(dept);
@@ -447,7 +492,7 @@ function noteDept(step, text, level = 'ok') {
 const renderSteps = () => {
   $('steps').innerHTML = DEPARTMENTS.map((d, i) => {
     const note = deptNotes.get(i);
-    const progress = activeDepts.has(i) && crewWorking ? 'active' : completedDepts.has(i) ? 'done' : '';
+    const progress = activeDepts.has(i) && crewBusy() ? 'active' : completedDepts.has(i) ? 'done' : '';
     const severity = note?.level === 'bad' ? 'bad' : note?.level === 'warn' ? 'warn' : '';
     const mark = severity === 'bad' ? '✕' : severity === 'warn' ? '!' : progress === 'active' ? '⟳' : progress === 'done' ? '✓' : i + 1;
     return (
@@ -463,7 +508,7 @@ const renderSteps = () => {
   const members = [...activeDepts].map((i) => DEPARTMENTS[i]).filter(Boolean);
   const visible = members.length ? members : [d];
   publishActivity('', 'crew', { id: d.id, ids: visible.map((member) => member.id),
-    name: visible.map((member) => member.name).join(' + '), working: crewWorking,
+    name: visible.map((member) => member.name).join(' + '), working: crewBusy(),
     detail: activeDept < 0 ? (currentMode || 'ทีมงานพร้อมเริ่ม · สร้างหนังสือใน Studio') :
       $('detail').textContent || deptNotes.get(activeDept)?.text || d.role });
 };
@@ -578,7 +623,10 @@ function logMachine(e) {
       verify_all: `กำลัง Final Check ภาพทั้งหมด ${e.total || ''} รูป`,
       compile: '✓ Images OK · กำลังประกอบ Ebook',
     }[e.stage] || `กำลังทำภาพ ${pos} · ${label}`;
-    setPhase('images', stage);
+    const imageFraction = !e.total ? undefined
+      : e.stage === 'verify_all' ? 0.95 : e.stage === 'compile' ? 0.98
+      : ((e.current || 1) - (['saved', 'settle'].includes(e.stage) ? 0 : 1)) / e.total * 0.92;
+    setPhase('images', stage, { fraction: imageFraction, label: e.total ? `ภาพ ${Math.min(e.current || 0, e.total)}/${e.total}` : '' });
     const stageDept = IMAGE_DEPT_OF_STAGE.get(e.stage) || 'art';
     activateDepartments([stageDept]);
     if (['verify_all', 'compile'].includes(e.stage)) {
@@ -604,6 +652,11 @@ function logMachine(e) {
     noteActiveDept(e.message, LEVEL_OF_LOG[e.level] || 'ok');
     if (book?.lastCompile?.pages)
       showPages(book.lastCompile.pages, expectedPhysicalPages(book), book.pageTolerance ?? 2);
+    return;
+  }
+  if (e.type === 'progress') {
+    // เงียบ ๆ ไม่ลง log — เป็นแค่การขยับแถบ ข้อความจริงของขั้นนั้นมาทาง log อยู่แล้ว
+    if (e.step) paintProgress(e.step, { fraction: e.total ? e.done / e.total : undefined, label: e.label || '' });
     return;
   }
   if (e.type === 'step') return setPhase(e.step) || addEvent('system', STEP_NAMES[e.step] || e.step, '');
@@ -641,6 +694,15 @@ let lastProgressPhase = '';
  */
 let machineBusy = false;
 let lastActivityAt = 0;
+// วาดกระดานทีมงานใหม่เมื่อสถานะ "ทำงานจริง" เปลี่ยน — เทิร์นเริ่ม/จบไม่ได้ผ่าน setMode เสมอไป
+let lastCrewBusy = null;
+setInterval(() => {
+  const now = crewBusy();
+  if (now === lastCrewBusy) return;
+  lastCrewBusy = now;
+  if ($('steps')) renderSteps();
+  $('progressMeter')?.classList.toggle('working', now && progressStep && progressStep !== 'done');
+}, 1000);
 
 /**
  * เพดานความเงียบที่ยอมรับได้ ต่างกันตามขั้น เพราะงานแต่ละขั้นกินเวลาไม่เท่ากัน
@@ -2008,7 +2070,10 @@ function readForm() {
     itemsPerPage: Number(val('itemsPerPage')) || 1,
     itemAlign: val('itemAlign', 'center'),
     itemAttribution: val('itemAttribution', 'off') === 'on',
-    itemSizePt: Number(val('itemSizePt')) || 26,
+    // ภาพในเล่มรายชิ้นมีช่องของตัวเอง — ช่องภาพของร้อยแก้วถูกซ่อนในโหมดนี้และต้องไม่เปิดภาพให้เล่มรายชิ้น
+    itemIllus: contentMode === 'items' ? val('itemIllus', 'none') : undefined,
+    // ว่าง = ให้เอกสารเลือกขนาดหนังสือจริงเอง (items.itemTypeSize)
+    itemSizePt: Number(val('itemSizePt')) || null,
     themeCount: Number(val('themeCount')) || 5,
     // ประวัติผู้เขียนมาจากผู้ใช้เท่านั้น ระบบไม่แต่งเอง
     aboutAuthor: $('aboutAuthor').value.trim(),
@@ -3461,6 +3526,25 @@ const fail = (e) => {
 
 // ---------- ประตูที่ 2: แก้ก่อนส่งออก ----------
 async function openEditor() {
+  /**
+   * ถามเจตนาของเล่มให้จบก่อน แล้วค่อยบอกหน้าจอว่าประตูนี้รอใครอยู่
+   *
+   * fullAutoRunning เป็นค่าของหน้า Studio ซึ่งถูกปลดทุกครั้งที่งานสะดุด
+   * เล่มที่สั่งอัตโนมัติไว้แล้วสะดุดกลางทางสักครั้ง (ซึ่งเกิดได้เป็นปกติ) จึงมานอนรอคน
+   * ที่ประตูนี้เงียบ ๆ ทั้งที่ผู้ใช้กดอัตโนมัติไว้แล้วเดินออกไปจากจอ
+   *
+   * runMachine() ติดธงกลับให้ตอนเริ่มรอบอยู่แล้วด้วยกติกาเดียวกันนี้ แต่ประตูอยู่กลางรอบ
+   * ธงจึงหลุดได้อีกหลังจากนั้น (เช่นตัวเฝ้างานเงียบสั่งเลิกกดต่อให้เองระหว่างทาง)
+   * ตรงนี้จึงต้องถามซ้ำด้วยกติกาเดิม: ครบทั้งเจตนาของเล่มและธงที่คนยังไม่ได้สั่งหยุด
+   *
+   * ต้องอยู่ก่อนสองบรรทัดข้างล่าง ไม่ใช่หลัง — เดิมมันอยู่ท้ายฟังก์ชัน เล่มที่ธงหลุดมาก่อน
+   * จึงส่งเสียงเรียกและขึ้นสถานะ "รอคุณตรวจงาน" ไปแล้ว ก่อนจะกู้ธงได้แล้วเดินต่อเอง
+   * ผู้ใช้ได้ยินเสียงเรียกของงานที่ไม่เคยรอเขาเลย ซึ่งทำให้เสียงเรียกทั้งระบบเชื่อถือไม่ได้
+   */
+  if (!fullAutoRunning && unattended && book?.automation?.mode === 'full') {
+    fullAutoRunning = true;
+    addEvent('system', 'อัตโนมัติ: ผ่านประตูตรวจต้นฉบับให้เอง', 'เล่มนี้ถูกสั่งให้ทำจนจบ และยังไม่มีใครสั่งหยุด');
+  }
   if (!autoPilot()) runState('input', 'ตรวจต้นฉบับ แล้วกดไปต่อใน Studio', 'editor', 'เปิดขั้นตรวจต้นฉบับ');
   // ประตูตรวจงานรอคนจริง ๆ เฉพาะตอนไม่ได้เดินอัตโนมัติ — โหมดอัตโนมัติผ่านเองอยู่แล้ว
   if (!autoPilot()) chime('attention');
@@ -3486,22 +3570,13 @@ async function openEditor() {
       ? `แก้ตอนไหนก็ได้ แล้วกดนับหน้าใหม่ · บรรณาธิการทำเครื่องหมายไว้ ${flagged.totalCounted} ประเด็นใน ${flagged.chapters.length} บท เปิดดูได้ที่กล่องผลตรวจ`
       : 'แก้ตอนไหนก็ได้ แล้วกดนับหน้าใหม่ เมื่อพอใจจึงไปต่อ',
   );
-  /**
-   * ประตูนี้ต้องอ่าน "เจตนา" ของเล่ม ไม่ใช่อ่านธงของหน้าที่หลุดง่าย
-   *
-   * fullAutoRunning เป็นค่าของหน้า Studio ซึ่งถูกปลดทุกครั้งที่งานสะดุด
-   * เล่มที่สั่งอัตโนมัติไว้แล้วสะดุดกลางทางสักครั้ง (ซึ่งเกิดได้เป็นปกติ) จึงมานอนรอคน
-   * ที่ประตูนี้เงียบ ๆ ทั้งที่ผู้ใช้กดอัตโนมัติไว้แล้วเดินออกไปจากจอ
-   *
-   * runMachine() ติดธงกลับให้ตอนเริ่มรอบอยู่แล้วด้วยกติกาเดียวกันนี้ แต่ประตูอยู่กลางรอบ
-   * ธงจึงหลุดได้อีกหลังจากนั้น (เช่นตัวเฝ้างานเงียบสั่งเลิกกดต่อให้เองระหว่างทาง)
-   * ตรงนี้จึงต้องถามซ้ำด้วยกติกาเดิม: ครบทั้งเจตนาของเล่มและธงที่คนยังไม่ได้สั่งหยุด
-   */
-  if (!fullAutoRunning && unattended && book?.automation?.mode === 'full') {
-    fullAutoRunning = true;
-    addEvent('system', 'อัตโนมัติ: ผ่านประตูตรวจต้นฉบับให้เอง', 'เล่มนี้ถูกสั่งให้ทำจนจบ และยังไม่มีใครสั่งหยุด');
-  }
   if (autoPilot()) {
+    if (isItemBook(book) && book.itemQuality?.passed === false && book.automation?.mode !== 'full') {
+      fullAutoRunning = false;
+      unattended = false;
+      runState('input', 'รายชิ้นยังมีประเด็น เปิดผลตรวจแล้วแก้ก่อนกดไปต่อ', 'editor', 'เปิดผลตรวจรายชิ้น');
+      return;
+    }
     addEvent('system', fullAutoRunning ? 'อัตโนมัติ' : 'ทดสอบระบบ', 'ผ่านประตูตรวจงานอัตโนมัติ');
     return await proceed();
   }
@@ -3529,7 +3604,9 @@ const cmpId = (a, b) => {
 
 function renderSecList() {
   // ตอนที่บรรณาธิการทำเครื่องหมายไว้ ต้องเห็นได้จากรายการ ไม่ใช่ต้องเปิดทีละตอนหา
-  const flagged = issuesBySection(book?.review);
+  const flagged = isItemBook(book)
+    ? new Map(sections.map(s => [s.id, itemReviewView(book).chapters[0].issues.filter(x => x.section === s.id)]))
+    : issuesBySection(book?.review);
   $('secList').innerHTML = sections
     .map((s) => {
       const off = s.quota ? Math.round(((s.chars - s.quota) / s.quota) * 100) : 0;
@@ -3575,7 +3652,9 @@ function selectSection(id) {
  */
 function renderSecReview(id) {
   const box = $('secReview');
-  const { mine, chapterWide } = issuesForSection(book?.review, id);
+  const { mine, chapterWide } = isItemBook(book)
+    ? { mine: itemReviewView(book).chapters[0].issues.filter(x => x.section === id), chapterWide: [] }
+    : issuesForSection(book?.review, id);
   if (!mine.length && !chapterWide.length) return box.classList.add('hidden');
   box.classList.remove('hidden');
   box.innerHTML =
@@ -3606,7 +3685,7 @@ function issueHtml(i, clickable, at = '') {
  */
 function renderReviewPanel() {
   const panel = $('reviewPanel');
-  const { chapters, total, totalCounted } = bookIssues(book?.review);
+  const { chapters, total, totalCounted } = isItemBook(book) ? itemReviewView(book) : bookIssues(book?.review);
   if (!total) return panel.classList.add('hidden');
   panel.classList.remove('hidden');
   $('reviewSummary').textContent =
@@ -3646,9 +3725,11 @@ function renderReviewPanel() {
  * เล่มที่แก้ด้วยมือจึงมี revision ค้างอยู่ที่เวลาก่อนแก้ตลอดไป และถูกทับด้วย snapshot ที่ไม่มีงานที่แก้
  */
 async function persistSectionEdit(s) {
+  syncItemEdit(book, s);
   await db.saveSection(book.id, s);
   await db.saveBook(book); // ขยับ updatedAt ของเล่ม ไม่งั้น snapshot ฝั่งแชร์จะดู "ใหม่กว่า" เสมอ
   await syncSharedProject(book.id);
+  if (isItemBook(book)) { renderReviewPanel(); renderSecReview(s.id); }
 }
 
 async function saveSection() {
@@ -3764,7 +3845,72 @@ ${list}`)) return;
  * ใช้ prompt ตัวเดียวกับที่เครื่องใช้เขียนทีละตอน จึงได้เนื้อหาที่เข้ากับเล่มเดิม
  * ทั้งเสียง โควตาความยาว จังหวะ (beats) และบริบทของตอนก่อนหน้า
  */
+async function writeItemWithAi(id, report = () => {}) {
+  const rec = sections.find(s => s.id === id && s.kind === 'item');
+  const theme = book.outline?.themes?.find(t => String(t.n) === String(rec?.theme ?? id.split('.')[0]));
+  if (!rec || !theme) return { ok: false, error: 'ไม่พบชิ้นหรือหมวดที่เลือก' };
+  if (rec.locked || rec.status === 'approved') return { ok: false, error: 'ปลดล็อกชิ้นนี้ก่อนสั่งเขียนใหม่' };
+  try {
+    report(`กำลังเขียนชิ้น ${id} ใหม่...`);
+    await focusChat(book);
+    const res = await sendTurn(
+      makeTransport(transportKind(book), transportOpts({}, book)),
+      itemBatchPrompt({ book, outline: book.outline, theme, count: 1, requestedIds: [id],
+        avoid: sections.filter(s => s.kind === 'item' && s.id !== id).map(s => s.md ?? s.text ?? '') }),
+      { label: `เขียนชิ้น ${id} ใหม่`, itemReceipt: true },
+      { parse: r => {
+        const item = extractItems(r.text, [id])[0];
+        return item ? { data: item } : { error: `คำตอบยังไม่ครบชิ้น ${id}` };
+      } },
+    );
+    if (!res?.data) return { ok: false, error: res?.error || 'ไม่ได้รับชิ้นใหม่ เก็บต้นฉบับเดิมไว้' };
+    rec.history = [...(rec.history || []), { md: rec.md ?? rec.text ?? '', text: rec.text,
+      attribution: rec.attribution, chars: rec.chars, at: Date.now(), reason: 'ก่อนเขียนรายชิ้นใหม่' }].slice(-20);
+    Object.assign(rec, res.data, { md: res.data.text, chars: countUnits(res.data.text, book.language), status: 'generated' });
+    await persistSectionEdit(rec);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e?.message || String(e) }; }
+}
+
+async function reviewItemsBeforeProceed() {
+  if (machineBusy || hasPendingTurn()) {
+    status('รอคำขอที่กำลังทำงานให้จบก่อนตรวจรายชิ้น');
+    return false;
+  }
+  machineBusy = true;
+  try {
+    const current = (await db.loadSections(book.id)).filter(s => s.kind === 'item').map(s => ({ ...s, text: s.md ?? s.text ?? '' }));
+    const signature = JSON.stringify([book.itemKind,book.topic,!!book.runConsistency,current.map(s=>[s.id,s.text,s.md,s.attribution])]);
+    const deferred = () => book.automation?.mode === 'full' && book.itemQuality?.deferred && !book.itemQuality?.pending;
+    if (!((book.itemQuality?.passed || deferred()) && book.itemQuality.signature === signature)) {
+      makeMachine();
+      await machine.checkItemQuality();
+    }
+    sections = (await db.loadSections(book.id)).sort((a, b) => cmpId(a.id, b.id));
+    if (book.itemQuality?.passed !== true && !deferred()) throw new Error('รายชิ้นยังมีประเด็น กรุณาแก้ตามผลตรวจแล้วกดไปต่อเพื่อตรวจซ้ำ');
+    const assets = await db.loadAssets(book.id);
+    const { pages, ms } = await compileBook({ book, outline: book.outline, sections, assets });
+    book.padPages = book.targetPages >= 24 && pages.physical % 2 === 1 ? 1 : 0;
+    book.finalPages = pages.physical + book.padPages;
+    book.lastCompile = { pages: pages.physical, ms, at: Date.now() };
+    await db.saveBook(book);
+    return true;
+  } catch (e) {
+    fullAutoRunning = false;
+    unattended = false;
+    runState('input', e?.message || String(e), 'editor', 'เปิดผลตรวจรายชิ้น');
+    status(e?.message || String(e));
+    return false;
+  } finally {
+    machineBusy = false;
+    renderReviewPanel();
+    renderSecList();
+    if (selected) renderSecReview(selected);
+  }
+}
+
 async function writeSectionWithAi(id, report = () => {}) {
+  if (isItemBook(book)) return writeItemWithAi(id, report);
   const rec = sections.find((x) => x.id === id);
   const outline = book.outline;
   const chapter = (outline?.chapters || []).find((c) => (c.sections || []).some((x) => x.id === id));
@@ -3871,6 +4017,7 @@ async function restoreVersion(old) {
     { md: s.md || '', chars: s.chars || 0, at: Date.now(), reason: 'ก่อนกู้คืน' },
   ].slice(-20);
   s.md = old.md || '';
+  if (isItemBook(book) && Object.hasOwn(old, 'attribution')) s.attribution = old.attribution || '';
   s.chars = countUnits(s.md, book.language);
   s.status = 'restored';
   await persistSectionEdit(s);
@@ -3904,6 +4051,7 @@ async function recount() {
 
 async function proceed() {
   book = await db.loadBook(book.id);
+  if (isItemBook(book) && !(await reviewItemsBeforeProceed())) return;
   if (book.job?.step === 'gate_images') {
     $('editor').classList.add('hidden');
     await openImagePhaseGate();
@@ -5209,7 +5357,6 @@ async function finish() {
 
   setMacroStage('done');
   setPhase('done', 'พร้อมส่งออก');
-  $('bar').style.width = '100%';
   $('done').classList.remove('hidden');
   chime('done');
   $('doneText').textContent = `“${book.outline?.title || book.topic}” · ${pages} หน้า · ติดขัด ${pf.blocking} ข้อ, เตือน ${pf.warnings} ข้อ`;
@@ -5348,7 +5495,7 @@ function updateItemPlan() {
     trim: { preset: val('trim', 'a5'), widthMm: p.w, heightMm: p.h },
   };
   const plan = planItems(draft);
-  $('itemSizePt').placeholder = suggestItemSize(draft);
+  $('itemSizePt').placeholder = `อัตโนมัติ ${suggestItemSize(draft)}`;
   $('itemPlanNote').innerHTML =
     `ต้องใช้ <span class="big">${plan.total}</span> ชิ้น · ${plan.themes} หมวด หมวดละราว ${plan.perTheme}<br>` +
     `คาดว่าใช้ราว <b>${plan.turns} ข้อความ ChatGPT</b> · จำนวนหน้าคำนวณตรง ๆ ไม่ต้องวนลูปปรับความยาว`;

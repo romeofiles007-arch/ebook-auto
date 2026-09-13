@@ -29,6 +29,34 @@ export const NO_CITATION_RULE = `
 ทุกค่าใน JSON ต้องเป็นข้อความจริงที่พิมพ์ออกมาตรง ๆ ไม่ใช่หมุดที่ชี้ไปหาเนื้อหาที่อื่น
 ถ้าคำตอบมีคำว่า contentReference หรือ oaicite อยู่ แปลว่าตอบผิดรูปแบบ ให้เขียนใหม่เป็นข้อความล้วน`;
 
+/**
+ * คำอธิบายตัวเลือกนิยายที่คนและโมเดลอ่านเข้าใจ — ห้ามส่งรหัสดิบ (third-limited, comingofage) เข้า prompt
+ * ใช้ทั้งตอนวางโครงและตอนเขียนฉาก ตัวเลือกที่ผู้ใช้เลือกไว้จะได้ไม่หายไปหลังขั้นวางโครง
+ */
+const FICTION_GENRE_NAME = {
+  romance: 'โรแมนติก', fantasy: 'แฟนตาซี', scifi: 'ไซไฟ', mystery: 'สืบสวน', thriller: 'ทริลเลอร์',
+  horror: 'สยองขวัญ', drama: 'ดราม่า', adventure: 'ผจญภัย', comingofage: 'Coming of Age (เรื่องการเติบโต)',
+  literary: 'วรรณกรรมร่วมสมัย',
+};
+const fictionGenreName = (key) => FICTION_GENRE_NAME[key] || key || 'นิยาย';
+const FICTION_POV = {
+  first: 'บุคคลที่ 1 อยู่ในประสบการณ์ของผู้เล่าหลัก ห้ามรู้สิ่งที่ตัวละครนี้ไม่รู้',
+  'third-limited': 'บุคคลที่ 3 จำกัดมุมมอง หนึ่งฉากอยู่กับตัวละครมุมมองเดียว ห้าม head-hop',
+  omniscient: 'ผู้เล่ารู้รอบ แต่ต้องควบคุมการย้ายมุมมองให้ชัดและมีเหตุผล',
+};
+const FICTION_ENDING = {
+  auto: 'ให้ตรรกะและธีมของเรื่องเป็นตัวกำหนดตอนจบ',
+  happy: 'จบสุขสมหวัง แต่ต้องแลกมาด้วยการตัดสินใจและผลของสิ่งที่เกิดก่อนหน้า',
+  bittersweet: 'จบหวานขม ได้บางอย่างและสูญเสียบางอย่างอย่างมีความหมาย',
+  tragic: 'จบโศกนาฏกรรมจากการตัดสินใจหรือข้อบกพร่องที่ปูไว้ ไม่ใช่อุบัติเหตุสุ่ม',
+  open: 'ปลายเปิด แต่แกนความขัดแย้งหลักต้องถึงจุดคลี่คลายพอให้เรื่องจบได้',
+};
+const FICTION_ROMANCE = {
+  none: 'ไม่มีเส้นเรื่องความรักเป็นแกน',
+  subplot: 'ความรักเป็นเส้นเรื่องรอง ต้องรับใช้การเปลี่ยนแปลงของตัวละครและไม่แย่งแกนหลัก',
+  main: 'ความสัมพันธ์โรแมนติกเป็นเส้นเรื่องหลัก ต้องมีแรงดึงดูด อุปสรรค การตัดสินใจ และผลลัพธ์ที่พัฒนาตลอดเล่ม',
+};
+
 export function titleIdeasPrompt({ topic, audience, tone, language = 'th', contentMode = 'prose', fictionGenre = 'fantasy', trendSeed = null, today = '', avoidTitles = [] }) {
   const trend = trendSeed?.trend
     ? `\nหัวข้อที่ผู้ใช้เลือกจากโหมดดูกระแส: ${trendSeed.trend}${trendSeed.why_now ? `\nทำไมน่าสนใจ: ${trendSeed.why_now}` : ''}\nชื่อที่เสนอทั้งหมดต้องเกาะหัวข้อนี้ แต่ห้ามพาดหัวเกินจริง\n`
@@ -37,7 +65,7 @@ export function titleIdeasPrompt({ topic, audience, tone, language = 'th', conte
     return `คุณคือบรรณาธิการนิยายมืออาชีพ
 
 แนวคิดตั้งต้นหรือชื่อชั่วคราว: ${topic || 'เสนอแนวคิดนิยายที่มีแรงขับทางอารมณ์และจำง่าย'}
-แนวนิยาย: ${fictionGenre}
+แนวนิยาย: ${fictionGenreName(fictionGenre)}
 กลุ่มผู้อ่าน: ${audience || 'ผู้อ่านทั่วไป'}
 โทน: ${tone || 'มีภาพชัด มีอารมณ์ และไม่เล่าตรงเกินไป'}
 ภาษา: ${language === 'th' ? 'ไทย' : 'อังกฤษ'}
@@ -79,7 +107,7 @@ angle ต้องบอกผู้อ่านที่เจาะจง ป�
  */
 export function trendIdeasPrompt({ seed = '', audience, tone, language = 'th', contentMode = 'prose', fictionGenre = 'fantasy', today = '' }) {
   const mode = contentMode === 'fiction'
-    ? `นิยายแนว ${fictionGenre}`
+    ? `นิยายแนว ${fictionGenreName(fictionGenre)}`
     : contentMode === 'items'
       ? 'หนังสือรายชิ้น (แตกเป็นหลายหมวดได้)'
       : 'หนังสือ non-fiction';
@@ -110,7 +138,7 @@ export function outlineDirectionsPrompt({ title, audience, tone, language = 'th'
 
   if (contentMode === 'fiction') {
     return `คุณคือ story editor ช่วยเสนอทิศทางโครงเรื่อง 3 ทางที่ต่างกันจริงสำหรับนิยายชื่อ "${title}"
-แนว: ${fictionGenre}
+แนว: ${fictionGenreName(fictionGenre)}
 ผู้อ่าน: ${audience || 'ผู้อ่านทั่วไป'}
 โทน: ${tone || '-'}
 ความยาวประมาณ: ${targetPages} หน้า
@@ -169,7 +197,7 @@ export function outlinePolishPrompt({
 
   const kindNote =
     contentMode === 'fiction'
-      ? `เป็นนิยายแนว ${fictionGenre} — chapters คือบท และ purpose คือสิ่งที่เปลี่ยนในบทนั้น`
+      ? `เป็นนิยายแนว ${fictionGenreName(fictionGenre)} — chapters คือบท และ purpose คือสิ่งที่เปลี่ยนในบทนั้น`
       : contentMode === 'items'
         ? 'เป็นหนังสือรายชิ้น — chapters คือหมวด และ purpose คือมุมของหมวดนั้น'
         : `แนวหนังสือ: ${genreBrief || 'non-fiction'}`;
@@ -420,23 +448,9 @@ ${retryErrors ? `\nคำตอบก่อนหน้าไม่ผ่าน�
 
 function fictionOutlinePrompt(book, retryErrors = null) {
   const u = unitName(book.language);
-  const pov = {
-    first: 'บุคคลที่ 1 อยู่ในประสบการณ์ของผู้เล่าหลัก ห้ามรู้สิ่งที่ตัวละครนี้ไม่รู้',
-    'third-limited': 'บุคคลที่ 3 จำกัดมุมมอง หนึ่งฉากอยู่กับตัวละครมุมมองเดียว ห้าม head-hop',
-    omniscient: 'ผู้เล่ารู้รอบ แต่ต้องควบคุมการย้ายมุมมองให้ชัดและมีเหตุผล',
-  }[book.fictionPov] || 'บุคคลที่ 3 จำกัดมุมมอง';
-  const ending = {
-    auto: 'ให้ตรรกะและธีมของเรื่องเป็นตัวกำหนดตอนจบ',
-    happy: 'จบสุขสมหวัง แต่ต้องแลกมาด้วยการตัดสินใจและผลของสิ่งที่เกิดก่อนหน้า',
-    bittersweet: 'จบหวานขม ได้บางอย่างและสูญเสียบางอย่างอย่างมีความหมาย',
-    tragic: 'จบโศกนาฏกรรมจากการตัดสินใจหรือข้อบกพร่องที่ปูไว้ ไม่ใช่อุบัติเหตุสุ่ม',
-    open: 'ปลายเปิด แต่แกนความขัดแย้งหลักต้องถึงจุดคลี่คลายพอให้เรื่องจบได้',
-  }[book.fictionEnding] || '';
-  const romance = {
-    none: 'ไม่มีเส้นเรื่องความรักเป็นแกน',
-    subplot: 'ความรักเป็นเส้นเรื่องรอง ต้องรับใช้การเปลี่ยนแปลงของตัวละครและไม่แย่งแกนหลัก',
-    main: 'ความสัมพันธ์โรแมนติกเป็นเส้นเรื่องหลัก ต้องมีแรงดึงดูด อุปสรรค การตัดสินใจ และผลลัพธ์ที่พัฒนาตลอดเล่ม',
-  }[book.fictionRomance] || '';
+  const pov = FICTION_POV[book.fictionPov] || 'บุคคลที่ 3 จำกัดมุมมอง';
+  const ending = FICTION_ENDING[book.fictionEnding] || '';
+  const romance = FICTION_ROMANCE[book.fictionRomance] || '';
 
   return `คุณคือ story editor และ novel architect ของสำนักพิมพ์ วางโครงนิยายที่ต้องเขียนต่อเนื่องทั้งเล่มโดยไม่ให้ตัวละคร บุคลิก เวลา สถานที่ หรือกฎของโลกหลุด
 
@@ -669,7 +683,9 @@ function fictionBookContext(book, outline, bible, chapter) {
 ชื่อเรื่อง: ${outline.title}
 แกนเรื่อง/ธีม: ${outline.thesis}
 แนว: ${book.genreBrief || book.fictionGenre || 'fiction'}
-มุมมอง: ${book.fictionPov || 'third-limited'}
+มุมมอง: ${FICTION_POV[book.fictionPov] || FICTION_POV['third-limited']}
+ตอนจบที่ผู้ใช้เลือก: ${FICTION_ENDING[book.fictionEnding] || FICTION_ENDING.auto}
+เส้นเรื่องความรัก: ${FICTION_ROMANCE[book.fictionRomance] || FICTION_ROMANCE.subplot}
 โทนภาษา: ${outline.voice_card || book.tone}
 ${book.trendSeed?.trend ? `แรงบันดาลใจจากกระแสที่เลือก: ${book.trendSeed.trend} — ใช้เฉพาะแกน/คำถามร่วมสมัย ห้ามคัดลอกบุคคลจริง เหตุการณ์จริง หรือเปลี่ยนนิยายให้เป็นข่าว` : ''}
 
@@ -727,7 +743,7 @@ export function batchPrompt(args) {
   });
 }
 
-function fictionBatchPrompt({ book, outline, bible, chapter, sections, prevSummaries, nextSection, withContext }) {
+function fictionBatchPrompt({ book, outline, bible, chapter, sections, prevSummaries, prevTail, nextSection, withContext }) {
   const u = unitName(book.language);
   const total = sections.reduce((n, s) => n + s.quota, 0);
   const blocks = sections.map((s) => `ฉาก ${s.id} — ${s.title}
@@ -741,13 +757,18 @@ function fictionBatchPrompt({ book, outline, bible, chapter, sections, prevSumma
   continuity ที่ห้ามหาย: ${(s.takeaways || []).join(' · ')}
   ความยาว ${s.quota.toLocaleString()} ${u} — ห้ามเกิน ${(s.maxChars || Math.round(s.quota * 1.25)).toLocaleString()} ${u} เด็ดขาด`).join('\n\n');
   const ids = sections.map((s) => s.id);
+  // ท้ายฉากก่อนหน้าคำต่อคำ — สรุปสองประโยคบอกได้แค่ "เกิดอะไร" ไม่ได้บอกว่าค้างไว้ตรงไหน ฉากใหม่จึงเคยต่อแบบกระโดด
+  const tail = prevTail
+    ? `\nท้ายฉากก่อนหน้าคำต่อคำ — ต่อเวลา สถานที่ และอารมณ์จากตรงนี้ ห้ามคัดลอกหรือทวนซ้ำ (ถ้าแผนของฉากนี้ข้ามเวลาหรือเปลี่ยนสถานที่ ให้ข้ามได้ตามแผน)\n"...${String(prevTail).slice(-400)}"\n`
+    : '';
+  const endingChoice = FICTION_ENDING[book.fictionEnding] || FICTION_ENDING.auto;
 
   return `${fictionBookContext(book, outline, bible, chapter)}\n\nเขียนฉากนิยาย ${sections.length} ฉากต่อไปนี้ให้ครบในคำตอบเดียว รวมราว ${total.toLocaleString()} ${u}
 
 ${blocks}
-${prevSummaries?.length ? `\nฉากก่อนหน้าเกิดอะไรขึ้น\n${prevSummaries.map((s) => `- ${s}`).join('\n')}\n` : ''}${nextSection ? `\nฉากถัดไปคือ "${nextSection.title}" — จบให้มีแรงส่งถึงฉากนั้น แต่ห้ามเขียนเหตุการณ์ของฉากถัดไปแทน\n` : sections.length > 1
-    ? `\nชุดนี้คือฉากสุดท้ายของทั้งเล่ม แต่มีหลายฉากในคำตอบเดียวกัน — เฉพาะฉาก "${sections[sections.length - 1].title}" (ฉากท้ายสุดในชุดนี้) เท่านั้นที่เป็นฉากพีค (climax): ความขัดแย้งหลักบีบให้ตัวเอกตัดสินใจครั้งสำคัญที่สุด เดิมพันสูงสุดในเรื่อง และพลิกด้วยเบาะแสที่ปูไว้แล้วจริงจากฉากก่อนหน้า (ไม่ใช่ข้อมูล/ความสามารถใหม่ที่เพิ่งโผล่) ให้จบแบบ "คาดไม่ถึงแต่ย้อนคิดแล้วสมเหตุสมผล" แล้วจบเรื่องให้สมบูรณ์ตามโทนที่กำหนดไว้ ห้ามค้างคาแบบยังไม่จบ ส่วนฉากก่อนหน้านั้นในชุดนี้ต้องยังคงไต่ระดับความเข้มข้นขึ้นไปหาฉากพีค ห้ามคลี่คลายความขัดแย้งหลักก่อนถึงฉากสุดท้าย\n`
-    : '\nนี่คือฉากสุดท้ายของทั้งเล่ม — ต้องเป็นฉากพีค (climax): ความขัดแย้งหลักบีบให้ตัวเอกตัดสินใจครั้งสำคัญที่สุด เดิมพันสูงสุดในเรื่อง และพลิกด้วยเบาะแสที่ปูไว้แล้วจริงจากฉากก่อนหน้า (ไม่ใช่ข้อมูล/ความสามารถใหม่ที่เพิ่งโผล่) ให้จบแบบ "คาดไม่ถึงแต่ย้อนคิดแล้วสมเหตุสมผล" แล้วจบเรื่องให้สมบูรณ์ตามโทนที่กำหนดไว้ ห้ามค้างคาแบบยังไม่จบ\n'}
+${prevSummaries?.length ? `\nฉากก่อนหน้าเกิดอะไรขึ้น\n${prevSummaries.map((s) => `- ${s}`).join('\n')}\n` : ''}${tail}${nextSection ? `\nฉากถัดไปคือ "${nextSection.title}" — จบให้มีแรงส่งถึงฉากนั้น แต่ห้ามเขียนเหตุการณ์ของฉากถัดไปแทน\n` : sections.length > 1
+    ? `\nชุดนี้คือฉากสุดท้ายของทั้งเล่ม แต่มีหลายฉากในคำตอบเดียวกัน — เฉพาะฉาก "${sections[sections.length - 1].title}" (ฉากท้ายสุดในชุดนี้) เท่านั้นที่เป็นฉากพีค (climax): ความขัดแย้งหลักบีบให้ตัวเอกตัดสินใจครั้งสำคัญที่สุด เดิมพันสูงสุดในเรื่อง และพลิกด้วยเบาะแสที่ปูไว้แล้วจริงจากฉากก่อนหน้า (ไม่ใช่ข้อมูล/ความสามารถใหม่ที่เพิ่งโผล่) ให้จบแบบ "คาดไม่ถึงแต่ย้อนคิดแล้วสมเหตุสมผล" แล้วจบเรื่องให้สมบูรณ์ตามตอนจบที่ผู้ใช้เลือก (${endingChoice}) ห้ามค้างคาแบบยังไม่จบ ส่วนฉากก่อนหน้านั้นในชุดนี้ต้องยังคงไต่ระดับความเข้มข้นขึ้นไปหาฉากพีค ห้ามคลี่คลายความขัดแย้งหลักก่อนถึงฉากสุดท้าย\n`
+    : `\nนี่คือฉากสุดท้ายของทั้งเล่ม — ต้องเป็นฉากพีค (climax): ความขัดแย้งหลักบีบให้ตัวเอกตัดสินใจครั้งสำคัญที่สุด เดิมพันสูงสุดในเรื่อง และพลิกด้วยเบาะแสที่ปูไว้แล้วจริงจากฉากก่อนหน้า (ไม่ใช่ข้อมูล/ความสามารถใหม่ที่เพิ่งโผล่) ให้จบแบบ "คาดไม่ถึงแต่ย้อนคิดแล้วสมเหตุสมผล" แล้วจบเรื่องให้สมบูรณ์ตามตอนจบที่ผู้ใช้เลือก (${endingChoice}) ห้ามค้างคาแบบยังไม่จบ\n`}
 กติกาการเขียนนิยาย
 - เขียนเป็นฉาก ไม่ใช่บทสรุปโครงเรื่อง ต้องมีการกระทำ ประสาทสัมผัส บทสนทนา และความคิดเท่าที่ POV รับรู้ได้
 - แม้ต้องเขียนหลายฉากในคำตอบเดียว ห้ามย่อหรือรวบรัดฉากใดฉากหนึ่งให้กลายเป็นสรุปเหตุการณ์เพื่อประหยัดที่ ทุกฉากต้องได้รับการเล่าเต็มรูปแบบเท่ากัน ถ้ารู้สึกว่าที่ไม่พอให้เขียนฉากที่กำหนดให้ครบทุกฉากแต่คุมความยาวของแต่ละฉากให้ใกล้เคียงโควตาที่ระบุ ไม่ใช่ตัดทอนฉากหลัง ๆ
@@ -901,8 +922,41 @@ ${fictionBatchOutputRules([section.id])}`;
  * นี่คือขั้นที่เอาผลตรวจที่จ่ายเงินไปแล้วมาใช้จริง
  */
 export function repairPrompt(args) {
-  if (args.book.contentMode === 'fiction') return `แก้ฉากนิยายเฉพาะปัญหาที่ระบุ รักษา POV น้ำเสียง ตัวละคร กฎโลก เหตุการณ์และปมเดิม ห้ามเปลี่ยนเป็นบทความสอนผู้อ่าน ห้ามเพิ่มข้อเท็จจริงหรือแก้จุดที่ไม่เกี่ยวข้อง\n${bookContext(args.book, args.book.outline, args.book.bible || {}, {})}\nปัญหา: ${JSON.stringify(args.issues)}\nต้นฉบับเต็ม:\n${args.currentText}\n${outputRules(args.section.id, true)}`;
+  if (args.book.contentMode === 'fiction') return fictionRepairPrompt(args);
   return proseRepair({ ...args, voice: authorVoiceBlock(args.book), output: outputRules(args.section.id, true) });
+}
+
+/**
+ * แก้ฉากนิยายตามผลตรวจ
+ *
+ * ตัวเดิมส่งบทว่าง ๆ เข้าบริบท ("บทที่ undefined: undefined") ไม่มีแผนของฉาก (POV เป้าหมาย beats)
+ * และขอคำตอบในรูป META ของสารคดี (new_terms · examples) — ฉากที่แก้แล้วจึงไม่รู้หน้าที่ของตัวเอง
+ * Story Bible ไม่ถูกอัปเดตตามสิ่งที่เปลี่ยน และศัพท์จากนิยายเสี่ยงหลุดไปอยู่ในอภิธานศัพท์
+ * เครื่องหมาย <<<SEC id BEGIN/END>>> ยังเหมือนเดิม ตัวแกะคำตอบจึงทำงานเหมือนเดิมทุกอย่าง
+ */
+function fictionRepairPrompt({ book, section, currentText, issues }) {
+  const outline = book.outline || {};
+  const chapter = (outline.chapters || []).find((c) => (c.sections || []).some((s) => String(s.id) === String(section.id))) || {};
+  const plan = { ...((chapter.sections || []).find((s) => String(s.id) === String(section.id)) || {}), ...section };
+  const pick = (...keys) => keys.map((k) => plan[k]).find((v) => v && (!Array.isArray(v) || v.length));
+  const beats = pick('beats') || [];
+  const keep = pick('takeaways') || [];
+  return `แก้ฉากนิยาย ${section.id} "${plan.title || ''}" เฉพาะปัญหาที่ระบุ รักษา POV น้ำเสียง ตัวละคร กฎโลก เหตุการณ์และปมเดิม ห้ามเปลี่ยนเป็นบทความสอนผู้อ่าน ห้ามเพิ่มข้อเท็จจริงหรือแก้จุดที่ไม่เกี่ยวข้อง
+
+${bookContext(book, outline, book.bible || {}, chapter)}
+
+แผนของฉากนี้ (ฉากที่แก้แล้วต้องยังทำหน้าที่นี้)
+POV: ${pick('povCharacter', 'pov_character') || 'ตาม Story Bible'}
+สถานที่: ${pick('location') || '-'} · เวลา: ${pick('time') || '-'}
+เป้าหมายฉาก: ${pick('sceneGoal', 'scene_goal') || '-'}
+ความขัดแย้ง: ${pick('conflict') || '-'} · จุดเปลี่ยน: ${pick('turn') || '-'} · แรงส่งท้ายฉาก: ${pick('hook') || '-'}
+${beats.length ? `beats: ${beats.map((b, i) => `${i + 1}) ${b}`).join(' ')}\n` : ''}${keep.length ? `continuity ที่ห้ามหาย: ${keep.join(' · ')}\n` : ''}
+ปัญหาที่ต้องแก้: ${JSON.stringify(issues)}
+
+ต้นฉบับเต็ม:
+${currentText}
+
+${fictionBatchOutputRules([section.id])}`;
 }
 
 export function consistencyPrompt(chapter, sections, bible, book = {}, partLabel = '') {
@@ -923,7 +977,7 @@ function fictionConsistencyPrompt(chapter, sections, bible, book) {
     ...(bible.relationships || []).map((x) => `REL: ${typeof x === 'string' ? x : JSON.stringify(x)}`),
   ].slice(-70).join('\n');
 
-  return `ตรวจบทที่ ${chapter.n} "${chapter.title}" ในฐานะ continuity editor ของนิยาย ${book.fictionGenre || ''}
+  return `ตรวจบทที่ ${chapter.n} "${chapter.title}" ในฐานะ continuity editor ของนิยาย${book.fictionGenre ? `แนว${fictionGenreName(book.fictionGenre)}` : ''}
 
 อ่านต้นฉบับเต็มทุกฉาก ตัดสินเฉพาะฉากที่ส่งมา ปมที่ยังไม่ถึงเวลาคลี่คลายไม่ถือเป็นข้อผิดพลาด
 ${summaries}
@@ -1897,29 +1951,56 @@ ${baked
 }
 
 /**
- * ลวดลายพื้นหลังที่วางทับทุกหน้าของเล่ม
+ * ลวดลายพื้นหลังของหน้าขึ้นบท / หน้าคั่นหมวด
  *
- * ข้อจำกัดต่างจากภาพประกอบทั่วไปโดยสิ้นเชิง: มันต้องอยู่ "ใต้ตัวหนังสือ" ทั้งเล่ม
- * อะไรที่มีคอนทราสต์สูง มีจุดสนใจ หรือมีจังหวะถี่ จะแย่งสายตากับเนื้อหาทันที
- * และเมื่อพิมพ์จริงบนกระดาษ ลายที่หนาแน่นเกินไปจะกลายเป็นพื้นเทาหม่นทั้งเล่ม
+ * ข้อจำกัดต่างจากภาพประกอบทั่วไปโดยสิ้นเชิง: ชื่อบทวางทับอยู่ อะไรที่มีคอนทราสต์สูง มีจุดสนใจ
+ * หรือมีจังหวะถี่ จะแย่งสายตาทันที และเมื่อพิมพ์จริงลายที่หนาแน่นจะกลายเป็นพื้นเทาหม่น
+ *
+ * ลายต้องมาจากเรื่องของเล่มนี้ ไม่ใช่ค่ากลาง
+ * เดิมคำสั่งเห็นแค่สไตล์ปก และถ้าไม่ได้ให้ระบบออกแบบปก (อัปโหลดเอง/ไม่ทำปก) ก็ตกไปที่
+ * "simple geometric marks" ทุกเล่ม ลายจึงหน้าตาเหมือนกันหมดไม่ว่าจะเป็นนิยายหรือคู่มือ
+ * ตอนนี้ส่งชื่อเรื่อง แก่น และส่วนต่าง ๆ ของเล่มไปให้เลือกวัตถุ/สัญลักษณ์เอง
+ * แต่ย้ำหนักว่าเป็นลายพื้น ไม่ใช่ภาพฉาก เพราะพอเห็นเนื้อเรื่องโมเดลชอบวาดเป็นภาพประกอบ
  */
 export function pagePatternPrompt(style, book) {
   const st = style || {};
   const palette = (st.palette || []).map((c) => c?.hex).filter(Boolean).join(', ');
   const trim = book?.trim || {};
-  return `A very subtle repeating background texture for the interior pages of a printed book. It will sit UNDER body text on every page.
+  const outline = book?.outline || {};
+  const mode = book?.contentMode || 'prose';
+  const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const title = clip(outline.title || book?.title || book?.topic, 120);
+  const core = clip(outline.thesis || book?.topic, 240);
+  const parts = (mode === 'fiction'
+    ? outline.world_rules || []
+    : mode === 'items'
+      ? (outline.themes || []).map((t) => [t.title, t.angle].filter(Boolean).join(' — '))
+      : (outline.chapters || []).map((c) => c.title))
+    .map((x) => clip(typeof x === 'string' ? x : JSON.stringify(x), 90))
+    .filter(Boolean)
+    .slice(0, 6);
+  const kind = { fiction: 'novel', items: 'collection of short pieces (quotes or poems)' }[mode] || 'non-fiction book';
+  const source = mode === 'fiction' ? 'objects, materials, weather or places from the story world'
+    : mode === 'items' ? 'small images and seasons that carry the mood of the pieces'
+      : 'everyday objects and symbols of the subject';
 
-Book style: ${st.style || 'clean modern editorial'}. ${st.texture || ''}
-Signature motif of this book: ${st.background_element || 'simple geometric marks drawn from the book concept'}.
-Palette (use only the lightest possible tints of these): ${palette || 'muted neutral tints'}.
+  return `A very subtle repeating background pattern for the chapter-opening pages of a printed ${kind}. The chapter title is printed on top of it, so the pattern must stay quiet.
+
+What this book is about — use it only as the source of the motifs, never write any of these words into the image:
+Title: ${title || '(untitled)'}
+${core && core !== title ? `Core idea: ${core}\n` : ''}${parts.length ? `Parts of the book:\n${parts.map((p) => `- ${p}`).join('\n')}\n` : ''}
+Pick 3-5 small, simple, instantly recognisable motifs that clearly belong to THIS book — ${source}. Not generic geometric marks, and not a picture of a scene. Scatter them lightly and repeat them like wallpaper.
+${st.background_element ? `The cover's signature motif must be one of them: ${st.background_element}.\n` : ''}Book style: ${st.style || 'clean modern editorial'}. ${st.texture || ''}
+Palette (use only the lightest possible tints of these): ${palette || 'muted neutral tints that suit the mood of the book'}.
 
 HARD REQUIREMENTS — this is wallpaper, not an illustration:
 - Extremely low contrast. Everything reads as a faint tint on near-white paper. No dark areas anywhere.
 - Even, all-over distribution. No focal point, no centre subject, no single large object, no vignette, no gradient across the page.
 - Small to medium repeating marks with generous empty space between them. At least 70% of the canvas stays empty paper.
-- No text, letters, numbers, logo, watermark or signature.
+- No scene, no landscape, no characters, no people, no story moment — only small separate motifs.
+- No text, letters, Thai characters, numbers, logo, watermark or signature.
 - No photographic content, no faces, no dense hatching, no heavy borders or frames.
-- Must stay calm and unnoticeable when body text is printed on top of it.
+- Must stay calm and unnoticeable when a title is printed on top of it.
 Canvas: portrait ${(Number(trim.widthMm) || 148).toFixed(0)} × ${(Number(trim.heightMm) || 210).toFixed(0)} mm, edge to edge, no margin.`;
 }
 

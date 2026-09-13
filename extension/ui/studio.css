@@ -408,3 +408,21 @@ button.reviewIssue:hover{border-color:#6f8cff}
 .projectDetail .fact{padding:9px 11px;border-radius:9px;background:#0c1425;border:1px solid #2b3956}
 .projectDetail .fact b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
 .projectDetail .fact span{font-size:11.5px;color:#8f9db8}
+/* แถบความคืบหน้ารวม: เปอร์เซ็นต์ใหญ่ · ขั้น x/9 · งานย่อยในขั้น · เวลาที่เหลือโดยประมาณ */
+.progressMeter{margin:14px 0 12px}
+.pmHead{display:flex;align-items:flex-end;gap:14px;margin-bottom:9px;min-width:0}
+.pmPct{font-size:34px;line-height:1;font-weight:800;letter-spacing:-.02em;color:#fff;font-variant-numeric:tabular-nums;flex-shrink:0}
+.pmPct small{font-size:16px;font-weight:700;color:#9db0da;margin-left:2px}
+.pmMeta{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;padding-bottom:2px}
+.pmMeta b{font-size:13.5px;color:#dfe7ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmMeta span{font-size:12.5px;color:#8f9db8;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pmEta{font-size:12.5px;color:#b9c7ff;font-variant-numeric:tabular-nums;white-space:nowrap;padding:4px 9px;border-radius:99px;background:#1a2544;border:1px solid #2d3d66;align-self:center}
+.pmEta:empty{display:none}
+.progressMeter .bar{margin:0;height:10px;position:relative}
+.progressMeter .bar i{background:linear-gradient(90deg,#5b74ff,#7f9bff);transition:width .6s cubic-bezier(.2,.7,.2,1);position:relative;overflow:hidden}
+.progressMeter.working .bar i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,#ffffff40,transparent);transform:translateX(-100%);animation:pm-sheen 1.8s ease-in-out infinite}
+.progressMeter.done .bar i{background:linear-gradient(90deg,#2fbf7a,#5fe0a0)}
+.progressMeter.done .pmPct{color:#7bf0a8}
+@keyframes pm-sheen{to{transform:translateX(100%)}}
+@media(prefers-reduced-motion:reduce){.progressMeter.working .bar i::after{animation:none;display:none}}
+@media(max-width:480px){.pmPct{font-size:28px}.pmHead{flex-wrap:wrap}.pmEta{order:3}}

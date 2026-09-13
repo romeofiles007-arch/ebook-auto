@@ -19,6 +19,9 @@ function setup(responses, decision, book = {}) {
   const scope = { book, RETRYABLE_TURN_STATUS: new Set(['error','timeout','empty']),
     turnErrorMessage: r => r.meta?.error || r.status,
     makeSupervisor: () => async () => { asks++; return decision; },
+    // superviseFailure ถาม ceoModeOn() เพื่อเลือกข้อความที่บอกผู้ใช้ว่าทำไมผู้คุมไม่เข้าแทรก
+    // ขาดตัวนี้ไป การ์ด "ห้ามส่งซ้ำ" จะ throw แทนที่จะ return null แล้วเทสต์จะเลิกพิสูจน์กติกานั้น
+    ceoModeOn: () => !!decision,
     addEvent() {}, recentLogLines: () => [], answerEvidence: () => '',
     citationGutted, NO_CITATION_RULE, noteTrouble,
     parseJson: s => { try { return JSON.parse(s); } catch { return null; } },

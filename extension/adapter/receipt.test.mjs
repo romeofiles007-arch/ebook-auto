@@ -83,3 +83,45 @@ test('ทางเดิมที่ใช้ได้อยู่แล้ว�
   const got = after.findUserReceipt(imagePrompt(2), snap);
   assert.equal(got.innerText, imagePrompt(2));
 });
+
+const pastedItem = (text, turn, id) => ({
+  ...msg(`Pasted text(20260913-063002).txt\nDocument\n${text}`,turn,id),
+  querySelector: selector => selector === '[data-testid="collapsible-user-message-content"]'
+    ? {innerText:text,textContent:text} : null,
+});
+
+test('item receipt finds the new prompt after a Pasted text file tile',()=>{
+  const prompt='เขียนกลอน 1 ชิ้นสำหรับหมวด ก่อนหนาว\n'+'เนื้อหาที่ต้องไม่ซ้ำ '.repeat(30);
+  const node=pastedItem(prompt,20,'new-item');
+  const before=pageWith([]).snapshotUserMessages(true);
+  assert.equal(pageWith([node]).findUserReceipt(prompt,before),node);
+});
+
+test('the same attachment-prefixed message is not accepted again on retry',()=>{
+  const prompt='เขียนกลอน 1 ชิ้นสำหรับหมวด ก่อนหนาว\n'+'เนื้อหาที่ต้องไม่ซ้ำ '.repeat(30);
+  const node=pastedItem(prompt,20,'old-item');
+  const page=pageWith([node]);
+  assert.equal(page.findUserReceipt(prompt,page.snapshotUserMessages(true)),null);
+});
+
+test('file tile alone or a different bubble cannot serve as the item receipt',()=>{
+  const prompt='เขียนกลอน 1 ชิ้นสำหรับหมวด ก่อนหนาว\n'+'เนื้อหาที่ต้องไม่ซ้ำ '.repeat(30);
+  const before=pageWith([]).snapshotUserMessages(true);
+  assert.equal(pageWith([msg('Pasted text.txt Document',20,'file-only')]).findUserReceipt(prompt,before),null);
+  assert.equal(pageWith([pastedItem('ข้อความอื่น',20,'other')]).findUserReceipt(prompt,before),null);
+});
+
+test('non-item callers retain the original attachment matching behavior',()=>{
+  const prompt='Existing prose or image prompt '.repeat(20);
+  const before=pageWith([]).snapshotUserMessages();
+  assert.equal(pageWith([pastedItem(prompt,20,'new')]).findUserReceipt(prompt,before),null);
+  const plain=msg(prompt,20,'new');
+  assert.equal(pageWith([plain]).findUserReceipt(prompt,before),plain);
+});
+
+test('item matching still handles a collapsed bubble and virtualized old turns',()=>{
+  const prompt='เขียนกลอน 1 ชิ้นสำหรับหมวด ก่อนหนาว\n'+'เนื้อหาที่ต้องไม่ซ้ำ '.repeat(30);
+  const before=pageWith([pastedItem(prompt,16,'old1'),pastedItem(prompt,18,'old2')]).snapshotUserMessages(true);
+  const fresh=pastedItem(prompt.slice(0,160),20,'new');
+  assert.equal(pageWith([fresh]).findUserReceipt(prompt,before),fresh);
+});

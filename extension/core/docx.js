@@ -12,6 +12,7 @@
 import { stripZwsp } from './thai.js';
 import { backMatterSections } from './references.js';
 import { stripEchoedHeading } from './extract.js';
+import { itemTypeSize } from './items.js';
 
 const MM_TO_TWIP = 56.6929;
 const tw = (mm) => Math.round(mm * MM_TO_TWIP);
@@ -57,7 +58,7 @@ export async function buildDocx({ book, outline, sections }) {
         .sort((a, b) => compareItemId(a.id, b.id));
       for (const item of items) {
         body.push(para(`${item.id} ${esc(theme.title)}`, { style: 'Heading2', font: head, size: size * 1.1, bold: true }));
-        body.push(para(esc(stripZwsp(item.text || item.md || '')), { font, size: book.itemSizePt || size, align: 'center' }));
+        body.push(para(esc(stripZwsp(item.md ?? item.text ?? '')), { font, size: itemTypeSize(book), align: 'center' }));
         if (item.attribution) body.push(para(`— ${esc(item.attribution)}`, { font, size: size * 0.75, align: 'center', color: '666666' }));
       }
     }

@@ -326,7 +326,16 @@
       </div>
       <div class="field">
         <label for="itemSizePt">ขนาดตัวอักษร (pt)</label>
-        <input id="itemSizePt" type="number" min="12" max="48" step="1" value="26">
+        <input id="itemSizePt" type="number" min="9" max="20" step="0.5" value="" placeholder="อัตโนมัติ">
+        <div class="muted">เว้นว่าง = ขนาดหนังสือจริงตามประเภทชิ้น (ราว 11–14pt)</div>
+      </div>
+      <div class="field">
+        <label for="itemIllus">ภาพประกอบในเล่ม</label>
+        <select id="itemIllus">
+          <option value="none" selected>ไม่มี — ตัวหนังสือล้วน</option>
+          <option value="light">บ้าง — ภาพหน้าคั่นหมวด + ราว 1 ภาพต่อ 24 ชิ้น</option>
+          <option value="rich">มากขึ้น — ราว 1 ภาพต่อ 12 ชิ้น</option>
+        </select>
       </div>
       <div class="field">
         <label for="itemAttribution">ที่มาใต้ชิ้น</label>
@@ -660,7 +669,14 @@
     <div id="phase">รอเริ่ม...</div>
     <div id="runningCost" class="pagestat hidden"></div>
     <div id="ceoRunningCost" class="muted"></div>
-    <div class="bar"><i id="bar"></i></div>
+    <div id="progressMeter" class="progressMeter" role="progressbar" aria-label="ความคืบหน้าทั้งเล่ม" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="pmHead">
+        <span class="pmPct"><span id="pmPct">0</span><small>%</small></span>
+        <span class="pmMeta"><b id="pmStep">รอเริ่ม</b><span id="pmSub"></span></span>
+        <span id="pmEta" class="pmEta"></span>
+      </div>
+      <div class="bar"><i id="bar"></i></div>
+    </div>
     <div id="detail" class="muted"></div>
     <!-- ฝ่ายธุรการ: ติดอะไรอยู่ · ซ้ำที่เดิมกี่ครั้ง · ลองท่าอะไรไปแล้ว (มองอย่างเดียว ไม่สั่งใคร) -->
     <div id="deskNote" class="muted hidden"></div>

@@ -10,7 +10,7 @@ const node=(key,text)=>({innerText:text,getAttribute:()=>key,closest:()=>null});
 test('receipt matches prompt and new identity even when a long chat keeps the same DOM count',()=>{
  let rows=[node('old','prompt')];
  const ctx={$$:()=>rows,normalizeMessage:s=>String(s).replace(/\s+/g,' ').trim()};
- vm.createContext(ctx);vm.runInContext([constFn('turnIndexOf'),...['userMessageKey','snapshotUserMessages','findUserReceipt'].map(n=>fn(n))].join('\n'),ctx);
+ vm.createContext(ctx);vm.runInContext([constFn('turnIndexOf'),...['userMessageKey','userReceiptText','snapshotUserMessages','findUserReceipt'].map(n=>fn(n))].join('\n'),ctx);
  const before=ctx.snapshotUserMessages();
  rows=[node('old','prompt')];assert.equal(ctx.findUserReceipt('prompt',before),null,'rerender is not a submission');
  rows=[node('new','unrelated')];assert.equal(ctx.findUserReceipt('prompt',before),null);
@@ -68,7 +68,7 @@ test('ข้อความยาวที่หน้าเว็บพับ�
   let rows = [];
   const ctx = { $$: () => rows, normalizeMessage: (s) => String(s).replace(/\s+/g, ' ').trim() };
   vm.createContext(ctx);
-  vm.runInContext(['userMessageKey', 'snapshotUserMessages', 'findUserReceipt'].map((n) => fn(n)).join('\n'), ctx);
+  vm.runInContext(['userMessageKey', 'userReceiptText', 'snapshotUserMessages', 'findUserReceipt'].map((n) => fn(n)).join('\n'), ctx);
   const before = ctx.snapshotUserMessages();
   // หน้าเว็บแสดงแค่ 300 ตัวแรกแล้วมีปุ่มขยาย — หัวข้อความยังตรง
   rows = [node('new', long.slice(0, 300))];
@@ -79,7 +79,7 @@ test('ข้อความอื่นที่ขึ้นต้นคนล�
   let rows = [];
   const ctx = { $$: () => rows, normalizeMessage: (s) => String(s).replace(/\s+/g, ' ').trim() };
   vm.createContext(ctx);
-  vm.runInContext(['userMessageKey', 'snapshotUserMessages', 'findUserReceipt'].map((n) => fn(n)).join('\n'), ctx);
+  vm.runInContext(['userMessageKey', 'userReceiptText', 'snapshotUserMessages', 'findUserReceipt'].map((n) => fn(n)).join('\n'), ctx);
   const before = ctx.snapshotUserMessages();
   rows = [node('new', 'คำสั่งอื่นที่ไม่เกี่ยวกันเลย')];
   assert.equal(ctx.findUserReceipt('คุณคือบรรณาธิการ ' + 'ก'.repeat(300), before), null);

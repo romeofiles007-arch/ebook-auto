@@ -23,7 +23,7 @@ import {
   widenBands,
 } from './budget.js';
 import * as I from './items.js';
-import { duplicateItems, reviewGroups, itemReviewPrompt, reviewIssues } from './item-quality.js';
+import { duplicateItems, reviewGroups, itemReviewPrompt, reviewIssues, itemDigest, itemVerdictKey } from './item-quality.js';
 import { compileBook, calibrate } from '../typeset/compiler.js';
 import { jitter, sleep } from '../transport/index.js';
 import { turnDelay } from './production-mode.js';
@@ -258,6 +258,12 @@ export class Machine {
     this.emit({ type: 'log', level, message, at: Date.now(), ...extra });
   }
 
+  /** ความคืบหน้าภายในขั้นปัจจุบัน — ใช้แค่ขยับแถบบนหน้าจอ ไม่มีผลกับการทำงาน */
+  progress(done, total, label = '') {
+    if (!(total > 0)) return;
+    this.emit({ type: 'progress', step: this.job?.step, done: Math.min(done, total), total, label });
+  }
+
   stop() {
     this.stopRequested = true;
   }
@@ -336,7 +342,9 @@ export class Machine {
     // เทิร์นที่ขอภาพต้องออกทางสายภาพเสมอ ไม่ใช่สายที่ใช้เขียนข้อความ
     const line = opts.wantImages ? this.imgTr : this.tr;
     const startedAt = Date.now();
-    const res = await line.send(prompt, {...opts, recoverCompletedSetup:this.book.threadMode !== 'reuse'});
+    const res = await line.send(prompt, {...opts, recoverCompletedSetup:this.book.threadMode !== 'reuse',
+      ...(this.book.contentMode === 'items' && !opts.wantImages ? { itemReceipt: true } : {}),
+    });
     res.meta = {...res.meta, elapsedMs:Date.now()-startedAt};
     await db.saveTurn(this.book.id, n, {
       label: opts.label || '',
@@ -733,7 +741,7 @@ ${P.NO_CITATION_RULE}
     if (this.book.contentMode === 'items') {
       // โหมดรายชิ้นไม่ต้องหาอักษรต่อหน้า เพราะจำนวนหน้ามาจากจำนวนชิ้นตรง ๆ
       this.book.itemSizePt = this.book.itemSizePt || I.suggestItemSize(this.book);
-      this.log('ok', `โหมดรายชิ้น ${this.book.itemsPerPage} ชิ้นต่อหน้า ตัวอักษร ${this.book.itemSizePt}pt`);
+      this.log('ok', `โหมดรายชิ้น ${this.book.itemsPerPage} ชิ้นต่อหน้า ตัวอักษร ${I.itemTypeSize(this.book)}pt`);
       this.job.step = 'outline';
       return;
     }
@@ -914,6 +922,12 @@ ${P.NO_CITATION_RULE}
     const existing = await db.loadSections(this.book.id);
     const done = new Map();
     for (const s of existing) if (s.kind === 'item') done.set(s.id, s);
+    const wantAll = outline.themes.reduce((n, t) => n + (t.count || plan.perTheme || 0), 0);
+    const reportItems = () => {
+      const n = [...done.values()].filter(s => (s.text || s.md || '').trim()).length;
+      this.progress?.(n, wantAll, `เขียนแล้ว ${Math.min(n, wantAll)}/${wantAll} ชิ้น`);
+    };
+    reportItems();
 
     for (const theme of outline.themes) {
       const want = theme.count || plan.perTheme;
@@ -962,6 +976,7 @@ ${P.NO_CITATION_RULE}
 
         have += got.length;
         this.log('ok', `หมวด ${theme.n} "${theme.title}": ได้ ${have}/${want} ชิ้น`);
+        reportItems();
         await this.save();
 
         if (got.length < count) throw new Halt(`ยังขาดชิ้น ${ids.filter(id=>!got.some(it=>it.id===id)).join(', ')} — บันทึกชิ้นที่ได้แล้ว กดทำต่อเพื่อเติมเฉพาะที่ขาด`);
@@ -995,52 +1010,92 @@ ${P.NO_CITATION_RULE}
     const target = plan.breakdown.targetPhysical;
     const tol = this.book.pageTolerance ?? 2;
     const perPage = Math.max(1, this.book.itemsPerPage || 1);
+    const plannedTotal = Number.isSafeInteger(plan.total) && plan.total > 0 ? plan.total : null;
 
     for (let round = 0; round < 3; round++) {
+      // โหมดรายชิ้น: นับชิ้น 30% ของขั้น ที่เหลือเป็นบรรณาธิการรายชิ้น (checkItemQuality)
+      this.progress?.(round * 10, 100, 'ปรับจำนวนชิ้นให้พอดีหน้า');
       const sections = await db.loadSections(this.book.id);
       const items = sections.filter((s) => s.kind === 'item');
       const { pages, ms } = await this.measure(sections);
-      const err = pages - target;
+      // Divider/front/back pages must never be compensated by deleting book content.
+      // Old imported plans without a total retain their previous measurement fallback.
+      const err = plannedTotal === null ? pages - target : (items.length - plannedTotal) / perPage;
+      const fitted = plannedTotal === null ? Math.abs(err) <= tol : items.length === plannedTotal;
       this.log(
-        Math.abs(err) <= tol ? 'ok' : 'warn',
+        fitted ? 'ok' : 'warn',
         `รอบที่ ${round + 1}: ${pages} หน้า จาก ${items.length} ชิ้น (${err >= 0 ? '+' : ''}${err}) คอมไพล์ ${ms} ms`,
       );
-      if (Math.abs(err) <= tol) return this.finishFit(pages);
+      if (fitted) {
+        if (Math.abs(pages - target) > tol) this.log('warn', `เนื้อหาครบตามแผน ${items.length} ชิ้น รวมจริง ${pages} หน้า ต่างจากค่าประมาณ ${target} หน้า — เก็บเนื้อหาครบไว้`);
+        return this.finishFit(pages);
+      }
 
       if (err > 0) {
-        const drop = Math.min(items.length - 1, err * perPage);
-        const tail = items.sort((a, b) => cmpItem(b.id, a.id)).slice(0, drop);
+        const drop = Math.min(items.length - 1, plannedTotal === null ? Math.ceil(err * perPage) : items.length - plannedTotal);
+        const tail = items.filter(s => !s.locked && s.status !== 'approved').sort((a, b) => cmpItem(b.id, a.id)).slice(0, drop);
+        if (!tail.length) { this.log('warn', 'ปรับหน้าต่อไม่ได้โดยรักษาชิ้นที่ล็อกไว้ เก็บเนื้อหาเดิมทั้งหมด'); return this.finishFit(pages); }
         for (const s of tail) await db.del('sections', s.key);
         this.log('ok', `ตัดออก ${tail.length} ชิ้นให้พอดีหน้า ไม่ต้องใช้ข้อความเพิ่ม`);
         continue;
       }
 
-      const need = -err * perPage;
+      const need = plannedTotal === null ? Math.ceil(-err * perPage) : plannedTotal - items.length;
       const themes = this.book.outline.themes;
       const theme = themes[round % themes.length];
-      const have = Math.max(0,...items.filter((s) => String(s.id).startsWith(theme.n + '.')).map(s=>Number(String(s.id).split('.').pop()) || 0));
-      const ids = Array.from({ length: need }, (_, i) => `${theme.n}.${have + i + 1}`);
+      let have = Math.max(0,...items.filter((s) => String(s.id).startsWith(theme.n + '.')).map(s=>Number(String(s.id).split('.').pop()) || 0));
 
-      const res = await this.turnWithRetry(
-        I.itemBatchPrompt({
-          book: this.book,
-          outline: this.book.outline,
-          theme,
-          count: need,
-          startIndex: have + 1,
-          avoid: (this.book.bible.usedExamples || []).slice(-30),
-        }),
-        { label: `เพิ่มอีก ${need} ชิ้น` },
-      );
-      const got = I.extractItems(res.text, ids);
-      for (const it of got) await this.saveItem(theme, it);
-      if (got.length !== ids.length) throw new Halt(`เพิ่มรายชิ้นยังไม่ครบ ${got.length}/${ids.length} ชิ้น — เก็บงานที่ได้แล้ว กรุณากดทำต่อ`);
-      this.log('ok', `เพิ่มมาได้ ${got.length} ชิ้น`);
-      if (!got.length) break;
+      /**
+       * ขอทีละชุดเท่าที่ตอบไหวจริง ไม่ใช่ขอทั้งก้อนในข้อความเดียว
+       *
+       * ขั้นเขียนรู้เรื่องนี้อยู่แล้ว มันตัด min(itemsPerTurn, ที่เหลือ) ทุกชุด (กลอน 10 · คำคม 20)
+       * แต่ขั้นนี้เคยส่ง need ดิบ ๆ เข้าไปเป็น count ซึ่งเป็นจำนวนที่คำนวณจากหน้าที่ยังขาด
+       * ขาดอยู่ 20 หน้าที่ 4 ชิ้นต่อหน้า = ขอ 80 ชิ้นในข้อความเดียว เกินเพดานของกลอนแปดเท่า
+       * และ prompt เองก็พองตาม เพราะแม่แบบพิมพ์โครง <<<ITEM>>> ให้ครบทุกชิ้นที่ขอ
+       *
+       * ผลคือ ChatGPT คืนคำตอบที่ใช้ไม่ได้ (หรือไม่คืนอะไรเลย) เหมือนกันทุกครั้ง
+       * เพราะ need คำนวณจากค่าเดิมทุกรอบ — กดทำต่อกี่ครั้งก็ตายที่เดิมเป๊ะ ๆ
+       * (เห็นจริง: ค้างที่ขั้นปรับจำนวนหน้า · กดต่อให้แล้ว 3 ครั้งแต่ยังกลับมาค้างที่เดิม)
+       *
+       * ขั้นนี้เป็นของโหมดรายชิ้นล้วน ๆ (fit() แยกทางมาที่นี่เมื่อ contentMode === 'items')
+       * โหมดอื่นไม่ได้เดินผ่านบรรทัดพวกนี้เลยสักบรรทัด
+       */
+      const per = I.itemsPerTurn(this.book.itemKind);
+      const avoid = [...(this.book.bible.usedExamples || []).slice(-30)];
+      let added = 0;
+      // มีเพดานจำนวนชุด เผื่อกรณีที่ได้กลับมาครั้งละนิดเดียว จะได้ไม่ยิงทั้งคืน
+      const maxBatches = Math.ceil(need / per) + 1;
+      for (let batch = 0; batch < maxBatches && added < need; batch++) {
+        const count = Math.min(per, need - added);
+        const ids = Array.from({ length: count }, (_, i) => `${theme.n}.${have + i + 1}`);
+        const res = await this.turnWithRetry(
+          I.itemBatchPrompt({
+            book: this.book,
+            outline: this.book.outline,
+            theme,
+            count,
+            startIndex: have + 1,
+            requestedIds: ids,
+            avoid: avoid.slice(-30),
+          }),
+          { label: `เพิ่มอีก ${count} ชิ้น (${Math.min(added + count, need)}/${need})` },
+        );
+        const got = I.extractItems(res.text, ids);
+        for (const it of got) await this.saveItem(theme, it);
+        if (!got.length) break; // ชุดนี้ไม่ได้อะไรเลย เลิกขอต่อในรอบนี้ ของที่ได้มาก่อนหน้ายังอยู่ครบ
+        // รหัสที่ได้จริงเป็นตัวบอกว่าชุดถัดไปเริ่มที่เลขไหน ไม่ใช่จำนวนที่ขอไป
+        have = Math.max(have, ...got.map((it) => Number(String(it.id).split('.').pop()) || 0));
+        avoid.push(...got.map((it) => it.text));
+        added += got.length;
+        this.log('ok', `เพิ่มมาได้ ${got.length} ชิ้น (รวม ${added}/${need} ชิ้นในรอบนี้)`);
+      }
+      if (!added) throw new Halt(`ขอเพิ่มรายชิ้นแล้วไม่ได้กลับมาสักชิ้นจาก ${need} ชิ้นที่ต้องการ — เก็บงานที่ได้แล้ว กรุณากดทำต่อ`);
     }
 
     const sections = await db.loadSections(this.book.id);
     const { pages } = await this.measure(sections);
+    if (plannedTotal !== null && sections.filter(s => s.kind === 'item').length !== plannedTotal)
+      this.log('warn', 'ปรับจำนวนชิ้นครบรอบแล้ว ยังไม่ตรงแผน โปรดตรวจจำนวนชิ้นก่อนส่งออก');
     return this.finishFit(pages);
   }
 
@@ -1059,6 +1114,9 @@ ${P.NO_CITATION_RULE}
   async ensureAuthorVoice() {
     const mode = this.book.authorVoice || 'auto';
     if (mode === 'off' || this.book.authorVoiceCard?.who) return;
+    // นิยายมีเสียงเล่าของตัวเองอยู่แล้ว (outline.voice_card + Story Bible) และ prompt นิยายไม่เคยอ่านการ์ดนี้
+    // การสร้างการ์ดให้นิยายจึงเสียหนึ่งข้อความโดยไม่มีผลกับเนื้อเรื่อง
+    if (this.book.contentMode === 'fiction') return;
     if (String(this.book.authorVoiceText || '').trim()) return; // ผู้ใช้เขียนเองแล้ว
 
     this.log('ok', 'สร้างการ์ดผู้เขียน เพื่อให้ทั้งเล่มมีคนพูดคนเดียวและมีจุดยืน');
@@ -1098,6 +1156,7 @@ ${P.NO_CITATION_RULE}
 
     for (let i = this.job.cursor; i < batches.length; i++) {
       this.job.cursor = i;
+      this.progress?.(i, batches.length, `เขียนชุด ${i + 1}/${batches.length}`);
       const b = batches[i];
       const pending = [];
       for (const s of b.sections) {
@@ -1203,7 +1262,12 @@ ${P.NO_CITATION_RULE}
    */
   async figures() {
     const next = () => (this.job.step = this.book.runConsistency ? 'consistency' : 'fit');
-    if (this.book.contentMode === 'items') return next();
+    if (this.book.contentMode === 'items') {
+      // ภาพของเล่มรายชิ้นเปิดจากช่อง itemIllus เท่านั้น — ไม่ใช่ illustrationLevel ที่ images() ปรับเองได้
+      // เล่มรายชิ้นที่สร้างก่อนมีตัวเลือกนี้จึงไม่มีวันได้ภาพหรือข้อความวางแผนภาพเพิ่มขึ้นมาเอง
+      if (['light', 'rich'].includes(this.book.itemIllus)) await this.itemFigures();
+      return next();
+    }
     if ((this.book.illustrationLevel || 'none') === 'none') {
       this.log('ok', 'เล่มนี้ไม่ใส่ภาพประกอบ ข้ามไป');
       return next();
@@ -1311,6 +1375,91 @@ ${P.NO_CITATION_RULE}
         (imgs ? ' · ดู prompt และใส่ไฟล์ได้ในแท็บภาพ' : ''),
     );
     return next();
+  }
+
+  /**
+   * ภาพของหนังสือรายชิ้น — น้อยแต่ตั้งใจ แบบหนังสือรวมบทกวีที่ขายกันจริง
+   *
+   * ไม่แทรก marker ลงเนื้อหาเหมือนร้อยแก้ว เพราะชิ้นหนึ่งมีไม่กี่บรรทัด ภาพจึงผูกกับรหัสชิ้น (1.12)
+   * หรือหน้าคั่นหมวด (theme-1) แล้วเอกสารรายชิ้นเป็นคนวาง: หน้าคั่นหมวดได้ภาพวงกลม
+   * ชิ้นที่มีภาพได้หน้าของตัวเอง ภาพอยู่บน ข้อความอยู่ล่าง
+   * ใช้งานภาพสายเดิมทั้งหมด (book.figures → plannedImageJobs → Phase 2)
+   */
+  async itemFigures() {
+    if ((this.book.figures || []).some((f) => f.itemFigure)) return;
+    const outline = this.book.outline || {};
+    const themes = outline.themes || [];
+    const multiTheme = themes.length > 1;
+    const kind = I.ITEM_KINDS[this.book.itemKind] || I.ITEM_KINDS.quote;
+    const items = (await db.loadSections(this.book.id))
+      .filter((s) => s.kind === 'item' && String(s.text || s.md || '').trim())
+      .sort((a, b) => cmpItem(a.id, b.id));
+    if (!items.length) return;
+
+    const every = this.book.itemIllus === 'rich' ? 12 : 24;
+    const want = Math.min(30, Math.max(1, Math.round(items.length / every))) + (multiTheme ? themes.length : 0);
+    // ส่งเฉพาะบรรทัดแรกของชิ้น และสุ่มแบบกระจายเท่า ๆ กันไม่เกิน 90 ชิ้น — เล่มใหญ่จะได้ไม่พิมพ์ข้อความยาวเกินจำเป็น
+    const step = Math.max(1, Math.ceil(items.length / 90));
+    const sample = items.filter((_, i) => i % step === 0)
+      .map((s) => `${s.id}: ${String(s.text || s.md).trim().split('\n')[0].slice(0, 60)}`);
+
+    const res = await this.turnWithRetry(`เลือกจุดวางภาพประกอบในหนังสือรวม${kind.label} "${outline.title || this.book.topic}"
+หนังสือแบบนี้ใช้ภาพน้อยแต่ตั้งใจ ภาพให้บรรยากาศและอารมณ์ของถ้อยคำ ไม่ใช่วาดสิ่งที่ข้อความพูดตรง ๆ
+
+${multiTheme ? `หมวดในเล่ม\n${themes.map((t) => `theme-${t.n}: ${t.title}`).join('\n')}\n\n` : ''}ชิ้นในเล่ม (รหัส: บรรทัดแรก)
+${sample.join('\n')}
+
+กติกา
+${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป็น theme-<เลขหมวด> ได้หมวดละ 1 ภาพ ควรมีครบทุกหมวด\n' : ''}- ภาพคู่ชิ้น: target เป็นรหัสชิ้นจากรายการด้านบนเท่านั้น เลือกชิ้นที่มีภาพในใจชัด กระจายทั่วเล่ม ห้ามเลือกชิ้นติดกัน
+- รวมทั้งหมดประมาณ ${want} ภาพ
+- subject เขียนเป็นภาษาอังกฤษ บรรยายฉาก วัตถุ แสง ฤดู และอารมณ์ให้ชัด ห้ามมีตัวอักษรในภาพ ไม่เน้นใบหน้าคน
+- แต่ละภาพต้องต่างกันจริง ไม่ใช่ฉากเดิมเปลี่ยนมุม
+
+ตอบ JSON เท่านั้น: {"figures":[{"target":"theme-1 หรือ 1.12","subject":"..."}]}`, { label: 'วางแผนภาพประกอบรายชิ้น' });
+    const plan = X.parseJson(res.text);
+
+    const valid = new Set(items.map((s) => String(s.id)));
+    const t = this.book.typography;
+    const textW = this.book.trim.widthMm - t.marginsMm.inner - t.marginsMm.outer;
+    const requested = this.book.figureStyle && this.book.figureStyle !== 'box' ? this.book.figureStyle : null;
+    const style = requested || (P.figureColorOn(this.book) ? 'photoColor' : 'photo');
+    const figures = [];
+    const used = new Set();
+    for (const f of plan?.figures || []) {
+      const target = String(f?.target || f?.section || '').trim();
+      const subject = String(f?.subject || '').trim();
+      const isTheme = multiTheme && themes.some((th) => `theme-${th.n}` === target);
+      if (!subject || used.has(target) || (!isTheme && !valid.has(target))) continue;
+      used.add(target);
+      const widthMm = isTheme ? Math.round(Math.min(50, textW * 0.52) * 10) / 10 : Math.round(textW * 0.8 * 10) / 10;
+      const aspect = normalizeFigureAspect(isTheme ? '1:1' : '4:3');
+      const heightMm = isTheme ? widthMm : Math.round(Math.min(72, widthMm / aspect.ratio) * 10) / 10;
+      const rec = isTheme ? null : items.find((s) => String(s.id) === target);
+      const prompt = P.interiorFigurePrompt(style, subject, widthMm, heightMm, aspect.label, {
+        color: P.figureColorOn(this.book),
+        palette: this.book.style?.palette || [],
+        cover: this.book.style || null,
+        otherSubjects: figures.map((x) => x.subject),
+        figureIndex: figures.length,
+        nearby: rec ? String(rec.text || rec.md) : themes.find((th) => `theme-${th.n}` === target)?.title || '',
+      });
+      if (!prompt) continue;
+      figures.push({
+        id: target, section: target, kind: 'image', itemFigure: true,
+        name: isTheme ? `fig-${target}.png` : `fig-item-${target}.png`,
+        caption: '', subject, placement: 'middle',
+        widthPct: isTheme ? 52 : 80, widthMm, heightMm, aspect: aspect.label, prompt,
+      });
+    }
+
+    if (!figures.length) {
+      this.log('warn', 'วางแผนภาพประกอบรายชิ้นไม่สำเร็จ — ทำเล่มต่อโดยไม่มีภาพในเล่ม');
+      return;
+    }
+    this.book.figures = [...(this.book.figures || []).filter((f) => !f.itemFigure), ...figures];
+    const onThemes = figures.filter((f) => f.section.startsWith('theme-')).length;
+    this.log('ok', `วางแผนภาพประกอบรายชิ้น ${figures.length} รูป — หน้าคั่นหมวด ${onThemes} · คู่ชิ้น ${figures.length - onThemes}`);
+    await this.save();
   }
 
   /**
@@ -1600,6 +1749,7 @@ ${P.NO_CITATION_RULE}
     const chapters = this.book.outline.chapters;
     for (let i = this.job.cursor; i < chapters.length; i++) {
       this.job.cursor = i;
+      this.progress?.(i, chapters.length, `ตรวจบทที่ ${i + 1}/${chapters.length}`);
       const ch = chapters[i];
       const recs = [];
       for (const s of ch.sections) recs.push((await db.loadSection(this.book.id, s.id)) || s);
@@ -1929,6 +2079,7 @@ ${P.NO_CITATION_RULE}
 
     for (let round = this.job.round; round < MAX_FIT_ROUNDS; round++) {
       this.job.round = round;
+      this.progress?.(round, MAX_FIT_ROUNDS, `ปรับหน้ารอบ ${round + 1}/${MAX_FIT_ROUNDS}`);
       const sections = await db.loadSections(this.book.id);
       const { pages, ms } = await this.measure(sections);
       const err = pages - target;
@@ -2247,20 +2398,30 @@ ${P.NO_CITATION_RULE}
   async checkItemQuality() {
     let changed=false;
     for(let round=0;round<3;round++) {
-      const items=(await db.loadSections(this.book.id)).filter(s=>s.kind==='item');
+      const items=(await db.loadSections(this.book.id)).filter(s=>s.kind==='item').map(s=>({...s,text:s.md ?? s.text ?? ''}));
       if(!items.length) throw new Halt('ไม่มีเนื้อหารายชิ้นให้ตรวจ');
       const signature=JSON.stringify([this.book.itemKind,this.book.topic,!!this.book.runConsistency,items.map(s=>[s.id,s.text,s.md,s.attribution])]);
-      if(this.book.itemQuality?.signature===signature && this.book.itemQuality?.passed) return changed;
+      const continuous = this.book.automation?.mode === 'full';
+      if(this.book.itemQuality?.signature===signature && (this.book.itemQuality?.passed || (continuous && this.book.itemQuality?.deferred))) return changed;
       let issues=duplicateItems(items);
       if(this.book.runConsistency) {
-        const groups=reviewGroups(items.map(s=>({id:s.id,text:s.text || s.md,attribution:s.attribution || ''})));
+        /**
+         * ผลตรวจเก็บเป็นรายชิ้น (itemVerdicts) ไม่ใช่รายชุด
+         * รอบหลังขัดเกลาจึงอ่านเฉพาะชิ้นที่เพิ่งถูกแก้ ไม่ใช่วนอ่านทั้งเล่มใหม่ทุกรอบ
+         */
+        const all=items.map(s=>({id:s.id,text:s.text || s.md,attribution:s.attribution || ''}));
+        const keyOf=new Map(all.map(s=>[s.id,itemVerdictKey(this.book,s)]));
+        const known=this.book.itemVerdicts || {};
+        this.book.itemVerdicts=Object.fromEntries([...keyOf.values()].filter(k=>Object.hasOwn(known,k)).map(k=>[k,known[k]]));
+        const verdicts=this.book.itemVerdicts;
+        const pending=all.filter(s=>!Object.hasOwn(verdicts,keyOf.get(s.id)));
+        for(const s of all) { const reason=verdicts[keyOf.get(s.id)]; if(reason) issues.push({id:s.id,reason}); }
+        if(pending.length<all.length) this.log('ok',`บรรณาธิการรายชิ้น · ใช้ผลตรวจเดิม ${all.length-pending.length} ชิ้นที่ข้อความไม่เปลี่ยน อ่านใหม่ ${pending.length} ชิ้น`);
+        const groups=reviewGroups(pending);
         for(let i=0;i<groups.length;i++) {
-          this.log('ok',`บรรณาธิการรายชิ้น · อ่านเต็มชุด ${i+1}/${groups.length} (${groups[i].length} ชิ้น)`);
-          const prompt = itemReviewPrompt(this.book,groups[i]);
-          // Exact prompt includes full texts and rules. Reuse only a completed review.
-          const cache = (this.book.itemReviewCache ||= []);
-          const hit = cache.find(entry => entry.prompt === prompt);
-          if (hit) { issues.push(...hit.issues); continue; }
+          this.log('ok',`บรรณาธิการรายชิ้น · อ่านชุด ${i+1}/${groups.length} (${groups[i].length} ชิ้น)`);
+          this.progress?.(30 + Math.round(((round + i / groups.length) / 3) * 70), 100, `บรรณาธิการรายชิ้น รอบ ${round+1} · ชุด ${i+1}/${groups.length}`);
+          const prompt = itemReviewPrompt(this.book,groups[i],itemDigest(all,groups[i]));
           const res=await this.turnWithRetry(prompt,{label:`ตรวจคุณภาพรายชิ้น ${i+1}/${groups.length}`});
           let findings = reviewIssues(X.parseJson(res.text),groups[i]);
           for (let retry=0; retry<2 && findings.some(x=>x.incomplete); retry++) {
@@ -2268,31 +2429,88 @@ ${P.NO_CITATION_RULE}
             const extra=await this.turnWithRetry(`${prompt}\nส่งผลตรวจเฉพาะรหัสที่ยังขาด: ${missing.map(x=>x.id).join(', ')} โดยเปรียบเทียบกับข้อความเต็มทั้งชุดด้านบน`,{label:'เติมผลตรวจรายชิ้นที่ขาด'});
             findings = [...findings.filter(x=>!x.incomplete), ...reviewIssues(X.parseJson(extra.text),missing)];
           }
-          if (!findings.some(x=>x.incomplete)) {
-            cache.push({prompt,issues:findings});
-            this.book.itemReviewCache = cache.slice(-60);
-            await this.save();
+          // เก็บเฉพาะชิ้นที่ได้ผลตรวจครบ ชิ้นที่ยังขาดต้องถูกอ่านใหม่ในรอบถัดไป
+          for (const item of groups[i]) {
+            const mine=findings.filter(x=>x.id===item.id);
+            if (!mine.some(x=>x.incomplete)) verdicts[keyOf.get(item.id)]=mine.map(x=>x.reason).join('; ');
           }
+          await this.save();
           issues.push(...findings);
         }
       }
       this.book.itemQuality={signature,passed:!issues.length,editorial:!!this.book.runConsistency,issues,at:Date.now()};
+      if (continuous && issues.length && (round === 2 || this.book.autoRepair === false || issues.some(x => x.incomplete)))
+        this.book.itemQuality.deferred = true;
       await this.save();
+      if (this.book.itemQuality.deferred) {
+        this.log('warn', `รายชิ้นยังมี ${issues.length} ประเด็น — เก็บผลตรวจไว้ให้ดูหลังจบ เดินหน้าทำภาพและส่งออกอัตโนมัติ`);
+        return changed;
+      }
       if(issues.some(x=>x.incomplete)) throw new Halt('บรรณาธิการรายชิ้นส่งผลตรวจไม่ครบ — เก็บเนื้อหาเดิมไว้ กดทำต่อเพื่อตรวจใหม่');
       if(!issues.length) {this.log('ok',`รายชิ้น ${items.length} ชิ้น · ผ่านตรวจ${this.book.runConsistency?'ความหมายและกติกาประเภทงาน':'ข้อความซ้ำ (ปิดบรรณาธิการอยู่)'}`); return changed;}
-      if(round===2 || this.book.autoRepair===false) throw new Halt(`รายชิ้นยังมี ${issues.length} ประเด็น: ${issues.slice(0,3).map(x=>`${x.id} ${x.reason}`).join(' · ')}`);
+      const summary=`รายชิ้นยังมี ${issues.length} ประเด็น: ${issues.slice(0,3).map(x=>`${x.id} ${x.reason}`).join(' · ')}`;
+      // ปิดตัวขัดเกลาเอง = ตั้งใจให้หยุดมาแก้ด้วยมือ ต้องหยุดตามนั้น
+      if(this.book.autoRepair===false) throw new Halt(summary);
+      /**
+       * ขัดครบรอบแล้วยังเหลือประเด็น = ส่งต่อให้คนดูที่ประตูตรวจต้นฉบับ ไม่ใช่หยุดกลางทาง
+       *
+       * ประเด็นที่เหลือถูกบันทึกไว้ใน itemQuality.issues แล้ว และหน้าตรวจงานอ่านจากตรงนั้น
+       * การหยุดตรงนี้จึงไม่ได้ทำให้ใครเห็นอะไรเพิ่ม มีแต่ทำให้เล่มที่เขียนครบทุกชิ้นแล้ว
+       * ไปไม่ถึงประตูที่ตั้งใจสร้างไว้ให้คนตรวจ — แล้วกดทำต่อก็วนมาตรวจใหม่ได้ผลเดิม
+       * เป็นวงที่ไม่มีทางออกด้วยตัวเอง ทั้งที่เนื้อหาในเล่มไม่ได้ขาดอะไรเลย
+       */
+      if(round===2) {this.log('warn',`${summary} — ขัดครบรอบแล้ว ส่งต่อไปขั้นตรวจงานพร้อมรายการประเด็น ให้คุณตัดสินที่ประตูตรวจต้นฉบับ`); return changed;}
+      /**
+       * ขัดเกลาชิ้นเดียวไม่สำเร็จ ต้องไม่ล้มทั้งเล่ม
+       *
+       * ขั้นนี้เป็นการ "ขัดให้ดีขึ้น" ไม่ใช่การ "ทำให้มีเนื้อหา" — ต้นฉบับเดิมอยู่ครบทุกชิ้น
+       * และยังถูกเก็บไว้ตามเดิมทุกกรณีที่ขัดไม่ผ่าน ข้อความเตือนของมันก็บอกเองว่า
+       * "เก็บต้นฉบับเดิมไว้" แต่แล้วกลับโยน Halt หยุดทั้งเล่มในบรรทัดเดียวกัน
+       *
+       * ราคาไม่เท่ากันเลย: เล่มนี้เดินมาหกสิบข้อความ ผ่านการเขียนครบทุกชิ้นแล้ว
+       * แล้วจอดตายเพราะป้ายกำกับของชิ้นเดียวไม่ตรง (ขอ 1.3 โมเดลปิดมาเป็น <<<END 1>>>)
+       * ซึ่งเป็นความผิดพลาดที่ไม่ได้ทำให้เนื้อหาในเล่มเสียหายแม้แต่ตัวอักษรเดียว
+       *
+       * ตอนนี้ข้ามชิ้นที่ขัดไม่ผ่านแล้วไปต่อ พร้อมบอกให้รู้ว่าข้ามอะไรไปบ้าง
+       * ด่านคุณภาพรวมข้างบน (ครบรอบแล้วยังมีประเด็นเหลือ) ยังทำงานเหมือนเดิมทุกประการ
+       */
+      /**
+       * ขัดเกลาเป็นชุดต่อหมวด ไม่ใช่ข้อความละชิ้น
+       *
+       * เดิมยิงหนึ่งข้อความต่อหนึ่งชิ้นที่มีประเด็น และแนบข้อความเต็มของ "ทุกชิ้นในเล่ม" ไปเป็นรายการห้ามซ้ำ
+       * ประเด็นยี่สิบชิ้นจึงเท่ากับยี่สิบข้อความ ข้อความละหลายหมื่นตัวอักษรที่ต้องพิมพ์ลงช่อง
+       * ตอนนี้รวมชิ้นในหมวดเดียวกันเป็นชุด (ครึ่งหนึ่งของที่ขั้นเขียนขอได้ต่อข้อความ เพราะต้องแนบต้นฉบับกับปัญหาไปด้วย)
+       * และรายการห้ามซ้ำใช้เพียงบรรทัดแรกของชิ้นในหมวดเดียวกัน
+       */
+      const skipped=[];
+      const byTheme=new Map();
       for(const id of new Set(issues.map(x=>x.id))) {
         const rec=items.find(s=>s.id===id);
-        if(!rec || rec.locked || rec.status==='approved') throw new Halt(`ชิ้น ${id} มีปัญหาแต่ถูกล็อกไว้ กรุณาตรวจแก้เอง`);
+        if(!rec || rec.locked || rec.status==='approved') {skipped.push(`${id} (ถูกล็อกไว้)`); continue;}
         const theme=this.book.outline.themes.find(t=>String(t.n)===String(rec.theme));
-        if(!theme) throw new Halt(`ไม่พบหมวดของชิ้น ${id}`);
-        const prompt=I.itemBatchPrompt({book:this.book,outline:this.book.outline,theme,count:1,requestedIds:[id],avoid:items.filter(s=>s.id!==id).map(s=>s.text || s.md)});
-        const res=await this.turnWithRetry(`${prompt}\nแก้ชิ้นเดิมนี้โดยรักษาใจความที่ถูกต้อง: ${rec.text || rec.md}\nปัญหาที่ต้องแก้: ${issues.filter(x=>x.id===id).map(x=>x.reason).join('; ')}`,{label:`แก้คุณภาพชิ้น ${id}`});
-        const fixed=I.extractItems(res.text,[id])[0];
-        if(!fixed) throw new Halt(`แก้ชิ้น ${id} ไม่สำเร็จ เก็บต้นฉบับเดิมไว้`);
-        await db.saveSection(this.book.id,{...rec,...fixed,md:fixed.text,chars:countUnits(fixed.text,this.book.language),status:'repaired',history:[...(rec.history || []).slice(-19),{md:rec.md,text:rec.text,chars:rec.chars,at:Date.now(),reason:'ก่อนตรวจแก้รายชิ้น'}]});
-        changed=true;
+        if(!theme) {skipped.push(`${id} (ไม่พบหมวด)`); continue;}
+        if(!byTheme.has(theme)) byTheme.set(theme,[]);
+        byTheme.get(theme).push(rec);
       }
+      const perRepair=Math.max(1,Math.ceil(I.itemsPerTurn(this.book.itemKind)/2));
+      for(const [theme,recs] of byTheme) for(let at=0;at<recs.length;at+=perRepair) {
+        const batch=recs.slice(at,at+perRepair);
+        const ids=batch.map(r=>r.id);
+        const avoid=items.filter(s=>!ids.includes(s.id) && String(s.theme)===String(theme.n)).map(s=>String(s.text || s.md || '').trim().split('\n')[0].slice(0,50)).slice(-40);
+        const prompt=I.itemBatchPrompt({book:this.book,outline:this.book.outline,theme,count:ids.length,requestedIds:ids,avoid});
+        const originals=batch.map(r=>`[${r.id}]\nต้นฉบับ: ${r.text || r.md}\nปัญหาที่ต้องแก้: ${issues.filter(x=>x.id===r.id).map(x=>x.reason).join('; ')}`).join('\n\n');
+        const res=await this.turnWithRetry(`${prompt}\n\nแก้ชิ้นเดิมต่อไปนี้ทีละรหัส โดยรักษาใจความที่ถูกต้อง และตอบครบทุกรหัสตามรูปแบบด้านบน\n${originals}`,{label:`แก้คุณภาพ ${ids.length} ชิ้น (${ids[0]}${ids.length>1?` ถึง ${ids.at(-1)}`:''})`});
+        const got=I.extractItems(res.text,ids);
+        for(const rec of batch) {
+          const id=rec.id;
+          const fixed=got.find(x=>x.id===id);
+          if(!fixed) {skipped.push(`${id} (แกะคำตอบไม่ได้)`); continue;}
+          await db.saveSection(this.book.id,{...rec,...fixed,md:fixed.text,chars:countUnits(fixed.text,this.book.language),status:'repaired',history:[...(rec.history || []).slice(-19),{md:rec.md,text:rec.text,chars:rec.chars,at:Date.now(),reason:'ก่อนตรวจแก้รายชิ้น'}]});
+          Object.assign(rec, fixed, { md: fixed.text });
+          changed=true;
+        }
+      }
+      if(skipped.length) this.log('warn',`ขัดเกลาไม่ผ่าน ${skipped.length} ชิ้น ใช้ต้นฉบับเดิมของชิ้นนั้นแทน: ${skipped.join(' · ')}`);
     }
     return changed;
   }

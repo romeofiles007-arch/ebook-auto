@@ -4,8 +4,29 @@
  * ถ้าเว็บเปลี่ยน ให้แก้ที่ DEFAULT_SELECTORS หรือทับค่าจากหน้าตั้งค่าของ Studio
  */
 (() => {
-  if (window.__ebookAutoAdapter) return;
+  /**
+   * กันติดตั้งซ้ำ — แต่ต้องไม่กันตัวใหม่ตอนที่ตัวเก่าตายไปแล้ว
+   *
+   * ธงเดิมเป็น boolean ที่ติดแล้วติดเลย พอโหลดส่วนขยายซ้ำ สคริปต์ตัวเก่าในแท็บจะกลายเป็น
+   * ซากที่คุยกับส่วนขยายไม่ได้อีก (Extension context invalidated) แต่ธงยังค้างอยู่บนหน้าเว็บ
+   * ensureAdapter ฝั่ง service worker จึงฉีดตัวใหม่เข้ามาถูกแล้ว แต่ตัวใหม่มาเจอธงค้าง
+   * แล้ว return ทิ้งตั้งแต่บรรทัดแรก — ไม่มีใครติดตั้ง listener ใหม่เลยสักตัว
+   * ping ก็ไม่ผ่าน วนอยู่ยี่สิบวินาทีแล้วยอมแพ้ ผลคือแท็บนั้นตายจนกว่าคนจะมากดรีเฟรชเอง
+   *
+   * ตัวเก่าจึงต้องพิสูจน์ตัวเองว่ายังมีชีวิตอยู่จริง ไม่ใช่แค่เคยมาถึงที่นี่
+   * chrome.runtime.id ของสคริปต์ที่ถูกตัดขาดจะหายไปหรือโยน ซึ่งเป็นคำตอบที่ตรงที่สุดที่มี
+   * ถ้าตัวเก่ายังเป็น ๆ อยู่ ยังกันเหมือนเดิมทุกประการ ไม่มีทางติดตั้งซ้อนสองตัว
+   */
+  const adapterAlive = () => {
+    try {
+      return !!chrome.runtime?.id;
+    } catch (_) {
+      return false; // ถูกตัดขาดจากส่วนขยายแล้ว
+    }
+  };
+  if (window.__ebookAutoAdapter && window.__ebookAutoAdapterAlive?.()) return;
   window.__ebookAutoAdapter = true;
+  window.__ebookAutoAdapterAlive = adapterAlive;
 
   const DEFAULT_SELECTORS = {
     composer: '#prompt-textarea, div[contenteditable="true"][id="prompt-textarea"]',
@@ -231,6 +252,20 @@
   }
 
   /**
+   * ข้อความของเราที่จับไว้ตอนส่ง ต้องยังอยู่บนหน้าจริง ไม่งั้นใช้ตัวล่าสุดที่อยู่บนหน้าแทน
+   *
+   * ChatGPT วาดบทสนทนาใหม่ระหว่างสร้างภาพได้ ตัวที่จับไว้จึงหลุดออกจากหน้า (isConnected = false)
+   * โหนดที่หลุดแล้วตอบคำถาม "อยู่ก่อนหรือหลัง" แบบสุ่ม และสำเนาใหม่ของข้อความเราเอง
+   * กลายเป็น "ข้อความผู้ใช้ถัดไป" ภาพทุกใบที่อยู่หลังมันจึงถูกทิ้ง
+   * (เห็นจริง: "เห็นคำตอบแล้ว · หยุดพ่นแล้ว · ภาพในคำตอบ 0 รูป" ทั้งที่ภาพอยู่บนจอ ต้องกดดึงเองทุกรูป)
+   * ใช้เฉพาะงานภาพ — ห้องสร้างภาพเป็นห้องใหม่ที่มีข้อความเราเป็นข้อความล่าสุดเสมอ
+   */
+  function liveAnchor(anchor) {
+    if (!anchor || anchor.isConnected !== false) return anchor;
+    return lastUserTurn() || anchor;
+  }
+
+  /**
    * คำตอบของเทิร์นนี้ = คำตอบตัวสุดท้ายที่อยู่ "หลัง" ข้อความที่เราเพิ่งส่ง
    *
    * เดิมใช้วิธีจำจำนวน/รหัสคำตอบก่อนส่งแล้วเทียบ ซึ่งต้องรอให้หน้าเว็บวาดบทสนทนาเสร็จก่อน
@@ -243,6 +278,33 @@
       if (anchor.compareDocumentPosition(turns[i]) & Node.DOCUMENT_POSITION_FOLLOWING) return turns[i];
     }
     return null;
+  }
+
+  /** ทุกกล่องคำตอบที่อยู่หลังข้อความที่เราเพิ่งส่ง เรียงตามหน้าเว็บ */
+  function assistantTurnsAfter(anchor) {
+    const turns = $$(S.assistantTurn);
+    if (!anchor) return turns;
+    return turns.filter((t) => anchor.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+
+  const turnHasContent = (t) => !!t && (!!(t.innerText || '').trim() || !!t.querySelector('img'));
+
+  /**
+   * กล่องคำตอบใบที่มีของจริง ไม่ใช่ใบสุดท้ายที่บังเอิญว่างเปล่า
+   *
+   * assistantAfter หยิบ "ใบล่างสุดที่อยู่หลังคำสั่งของเรา" ซึ่งถูกเสมอตอนที่หน้าเว็บมีใบเดียว
+   * แต่ selector ของเรานับ [data-turn="assistant"] ที่ยังไม่มีเนื้อในเป็นกล่องคำตอบด้วย
+   * ถ้าหน้าเว็บวางโครงใบถัดไปต่อท้ายไว้ (ซึ่งมันทำ) เราจะไปจ้องใบเปล่านั้นแทนใบที่มีคำตอบจริง
+   * แล้วเห็นเป็น "เห็นคำตอบใหม่แล้ว · ยาว 0 ตัวอักษร · ยังไม่เจอแถบปุ่ม" ค้างจนหมดเพดาน
+   * ทั้งที่คำตอบเต็ม ๆ วางอยู่บนจอเรียบร้อยแล้ว — อาการเดียวกับที่เห็นซ้ำหลายรอบที่ขั้นปรับจำนวนหน้า
+   *
+   * ทุกใบที่คัดมาอยู่หลังคำสั่งของเราทั้งหมด จึงเป็นคำตอบของเทิร์นนี้เท่านั้น
+   * ไม่มีทางย้อนไปหยิบคำตอบของเทิร์นก่อนหน้ามาใช้
+   */
+  function filledAssistantAfter(anchor) {
+    const turns = assistantTurnsAfter(anchor);
+    for (let i = turns.length - 1; i >= 0; i--) if (turnHasContent(turns[i])) return turns[i];
+    return turns[turns.length - 1] || null;
   }
 
   /**
@@ -322,8 +384,19 @@
    * websites/sites หรือมีตัวเลขจึงหลุดออกมาเป็น "คำตอบ" ยาว 21 ตัวอักษร แล้วถูกส่งไปแปลงเป็น JSON
    * (อาการที่เห็น: ค้นกระแสไม่สำเร็จ — อ่านคำตอบเป็น JSON ไม่ได้ ค้นข้อความ: Searching websites 4)
    */
+  /**
+   * ป้ายบอกสถานะระหว่างคิด ไม่ใช่คำตอบ
+   *
+   * รายการคำข้างล่างนี้แม่นแต่ตามไม่ทัน ทุกครั้งที่ ChatGPT คิดคำใหม่บนป้าย
+   * เราจะรับป้ายนั้นมาเป็น "คำตอบ" หนึ่งรอบเสมอ แล้วขั้นบนก็แกะไม่ได้และหยุดงาน
+   * (เห็นมาแล้ว: "Searching websites 4" ยาว 21 · "Refining Thai verse" ยาว 19 ตัวอักษร)
+   *
+   * จึงเติมแขนที่ไม่ต้องเดาคำ: บรรทัดเดียว เป็นอักษรละตินล้วน ขึ้นต้นด้วยคำที่ลงท้าย -ing
+   * แล้วตามด้วยคำสั้น ๆ ไม่เกินสี่คำ — คำตอบจริงของระบบนี้ไม่มีทางหน้าตาแบบนั้น
+   * เพราะทุกคำสั่งขอเป็นบล็อกโค้ดหรือข้อความไทย ป้ายพวกนี้ไม่มีทั้งสองอย่าง
+   */
   const PLACEHOLDER =
-    /^(?:thinking|reasoning|analy[sz]ing|working on it|thought for [^\n]{0,24}|(?:search|brows|read|find|gather|visit|check)(?:ing|ed|s)?(?:\s+\d{1,4})?(?:\s+(?:the\s+)?(?:web|websites?|sites?|sources?|results?|links?|pages?))?(?:\s+\d{1,4})?|กำลัง(?:คิด|ค้นหา|ค้น|อ่าน|ตรวจ|รวบรวม)[^\n]{0,24})[.…·\s]*$/i;
+    /^(?:thinking|reasoning|analy[sz]ing|working on it|thought for [^\n]{0,24}|(?:search|brows|read|find|gather|visit|check)(?:ing|ed|s)?(?:\s+\d{1,4})?(?:\s+(?:the\s+)?(?:web|websites?|sites?|sources?|results?|links?|pages?))?(?:\s+\d{1,4})?|[A-Za-z][a-z]{2,}ing(?:\s+[A-Za-z0-9'’-]{1,20}){0,4}|กำลัง(?:คิด|ค้นหา|ค้น|อ่าน|ตรวจ|รวบรวม)[^\n]{0,24})[.…·\s]*$/i;
   const isThinkingOnly = (turn) => PLACEHOLDER.test((turn?.innerText || '').trim());
 
   function report(turnId, phase, detail, note) {
@@ -1031,11 +1104,18 @@
     const m = id.match(/(\d+)\s*$/);
     return m ? Number(m[1]) : NaN;
   };
-  function snapshotUserMessages() {
+  function userReceiptText(node, itemReceipt = false) {
+    // Item repair prompts can have a Pasted text file tile before the actual bubble.
+    // Keep the existing matching path for every caller that has not opted in.
+    const body = itemReceipt ? node.querySelector?.('[data-testid="collapsible-user-message-content"]') : null;
+    return normalizeMessage(body ? (body.innerText || body.textContent) : (node.innerText || node.textContent));
+  }
+  function snapshotUserMessages(itemReceipt = false) {
     const rows = $$('[data-message-author-role="user"]').map(node => ({
-      key:userMessageKey(node), text:normalizeMessage(node.innerText || node.textContent),
+      key:userMessageKey(node), text:userReceiptText(node, itemReceipt),
       turn:turnIndexOf(node),
     }));
+    rows.itemReceipt = itemReceipt;
     // ลำดับสูงสุดที่เคยเห็น เก็บติดไปกับก้อนเดียวกัน ผู้เรียกจะได้ไม่ต้องรู้เรื่องนี้เอง
     rows.maxTurn = rows.reduce((m, r) => (Number.isFinite(r.turn) && r.turn > m ? r.turn : m), -1);
     return rows;
@@ -1057,7 +1137,7 @@
     const sameMessage = (text) => text === expected || (!!head && text.startsWith(head));
     const all = $$('[data-message-author-role="user"]');
     const matches = all.filter(node =>
-      sameMessage(normalizeMessage(node.innerText || node.textContent)));
+      sameMessage(userReceiptText(node, before.itemReceipt === true)));
     const oldKeys = new Set(before.map(row=>row.key).filter(Boolean));
     const identified = matches.find(node => userMessageKey(node) && !oldKeys.has(userMessageKey(node)));
     if (identified) return identified;
@@ -1075,7 +1155,7 @@
      * ข้อความล่าสุดอยู่ท้ายจอเสมอ จึงไม่เคยถูกถอด และลำดับเทิร์นก็ไม่ย้อนกลับ
      */
     const tail = all[all.length - 1];
-    if (tail && sameMessage(normalizeMessage(tail.innerText || tail.textContent))) {
+    if (tail && sameMessage(userReceiptText(tail, before.itemReceipt === true))) {
       const seen = Number(before?.maxTurn ?? -1);
       const now = turnIndexOf(tail);
       if (Number.isFinite(now) && now > seen) return tail;
@@ -1177,6 +1257,28 @@
   /** แถบปุ่มบอกว่าจบ แต่ปุ่มหยุดยังอยู่ — ให้เวลาพิสูจน์ตัวเองเท่านี้ก่อนเชื่อแถบปุ่ม */
   const BAR_STUCK_MS = 2500;
 
+  /**
+   * พ่นจบแล้วแต่ไม่มีตัวอักษรสักตัว = คำตอบว่าง ซึ่งเป็นคำตอบที่ยืนยันได้
+   *
+   * เดิมกรณีนี้ไม่มีด่านไหนจับเลยสักด่าน: ด่านกันค้างฝั่งปุ่มหยุดเขียนว่า `len > 0`
+   * และเกณฑ์ "ข้อความหยุดยาว" อยู่ใต้บรรทัด `if (len === 0) return` ที่ไม่มีกำหนดเวลา
+   * ทางออกเดียวจึงเป็นเพดานห้านาทีของนาฬิกาหัวใจ ซึ่งถูกตีตราเป็น outcome_unknown
+   * — รหัสเดียวในระบบที่ห้ามกู้ทุกทาง ทั้งเล่มจึงตายตรงนั้นและต้องให้คนมากดเอง
+   * (เห็นจริง: "เห็นคำตอบใหม่แล้ว · ยาว 0 ตัวอักษร · หยุดพ่นแล้ว · ยังไม่เจอแถบปุ่ม" 299 วินาที)
+   *
+   * ตัดสินตรงนี้แทน แล้วคืน empty ซึ่งลองใหม่ได้ตามปกติ เสียเวลาสองวินาทีแทนห้านาที
+   */
+  const EMPTY_SETTLED_MS = 2000;
+
+  /**
+   * ไม่เคยเห็นปุ่มหยุดเลยตลอดเทิร์น = เราไม่มีหลักฐานว่ามันเคยพ่น ต้องให้เวลามากกว่านั้น
+   *
+   * ปุ่มหยุดโผล่ช้ากว่ากล่องคำตอบได้ และ selector ของมันพลาดได้เมื่อหน้าเว็บเปลี่ยนโครงสร้าง
+   * ช่วงต้นเทิร์นจึงมีจังหวะที่ "กล่องมาแล้ว · ยังไม่มีตัวอักษร · ยังไม่เห็นปุ่มหยุด" อยู่จริง
+   * ถ้าตัดที่สองวินาทีเท่ากัน เทิร์นปกติที่แค่เริ่มช้าจะถูกทิ้งทั้งที่กำลังจะมีคำตอบ
+   */
+  const EMPTY_GIVEUP_MS = 60000;
+
   let completedSetupReply = null;
   function setupJson(turn, keys = []) {
     if (!turn || !keys.length) return '';
@@ -1218,6 +1320,9 @@
       let stuckSince = 0;
       let done = false;
       let jsonSignature = '', jsonSince = 0;
+      let sawStop = false; // เคยเห็นปุ่มหยุดไหม = มีหลักฐานว่าเทิร์นนี้เคยพ่นจริง
+      let emptySince = 0;
+      let swappedTurn = false; // บอกครั้งเดียวพอว่าเราย้ายไปอ่านกล่องคำตอบอีกใบ
 
       const finish = (status) => {
         if (done) return;
@@ -1252,8 +1357,26 @@
           return;
         }
 
-        const turn = assistantAfter(anchor);
+        let turn = assistantAfter(anchor);
         if (!turn) return;
+
+        /**
+         * ใบล่างสุดว่างเปล่าและไม่มีอะไรพ่นอยู่ = เราจ้องผิดใบ ให้ถอยไปหยิบใบที่มีของจริง
+         *
+         * ทำเฉพาะตอนที่ปุ่มหยุดหายไปแล้วเท่านั้น ระหว่างที่ยังพ่นอยู่ กล่องที่เพิ่งเกิดใหม่
+         * ย่อมว่างเป็นธรรมดา การถอยไปหยิบใบก่อนหน้าตอนนั้นคือการอ่านคำตอบที่ยังเขียนไม่จบ
+         */
+        if (!stopButtonVisible() && !turnHasContent(turn)) {
+          const filled = filledAssistantAfter(anchor);
+          // ป้ายบอกสถานะก็นับว่า "มีของ" ตามตัวอักษร แต่ไม่ใช่คำตอบ ห้ามย้ายไปเกาะมัน
+          if (filled && filled !== turn && turnHasContent(filled) && !isThinkingOnly(filled)) {
+            if (!swappedTurn) {
+              swappedTurn = true;
+              report(turnId, 'streaming', 'กล่องคำตอบใบล่างสุดว่างเปล่า — ใช้ใบที่มีคำตอบจริงแทน');
+            }
+            turn = filled;
+          }
+        }
 
         /**
          * ประกาศโควตาภาพหมดมาแทนภาพ — จบทันที ไม่ต้องรอจนหมดเพดาน
@@ -1269,8 +1392,16 @@
           }
         }
 
-        // ยังคิดอยู่ ไม่ว่าหน้าเว็บจะนิ่งแค่ไหนก็ยังไม่ใช่คำตอบ
-        if (isThinkingOnly(turn) && !turn.querySelector('img')) return;
+        /**
+         * ยังคิดอยู่ ไม่ว่าหน้าเว็บจะนิ่งแค่ไหนก็ยังไม่ใช่คำตอบ — แต่ต้องแยกสองกรณีออกจากกัน
+         *
+         * ปุ่มหยุดยังอยู่ = มันกำลังคิดจริง ป้ายจะถูกแทนที่ด้วยคำตอบในอีกสักครู่ รอต่อถูกแล้ว
+         * ปุ่มหยุดหายไปแล้ว = จบเทิร์นแล้วและเหลือแต่ป้าย คำตอบจะไม่มีวันมา
+         * ของเดิม return ทิ้งทั้งสองกรณี ทางที่สองจึงรอจนหมดเพดานห้านาทีทุกครั้ง
+         * แล้วจบเป็น timeout ที่แปลว่า "ยืนยันผลไม่ได้" — ทั้งที่ยืนยันได้ชัดว่าไม่มีคำตอบ
+         */
+        const placeholderOnly = isThinkingOnly(turn) && !turn.querySelector('img');
+        if (placeholderOnly && stopButtonVisible()) return;
 
         const len = (turn.innerText || '').length;
         const hasImg = !!turn.querySelector('img');
@@ -1299,6 +1430,8 @@
          * ถ้าสัญญาณขัดกัน ต้องมีแถบจบคำตอบจริงด้วย ไม่ตัดสินจากความนิ่งอย่างเดียว
          */
         if (stopButtonVisible()) {
+          sawStop = true;
+          emptySince = 0;
           /**
            * ด่านกันค้างสำหรับเทิร์นข้อความ
            *
@@ -1365,7 +1498,33 @@
           return;
         }
 
-        if (len === 0 && !hasImg) return; // ยังไม่มีอะไรเลย รอต่อ
+        /**
+         * ว่างเปล่าและพ่นจบแล้ว = คำตอบว่าง ไม่ใช่ "ยังไม่มาถึง"
+         *
+         * มาถึงบรรทัดนี้ได้แปลว่าปุ่มหยุดหายไปแล้ว (สาขาข้างบน return ไปหมดแล้ว)
+         * ถ้าเคยเห็นปุ่มหยุดมาก่อน เท่ากับเห็นครบวงจร "เริ่มพ่น → พ่นจบ" แล้วไม่ได้อะไรเลย
+         * ไม่เคยเห็นปุ่มหยุดเลยก็ยังตัดสินได้ แต่ต้องให้เวลานานกว่านั้นมากก่อน
+         *
+         * คืน empty ไม่ใช่ timeout เพราะ empty ลองใหม่ได้ ส่วน timeout ถูกตีตราเป็น
+         * outcome_unknown ที่ห้ามกู้ทุกทาง — คำตอบว่างไม่ใช่ผลที่ยืนยันไม่ได้ มันยืนยันแล้ว
+         */
+        if (!hasImg && (len === 0 || placeholderOnly)) {
+          if (!emptySince) emptySince = Date.now();
+          if (Date.now() - emptySince >= (sawStop ? EMPTY_SETTLED_MS : EMPTY_GIVEUP_MS)) {
+            report(
+              turnId,
+              'received',
+              placeholderOnly
+                ? `ChatGPT พ่นจบแล้วแต่เหลือแต่ป้ายบอกสถานะ ไม่ใช่คำตอบ: "${(turn.innerText || '').trim().slice(0, 60)}"`
+                : 'ChatGPT พ่นจบแล้วแต่คำตอบว่างเปล่า — ไม่รอต่อจนหมดเพดาน',
+            );
+            return finish('empty');
+          }
+          // ไม่ต้องนัดมาตรวจเอง นาฬิกาหัวใจเรียก check() ให้ทุกวินาทีอยู่แล้ว
+          // แม้ตอนที่หน้าเว็บนิ่งสนิทจน MutationObserver ไม่ปลุกอีกเลย
+          return;
+        }
+        emptySince = 0;
 
         // สัญญาณตรงว่าจบแล้ว: ปุ่มหยุดหายไปแล้ว และแถบปุ่มใต้คำตอบโผล่ขึ้นมา
         // ยืนยันอีกจังหวะว่าข้อความไม่โตต่อแล้วจริง กันจังหวะที่ปุ่มหยุดกะพริบหายไปหนึ่งเฟรม
@@ -1399,12 +1558,20 @@
        * ถ้าเทิร์นค้างอีก จะรู้ทันทีว่าติดด่านไหน โดยไม่ต้องเดาหรือเปิด DevTools
        */
       const diag = () => {
+        const after = assistantTurnsAfter(anchor);
         const turn = assistantAfter(anchor);
         return [
           started ? 'เห็นคำตอบใหม่แล้ว' : 'ยังไม่เห็นคำตอบใหม่',
           `ยาว ${turn ? (turn.innerText || '').length : 0} ตัวอักษร`,
+          // ครั้งหน้าที่ค้าง ต้องตอบได้ทันทีว่า "ไม่มีคำตอบเลย" หรือ "มีคำตอบแต่เราจ้องผิดใบ"
+          after.length > 1
+            ? `กล่องคำตอบหลังคำสั่ง ${after.length} ใบ [${after.map((t) => (t.innerText || '').length).join(', ')}]`
+            : '',
           stopButtonVisible() ? 'ยังพ่นอยู่' : 'หยุดพ่นแล้ว',
           turn && actionBarFor(turn) ? 'เจอแถบปุ่มแล้ว' : 'ยังไม่เจอแถบปุ่ม',
+          !wantImages && emptySince
+            ? `ว่างเปล่ามา ${Math.round((Date.now() - emptySince) / 1000)}/${(sawStop ? EMPTY_SETTLED_MS : EMPTY_GIVEUP_MS) / 1000} วินาที`
+            : '',
           wantImages ? `ภาพใหม่ ${(imageKey() || '').split('|').filter(Boolean).length} รูป` : '',
           wantImages && imgSince
             ? `นิ่งมา ${Math.round((Date.now() - imgSince) / 1000)}/${(imgSig.split('|')[1] ? IMAGE_SETTLED_MS : IMAGE_GIVEUP_MS) / 1000} วินาที`
@@ -1426,7 +1593,8 @@
 
   // ---------- ดึงเนื้อหากลับ ----------
   function readAnswer(anchor) {
-    const turn = assistantAfter(anchor) || lastAssistantTurn();
+    // ต้องอ่านใบเดียวกับที่ waitForAnswer ตัดสินว่าจบแล้ว ไม่งั้นจะจบที่ใบหนึ่งแต่ไปอ่านอีกใบ
+    const turn = filledAssistantAfter(anchor) || lastAssistantTurn();
     if (!turn) return { text: '', blocks: 0 };
     const codes = $$(S.codeBlock, turn);
     if (codes.length) {
@@ -1473,6 +1641,7 @@
    * ส่วนชื่อโดเมนเหลือไว้เป็นแค่ตัวจัดลำดับความน่าเชื่อถือ ไม่ใช่ประตูปิดตาย
    */
   function scanImages(before = { sources: new Set(), elements: new Set() }, anchor = null) {
+    anchor = liveAnchor(anchor);
     const nextUser = anchor && $$('[data-message-author-role="user"]').find(
       (node) => node !== anchor && (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING),
     );
@@ -1726,6 +1895,10 @@
    * สิ่งที่มันบอกไปแล้วคือการเสียเวลาเปล่า และทำให้ผู้ใช้เห็นหน้าจอค้างโดยไม่จำเป็น
    */
   const GEN_FAILED = /something went wrong while generating your image|error generating image|image generation failed|เกิดข้อผิดพลาดขณะสร้างภาพ|สร้างภาพไม่สำเร็จ/i;
+  /** ข้อความที่บอกว่า ChatGPT ยังสร้างภาพอยู่ แม้จะมีกล่องผิดพลาดโผล่ขึ้นมาก่อนหน้า */
+  const IMAGE_IN_PROGRESS = /hang tight|generating|creating (?:an? )?image|thinking|กำลังสร้าง|กำลังคิด|กำลังวาด/i;
+  /** กล่องผิดพลาดที่ค้างโดยไม่มีสัญญาณว่ายังทำงาน นานเท่านี้ถึงนับว่าล้มจริง */
+  const ERROR_GRACE_MS = 30000;
 
   async function pollForImage(
     turnId,
@@ -1745,6 +1918,7 @@
     let lastChange = Date.now();
     let started = false;
     let lastCaptureErrors = [];
+    let errorQuietSince = 0;
 
     /**
      * ปุ่ม Retry ของ ChatGPT นับเป็นความผิดพลาด "ของเทิร์นนี้" เท่านั้น
@@ -1762,7 +1936,7 @@
 
     while (Date.now() - t0 < timeoutMs) {
       if (hitLimit()) return { status: 'rate_limited', seen: [] };
-      if (errorAfterAnchor()) return { status: 'error', seen: scanImages(before, anchor).seen };
+      anchor = liveAnchor(anchor); // บทสนทนาถูกวาดใหม่ระหว่างรอ — ตามข้อความของเราตัวที่อยู่บนหน้าจริง
 
       const scan = scanImages(before, anchor);
       if (scan.images.length) {
@@ -1777,6 +1951,28 @@
       const turn = assistantAfter(anchor);
       if (turn && !stopButtonVisible() && GEN_FAILED.test(turn.innerText || '')) {
         return { status: 'generation_failed', seen: scan.seen, errors: lastCaptureErrors };
+      }
+
+      /**
+       * "Something went wrong · Retry" ขึ้นใต้ข้อความเรา แต่ ChatGPT ยังวาดต่ออยู่ — ห้ามเลิกรอ
+       *
+       * เห็นจริงบ่อยมาก: กล่องแดงกับปุ่ม Retry โผล่ แล้วข้างล่างยังขึ้น "Thinking ·
+       * Generating a more detailed image — hang tight" พร้อมภาพที่กำลังค่อย ๆ ขึ้น
+       * เดิมเจอกล่องแดงปุ๊บคืน error ทันที เครื่องผลิตนับเป็นรอบที่ล้ม เปิดห้องใหม่แล้วสั่งวาดซ้ำ
+       * — เสียโควตาภาพเพิ่มหนึ่งรูป และทิ้งภาพที่อีกไม่กี่สิบวินาทีก็เสร็จ
+       *
+       * ตอนนี้ภาพที่โผล่ถูกเก็บก่อนเสมอ (สแกนด้านบน) และกล่องแดงนับเป็นความล้มเหลวเมื่อ
+       * ไม่มีสัญญาณว่ายังทำงาน (ปุ่มหยุด · ข้อความกำลังสร้าง/กำลังคิด) ติดต่อกันครบ 30 วินาทีเท่านั้น
+       */
+      if (errorAfterAnchor()) {
+        const stillWorking = stopButtonVisible() || (turn && IMAGE_IN_PROGRESS.test(turn.innerText || ''));
+        if (stillWorking) errorQuietSince = 0;
+        else if (!errorQuietSince) errorQuietSince = Date.now();
+        if (errorQuietSince && Date.now() - errorQuietSince >= ERROR_GRACE_MS) {
+          return { status: 'error', seen: scan.seen };
+        }
+      } else {
+        errorQuietSince = 0;
       }
       if (!started && (turn || stopButtonVisible())) started = true;
       if (!started && Date.now() - t0 > startMs) return { status: 'no_response', seen: scan.seen };
@@ -1999,7 +2195,7 @@
         return { turnId, status: 'error', text: '', meta: { error: 'previous_turn_running' } };
       }
 
-      const userMessagesBefore = snapshotUserMessages();
+      const userMessagesBefore = snapshotUserMessages(opts.itemReceipt === true && !opts.wantImages);
 
       /**
        * แนบไฟล์ก่อนพิมพ์ข้อความเสมอ
@@ -2351,7 +2547,8 @@
     if (msg?.type === 'gpt.grabImage') {
       (async () => {
         const source = msg.turnId ? imageTurns.get(msg.turnId) : null;
-        if (msg.turnId && (!source || !sameConversation(source.url) || !source.anchor.isConnected)) {
+        // ห้องเดิม (sameConversation) คือหลักฐานหลัก ข้อความของเราที่ถูกวาดใหม่ตามด้วย liveAnchor ได้
+        if (msg.turnId && (!source || !sameConversation(source.url) || !liveAnchor(source.anchor)?.isConnected)) {
           sendResponse({ ok: false, error: 'image_turn_not_available' });
           return;
         }

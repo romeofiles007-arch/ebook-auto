@@ -200,3 +200,41 @@ test('browser-native Enter is attempted before the fragile DOM button', () => {
   assert.ok(block.indexOf("type:'sw.forceSend'") < block.indexOf('clickSend('));
   assert.match(block, /native\?\.ok[\s\S]*outcome_unknown[\s\S]*ไม่กดซ้ำ/);
 });
+
+/**
+ * ภาพขึ้นจอแล้ว แต่บันทึกฟ้อง "เห็นคำตอบแล้ว · หยุดพ่นแล้ว · ภาพในคำตอบ 0 รูป · นิ่งมา 122/90"
+ * ผู้ใช้ต้องกด "ภาพเสร็จแล้ว → ดึงมาเลย" เองทุกรูป
+ *
+ * ต้นเหตุ: ChatGPT วาดบทสนทนาใหม่ระหว่างสร้างภาพ ข้อความของเราที่จับไว้ตอนส่ง (anchor) หลุดออกจากหน้า
+ * ตัวที่หลุดตอบตำแหน่งแบบสุ่ม ("อยู่ก่อน" ทุกโหนด) และสำเนาใหม่ของข้อความเราเองถูกนับเป็น
+ * "ข้อความผู้ใช้ถัดไป" ภาพทุกใบที่อยู่หลังมันจึงถูกทิ้ง — ปุ่มดึงเองใช้ข้อความล่าสุดที่อยู่บนหน้าจริง จึงเจอ
+ */
+test('image scan follows a re-rendered user message instead of a detached anchor', async () => {
+  const a = await adapterFixture();
+  const live = a.node(2);
+  live.isConnected = true;
+  a.nodes.push(live);
+  a.images.push(a.node(3, 'https://chatgpt.com/backend-api/estuary/content?id=file_generated'));
+  const detached = { isConnected: false, compareDocumentPosition: () => 1 | 4 | 32 };
+  assert.deepEqual(Array.from(a.scanImages(undefined, detached).images), [
+    'https://chatgpt.com/backend-api/estuary/content?id=file_generated',
+  ]);
+});
+
+/**
+ * กล่อง "Something went wrong · Retry" โผล่ แต่ ChatGPT ยังขึ้น "Generating a more detailed image — hang tight"
+ * ต้องไม่เลิกรอแล้วเปิดห้องใหม่ทันที (อาการ: "ภาพยังไม่มา new chat เฉยเลย")
+ */
+test('an error box does not abandon an image that ChatGPT is still generating', () => {
+  const start = adapterSource.indexOf('async function pollForImage(');
+  const loop = adapterSource.slice(start, adapterSource.indexOf("return { status: 'timeout'", start));
+  assert.ok(loop.indexOf('const scan = scanImages(before, anchor);') < loop.indexOf('if (errorAfterAnchor())'),
+    'images that already appeared are grabbed before any error decision');
+  assert.ok(!/if \(errorAfterAnchor\(\)\) return \{ status: 'error'/.test(loop), 'no immediate give-up on the error box');
+  assert.match(loop, /stillWorking = stopButtonVisible\(\) \|\| \(turn && IMAGE_IN_PROGRESS\.test/);
+  assert.match(loop, /Date\.now\(\) - errorQuietSince >= ERROR_GRACE_MS/);
+  const re = vm.runInNewContext(adapterSource.match(/const IMAGE_IN_PROGRESS = (\/.*\/i);/)[1]);
+  assert.ok(re.test('Thinking\nGenerating a more detailed image — hang tight.'));
+  assert.ok(!re.test('Something went wrong. Please try again.'));
+  assert.match(adapterSource, /const ERROR_GRACE_MS = 30000;/);
+});

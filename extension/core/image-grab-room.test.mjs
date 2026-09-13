@@ -43,5 +43,6 @@ test('คนละเว็บ ต้องไม่ยอมรับ', () => {
 test('ตัวคว้าภาพยังยึด anchor เป็นหลักฐานจริง ไม่ได้ปล่อยผ่านทั้งหมด', () => {
   const grab = src.slice(src.indexOf("if (msg?.type === 'gpt.grabImage')"), src.indexOf("if (msg?.type === 'gpt.run')"));
   assert.match(grab, /!sameConversation\(source\.url\)/);
-  assert.match(grab, /!source\.anchor\.isConnected/);
+  // ข้อความที่ถูกวาดใหม่ต้องตามด้วย liveAnchor ได้ แต่ยังต้องเป็นห้องเดิมและยังต้องมีข้อความของเราอยู่จริง
+  assert.match(grab, /!liveAnchor\(source\.anchor\)\?\.isConnected/);
 });

@@ -22,10 +22,17 @@ globalThis.chrome = {
 };
 const { ChatGptTabTransport, hasPendingTurn } = await import('./chatgpt-tab.js');
 
+/**
+ * ช่วงต่อเวลาต้องถูกย่อด้วย ไม่ใช่ย่อแค่เพดานรอบนอก
+ *
+ * กรณี running ต่อเวลาให้ทีละหนึ่งนาทีจนครบสิบห้านาทีก่อนจะยอมแพ้ ถ้าไม่ย่อสองค่านี้
+ * เทสต์ตัวเดียวจะนั่งรอเวลาจริงสิบห้านาที แล้วลากทั้งชุดจากหนึ่งนาทีเป็นสิบหกนาที
+ * (สองปุ่มนี้ถูกเปิดให้ตั้งค่าได้เพื่อการนี้โดยเฉพาะ — เทสต์นี้กลับเป็นที่เดียวที่ไม่ได้ใช้)
+ */
 async function timedOut(phases, reply) {
   probeReply = reply;
   const tr = new ChatGptTabTransport({});
-  const p = tr.send('คำสั่งของเรา', { outerTimeoutMs: 30 });
+  const p = tr.send('คำสั่งของเรา', { outerTimeoutMs: 30, runningRecheckMs: 20, runningMaxExtraMs: 60 });
   for (const phase of phases) listener({ type: 'gpt.progress', turnId: tr.lastTurnId, phase });
   return await p;
 }

@@ -211,6 +211,7 @@ export class ChatGptTabTransport {
             newThread: !!opts.newThread,
             wantImages: !!opts.wantImages,
             expectedJsonKeys: opts.expectedJsonKeys,
+            ...(opts.itemReceipt === true && !opts.wantImages ? { itemReceipt: true } : {}),
             recoverCompletedSetup: !opts.wantImages && opts.recoverCompletedSetup !== false,
             expectModel: opts.expectModel ?? this.expectModel,
             timeoutMs: answerTimeoutMs,

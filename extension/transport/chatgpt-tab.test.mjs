@@ -9,8 +9,17 @@ function fixture() {
   const context={setTimeout:(fn,ms)=>{timers.set(++n,{fn,ms});return n;},clearTimeout:id=>timers.delete(id),Date,
     chrome:{runtime:{onMessage:{addListener:fn=>listener=fn},sendMessage:async msg=>{sent=msg;return {ok:true}}}}};
   const Transport=vm.runInNewContext(source.replaceAll('export ','')+'\nChatGptTabTransport',context);
-  return {tr:new Transport(),timers,send:msg=>listener({...msg,turnId:sent.turnId}),id:()=>sent.turnId};
+  return {tr:new Transport(),timers,message:()=>sent,send:msg=>listener({...msg,turnId:sent.turnId}),id:()=>sent.turnId};
 }
+
+test('only opted-in item text receipts reach the adapter',async()=>{
+  for(const opts of [{itemReceipt:true},{},{itemReceipt:true,wantImages:true}]) {
+    const f=fixture(); const result=f.tr.send('prompt',opts);
+    assert.equal(f.message().opts.itemReceipt===true,opts.itemReceipt===true&&!opts.wantImages);
+    if(!opts.itemReceipt||opts.wantImages) assert.equal(Object.hasOwn(f.message().opts,'itemReceipt'),false);
+    f.send({type:'gpt.result',status:'ok',text:'answer'}); await result;
+  }
+});
 test('reply deadline starts after accepted prompt, includes effective image timeout, never resets on heartbeat',async()=>{
   const f=fixture(); const p=f.tr.send('draw',{wantImages:true});
   assert.equal([...f.timers.values()][0].ms,600000);

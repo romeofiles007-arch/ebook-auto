@@ -97,7 +97,17 @@ export function absorb(bible, sectionId, meta) {
   bible.usedExamples = bible.usedExamples.slice(-40);
   bible.glossary = bible.glossary.slice(-60);
   bible.openPromises = bible.openPromises.slice(-20);
-  bible.characters = bible.characters.slice(-40);
+  /**
+   * ตัดรายการตัวละครโดยไม่ทิ้งโปรไฟล์ canon
+   *
+   * โปรไฟล์ตัวละคร (object ที่มีชื่อ want need รูปลักษณ์) มาจากโครงเรื่องและอยู่หัวรายการ
+   * ส่วนอัปเดตแบบข้อความสั้นถูกต่อท้ายทุกฉาก เดิมตัดเหลือ 40 รายการล่าสุดรวดเดียว
+   * นิยายยาวจึงตัดโปรไฟล์ตัวเอกทิ้งไปก่อน แล้วบทท้าย ๆ เขียนโดยไม่รู้หน้าตาหรือความต้องการของตัวละครหลัก
+   * สารคดีไม่เคยมีรายการนี้ ผลจึงไม่เปลี่ยน
+   */
+  const profiles = bible.characters.filter((c) => c && typeof c === 'object' && String(c.name || '').trim());
+  const notes = bible.characters.filter((c) => !(c && typeof c === 'object' && String(c.name || '').trim()));
+  bible.characters = [...profiles.slice(-40), ...notes.slice(-Math.max(10, 40 - profiles.length))];
   bible.worldFacts = bible.worldFacts.slice(-80);
   bible.timeline = bible.timeline.slice(-80);
   bible.openThreads = bible.openThreads.slice(-50);

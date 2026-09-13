@@ -5,6 +5,7 @@
  */
 
 import * as db from './db.js';
+import { syncItemEdit, isItemBook } from './item-edit.js';
 import { backMatterSections, referenceProblem } from './references.js';
 import { stripZwsp } from './thai.js';
 import { coverTextBaked, backCoverTextBaked } from './prompts.js';
@@ -374,16 +375,19 @@ export async function importDocx(book, file, { apply = false } = {}) {
     changes.push({ id: p.id, title: p.title, before: rec.chars || 0, after: chars, delta });
 
     if (apply) {
-      await db.saveSection(book.id, {
+      const edited = {
         ...rec,
         title: p.title || rec.title,
         md: p.md,
         chars,
         status: 'edited',
         history: [...(rec.history || []).slice(-19), { md: rec.md, chars: rec.chars, at: Date.now(), reason: 'ก่อนนำ DOCX กลับเข้า' }],
-      });
+      };
+      syncItemEdit(book, edited);
+      await db.saveSection(book.id, edited);
     }
   }
+  if (apply && changes.length && isItemBook(book)) await db.saveBook(book);
   return { total: parsed.length, changes };
 }
 
@@ -406,7 +410,7 @@ export async function exportEpub(book, sections) {
           .sort((a, b) => compareItemId(a.id, b.id))
           .map((item) => {
             const attribution = item.attribution ? `<footer>— ${esc(item.attribution)}</footer>` : '';
-            return `<blockquote>${mdToHtml(stripZwsp(item.text || item.md || ''))}${attribution}</blockquote>`;
+            return `<blockquote>${mdToHtml(stripZwsp(item.md ?? item.text ?? ''))}${attribution}</blockquote>`;
           })
           .join('\n');
         return {

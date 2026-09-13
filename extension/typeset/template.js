@@ -10,6 +10,7 @@ import { prepareForTypeset, THAI_GAP } from '../core/thai.js';
 import { coverTextBaked, backCoverTextBaked } from '../core/prompts.js';
 import { referenceLines, REFERENCE_STYLES } from '../core/references.js';
 import { stripEchoedHeading } from '../core/extract.js';
+import { itemTypeSize, ITEM_BLOCK_KINDS } from '../core/items.js';
 
 const mm = (v) => `${round(v)}mm`;
 const pt = (v) => `${round(v)}pt`;
@@ -445,8 +446,37 @@ export function buildItemsDocument({ book, outline, items, opts = {} }) {
   const lang = book.language || 'th';
   const bleed = opts.withBleed ? trim.bleedMm || 0 : 0;
   const perPage = Math.max(1, book.itemsPerPage || 1);
-  const size = book.itemSizePt || 24;
-  const align = book.itemAlign === 'top' ? 'top + center' : 'horizon + center';
+  /**
+   * จัดหน้าแบบหนังสือรวมบทกวีจริง
+   *
+   * เดิมตัวอักษร 20-26pt และจัดกลางทีละบรรทัด กลอนจึงหักกลางวรรคแล้วไหลไปทับเลขหน้า
+   * ขอบซ้ายขวาของแต่ละบรรทัดก็ไม่ตรงกัน อ่านแล้วเหมือนป้ายประกาศ ไม่ใช่หนังสือ
+   * ตอนนี้: ตัวเล็กขนาดหนังสือ · บทกลอนเป็นก้อนชิดซ้ายวางกลางหน้า · คำคมสั้นจัดกลาง
+   * · ถ้าวรรคไหนยาวเกินความกว้างจริง ย่อทั้งชิ้นลงเล็กน้อยแทนการหักบรรทัด
+   */
+  const size = itemTypeSize(book);
+  const pieceAlign = ITEM_BLOCK_KINDS.has(book.itemKind) ? 'left' : 'center';
+  const top = book.itemAlign === 'top';
+  const leading = round(Math.max(0.55, Math.min(0.8, (t.lineHeight || 1.7) - 1)));
+  const textW = trim.widthMm - t.marginsMm.inner - t.marginsMm.outer;
+
+  // ภาพของโหมดรายชิ้นผูกกับรหัสชิ้น (1.12) หรือหน้าคั่นหมวด (theme-1) — วางแผนใน Machine.itemFigures
+  const have = new Set(opts.assetNames || []);
+  const figOf = new Map(
+    (book.figures || []).filter((f) => f.kind === 'image' && f.name && f.itemFigure).map((f) => [String(f.section), f]),
+  );
+  const figMarkup = (f, circle) => {
+    const w = circle ? Math.min(50, textW * 0.52) : round(textW * 0.8);
+    const h = circle ? w : Math.max(36, Math.min(72, Number(f.heightMm) || 58));
+    const inner = have.has(f.name)
+      ? `#image("/img/${f.name}", width: 100%, height: 100%, fit: "cover")`
+      : `#align(center + horizon)[#text(size: 6.5pt, fill: luma(105))[${
+          esc(book.figureMode === 'prompt' && f.prompt ? `<Prompt : ${f.prompt}>` : `ยังไม่ได้ใส่ภาพ: ${f.name}`)
+        }]]`;
+    return `#box(width: ${mm(w)}, height: ${mm(h)}, radius: ${circle ? mm(w / 2) : '2pt'}, clip: true${
+      have.has(f.name) ? '' : ', stroke: 0.6pt + luma(165), inset: 7pt'
+    })[${inner}]`;
+  };
 
   const byTheme = new Map();
   for (const it of items) {
@@ -455,14 +485,15 @@ export function buildItemsDocument({ book, outline, items, opts = {} }) {
     byTheme.get(n).push(it);
   }
 
-  // ต้องเป็น markup ที่ขึ้นต้นด้วย # เพราะอยู่ใน [...] ไม่ใช่ในวงเล็บของฟังก์ชัน
-  // (เคยใส่ไว้เป็นอาร์กิวเมนต์ของ #stack แล้ว Typst ฟ้องว่า # ใช้ใน code ไม่ได้)
-  const one = (it) => `#block(width: 100%, breakable: false)[
-      #align(center)[
-        #text(size: ${pt(size)}, weight: 500)[${itemText(it.text, lang)}]
-        ${it.attribution ? `\n        #v(0.6em)\n        #text(size: ${pt(size * 0.55)}, fill: luma(110))[— ${inline(it.attribution)}]` : ''}
-      ]
-    ]`;
+  const one = (it) =>
+    `#item-piece(${pieceAlign}, by: ${it.attribution ? `[${inline(prepareForTypeset(it.attribution, lang))}]` : 'none'})[${itemText(it.md ?? it.text ?? '', lang)}]`;
+
+  // จัดตำแหน่งแนวตั้งด้วยสัดส่วน — ล่างมากกว่าบนเล็กน้อย ให้ก้อนข้อความอยู่ที่กึ่งกลางทางสายตา
+  const pageOf = (inner) => `#page[
+  ${top ? '#v(12mm)' : '#v(1fr)'}
+  ${inner}
+  ${top ? '#v(1fr)' : '#v(1.3fr)'}
+]`;
 
   const body = [];
   const multiTheme = byTheme.size > 1;
@@ -470,23 +501,52 @@ export function buildItemsDocument({ book, outline, items, opts = {} }) {
   for (const [n, list] of byTheme) {
     const theme = (outline.themes || []).find((x) => String(x.n) === String(n));
     if (multiTheme && theme) {
-      body.push(`#pagebreak(to: "odd", weak: true)
-#page(numbering: none)[${markPatternPage(opts, { markup: true })}
-  #align(center + horizon)[
-    #text(size: ${pt(size * 1.15)}, weight: 600)[${inline(prepareForTypeset(theme.title, lang))}]
+      const tf = figOf.get(`theme-${n}`);
+      // ไม่บังคับให้หน้าคั่นหมวดขึ้นหน้าขวา — #page ขึ้นหน้าใหม่ให้อยู่แล้ว
+      // การดันไปหน้าคี่เคยทิ้งหน้าเปล่าที่มีแต่เลขหน้าไว้ก่อนหมวด (เห็นจริงในเล่ม "หมดไฟ แต่ยังไม่หมดทาง" หน้า 1 และ 19)
+      body.push(`#page(numbering: none)[${markPatternPage(opts, { markup: true })}
+  #v(1fr)
+  #align(center)[
+    ${tf ? `${figMarkup(tf, true)}\n    #v(2.2em)` : ''}
+    #text(size: ${pt(size * 0.72)}, fill: luma(125), tracking: 0.06em)[หมวดที่ ${esc(n)}]
+    #v(0.8em)
+    #heading(level: 1)[${inline(prepareForTypeset(theme.title, lang))}]
   ]
+  #v(1.4fr)
 ]`);
     }
 
-    for (let i = 0; i < list.length; i += perPage) {
-      const group = list.slice(i, i + perPage);
-      body.push(`#page[
-  #align(${align})[
-    ${group.map(one).join(`\n    #v(${round(2.4 / perPage + 0.8)}em)\n    `)}
-  ]
-]`);
+    let group = [];
+    const flush = () => {
+      if (!group.length) return;
+      body.push(pageOf(group.map(one).join(`\n  ${top ? '#v(2.4em)' : '#v(1fr)'}\n  #item-rule\n  ${top ? '#v(2.4em)' : '#v(1fr)'}\n  `)));
+      group = [];
+    };
+    for (const it of list) {
+      const f = figOf.get(String(it.id));
+      if (f) {
+        // ชิ้นที่มีภาพได้หน้าของตัวเอง: ภาพก่อน ตามด้วยข้อความ
+        flush();
+        body.push(pageOf(`#align(center)[${figMarkup(f, false)}]\n  #v(2em)\n  ${one(it)}`));
+        continue;
+      }
+      group.push(it);
+      if (group.length >= perPage) flush();
     }
+    flush();
   }
+
+  /**
+   * หน้าต้นเล่มที่ไม่มีของจริงให้ใส่ ต้องไม่ถูกพิมพ์ออกมา
+   * - สารบัญ: เล่มหมวดเดียวไม่มีหน้าคั่นหมวด จึงไม่มีหัวข้อ — หน้าสารบัญเปล่าดูเหมือนเล่มพัง
+   * - คำนำ: ถ้าไม่มีคำนำที่เขียนจริง ตัวสำรองของหน้าต้นเล่มเป็นประโยคของหนังสือสารคดี
+   *   ("จัดทำขึ้นเพื่อช่วยให้ผู้อ่านเข้าใจ ... อย่างเป็นขั้นตอนและนำไปใช้ได้จริง") ซึ่งผิดประเภทกับหนังสือคำคม/กลอน
+   */
+  const front = {
+    ...book,
+    frontMatter: (book.frontMatter || []).filter((k) =>
+      !(k === 'toc' && !multiTheme) && !(k === 'foreword' && !String(outline.foreword || '').trim())),
+  };
 
   return `
 #set document(title: ${str(outline.title)}, author: ${str(book.author || '')})
@@ -507,16 +567,38 @@ ${patternPreamble(opts)}#set page(
   font: ${str(t.bodyFont)}, size: ${pt(size)}, lang: ${str(lang)},
   top-edge: "ascender", bottom-edge: "descender",
 )
-#set par(
-  justify: false,
-  leading: ${round(Math.max(0.5, (t.lineHeight || 1.7) - 1))}em,
-  spacing: ${round(Math.max(0.5, (t.lineHeight || 1.7) - 1))}em,
-  first-line-indent: 0pt,
-)
+#set par(justify: false, leading: ${leading}em, spacing: ${leading}em, first-line-indent: 0pt)
+#set heading(numbering: none)
+#show heading.where(level: 1): it => block(text(size: ${pt(Math.max(16, size * 1.45))}, weight: 600, it.body))
 
-${frontMatter(book, outline, opts)}
+#let item-size = ${pt(size)}
+#let item-stanza = v(${round(leading * 1.4)}em)
+// บทกลอน: ย่อทั้งชิ้นเมื่อวรรคที่ยาวที่สุดกว้างเกินหน้า ดีกว่าหักวรรคกลางคำ (ย่อได้ไม่ต่ำกว่า 82%)
+// ถ้ายังไม่พอ วรรคนั้นห้อยบรรทัดต่อเข้าไป ไม่ตกลงมาเหมือนวรรคใหม่
+#let item-fit(body) = layout(area => {
+  let natural = measure(text(size: item-size, body)).width
+  let s = item-size
+  if natural > area.width {
+    s = item-size * (area.width / natural) * 0.98
+    if s < item-size * 0.82 { s = item-size * 0.82 }
+  }
+  text(size: s, body)
+})
+#let item-piece(al, by: none, body) = align(center, block(breakable: false, {
+  set par(spacing: ${leading}em, hanging-indent: if al == left { 1.6em } else { 0pt })
+  set align(al)
+  // คำคม/ข้อคิดสั้นจัดกลาง ตัดบรรทัดตามธรรมชาติในความกว้างราว 80% ของหน้า ไม่ย่อตัวอักษร
+  if al == left { item-fit(body) } else { block(width: 80%, body) }
+  if by != none {
+    v(0.9em)
+    align(if al == left { right } else { center }, text(size: item-size * 0.72, fill: luma(115), [— #by]))
+  }
+}))
+#let item-rule = align(center, line(length: 16pt, stroke: 0.5pt + luma(180)))
 
-#set page(numbering: ${book.itemPageNumbers === false ? 'none' : '"1"'}, number-align: center)
+${frontMatter(front, outline, opts)}
+
+#set page(numbering: ${book.itemPageNumbers === false ? 'none' : '(..n) => text(size: 8pt, fill: luma(130), numbering("1", ..n))'}, number-align: center)
 #counter(page).update(1)
 
 ${body.join('\n\n')}
@@ -530,12 +612,24 @@ ${'#pagebreak()\n'.repeat(opts.padPages || 0)}
 `.trim();
 }
 
-/** ข้อความของชิ้น — ขึ้นบรรทัดใหม่ตามฉันทลักษณ์ ห้ามให้ไหลรวมกัน */
+/**
+ * ข้อความของชิ้น — ขึ้นบรรทัดใหม่ตามฉันทลักษณ์ ห้ามให้ไหลรวมกัน
+ *
+ * หนึ่งวรรคหนึ่งย่อหน้า เพื่อให้วรรคที่ยาวเกินหน้าจริง ๆ ห้อยบรรทัดต่อเข้าไป (hanging indent)
+ * แบบหนังสือกลอนที่พิมพ์กัน แทนที่จะตกลงมาชิดซ้ายจนดูเหมือนเป็นวรรคใหม่
+ * บรรทัดว่างคือช่องไฟระหว่างบท
+ */
 function itemText(text, lang) {
   return String(text)
     .split('\n')
-    .map((l) => inline(prepareForTypeset(l.trim(), lang)))
-    .join(' \\\n');
+    .map((l) => l.trim())
+    .reduce((out, l) => {
+      if (!l) { if (out.length && out.at(-1) !== '#item-stanza') out.push('#item-stanza'); }
+      else out.push(inline(prepareForTypeset(l, lang)));
+      return out;
+    }, [])
+    .filter((l, i, all) => !(l === '#item-stanza' && i === all.length - 1))
+    .join('\n\n');
 }
 
 /**
