@@ -23,12 +23,13 @@ test('ลายพื้นหลังไม่เคยเข้าเงื�
  * กฎการตัดสินใจอยู่ในลูปสร้างภาพ เทสต์นี้จึงยึดกฎเดียวกันไว้เป็นสัญญา
  * ถ้ามีคนแก้กฎในลูป ต้องมาแก้ตรงนี้ด้วย และจะได้เห็นว่ากำลังเปลี่ยนอะไร
  */
-const wantsCoverRef = (hasAuthorRef, kind) => !hasAuthorRef && (kind === 'pattern' || kind === 'interior');
+const wantsCoverRef = (hasAuthorRef, kind, name) => !hasAuthorRef && name !== 'cover-front.png' && (kind === 'pattern' || kind === 'interior' || kind === 'cover');
 
 test('ปกถูกแนบให้ลายพื้นหลังและภาพประกอบ แต่ไม่แนบให้ตัวปกเอง', () => {
-  assert.equal(wantsCoverRef(false, 'pattern'), true);
-  assert.equal(wantsCoverRef(false, 'interior'), true);
-  assert.equal(wantsCoverRef(false, 'cover'), false, 'ปกไม่ต้องอ้างอิงตัวเอง');
+  assert.equal(wantsCoverRef(false, 'pattern', 'pattern.png'), true);
+  assert.equal(wantsCoverRef(false, 'interior', 'fig-1.png'), true);
+  assert.equal(wantsCoverRef(false, 'cover', 'cover-back.png'), true, 'ปกหลังอ้างอิงปกหน้าได้');
+  assert.equal(wantsCoverRef(false, 'cover', 'cover-front.png'), false, 'ปกหน้าอ้างอิงตัวเองไม่ได้');
 });
 
 /**
@@ -36,6 +37,6 @@ test('ปกถูกแนบให้ลายพื้นหลังแล�
  * ซึ่งเป็นความเสียหายที่ผู้ใช้เห็นก็ต่อเมื่อเปิดเล่มที่ส่งออกแล้ว
  */
 test('รูปผู้เขียนมาก่อนเสมอ ไม่แนบสองรูปพร้อมกัน', () => {
-  assert.equal(wantsCoverRef(true, 'interior'), false);
-  assert.equal(wantsCoverRef(true, 'pattern'), false);
+  assert.equal(wantsCoverRef(true, 'interior', 'fig-1.png'), false);
+  assert.equal(wantsCoverRef(true, 'pattern', 'pattern.png'), false);
 });

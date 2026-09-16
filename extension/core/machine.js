@@ -3445,7 +3445,13 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
         if (ref) this.log('ok', `ภาพ ${j.name} · แนบรูปผู้เขียน ${ref.name} (${ref.width}×${ref.height}px)`);
 
         /**
-         * แนบปกเป็นตัวอ้างอิงภาษาภาพให้ลายพื้นหลังและภาพประกอบ
+         * แนบปกไปกับคำสั่ง — สองหน้าที่ในไฟล์เดียว
+         *
+         * หน้าที่แรกคือภาษาภาพ ให้ภาพทั้งเล่มมาจากโลกเดียวกับปก
+         * หน้าที่ที่สองสำคัญกว่า และเพิ่งพิสูจน์จากการทำมือ: ไฟล์แนบทำให้ ChatGPT
+         * รู้ทันทีว่านี่คืองานภาพ แล้วเรียกเครื่องมือวาดเลย คำสั่งที่ไม่มีไฟล์แนบ
+         * ถูกอ่านเป็นคำถามธรรมดา โมเดลสายคิดก่อนตอบจึงค้างอยู่ที่ Thinking
+         * แล้วตอบกลับเป็นข้อความ ไม่มีภาพสักใบ จนระบบหมดเวลารอ
          *
          * แนบได้เฉพาะตอนที่ไม่ได้แนบรูปผู้เขียน — สองรูปในข้อความเดียวทำให้โมเดลสับสน
          * ว่าหน้าไหนคือหน้าที่ต้องรักษา ซึ่งเป็นความเสียหายที่ผู้ใช้เห็นก็ต่อเมื่อเปิดเล่มแล้ว
@@ -3454,7 +3460,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
          * เคยมีรอบที่ลายพื้นหลังออกมาหน้าตาเหมือนปก ตอนที่ปกอยู่ในห้องแชตเดียวกัน
          * การแนบปกเข้าไปตรง ๆ จึงเสี่ยงซ้ำรอยนั้น ถ้าไม่กำกับหน้าที่ของรูปไว้
          */
-        const wantsCoverRef = !ref && (j.kind === 'pattern' || j.kind === 'interior');
+        const wantsCoverRef = !ref && j.name !== 'cover-front.png' && (j.kind === 'pattern' || j.kind === 'interior' || j.kind === 'cover');
         const styleRef = wantsCoverRef ? await this.coverStyleRef() : null;
         if (styleRef) {
           j.prompt = `${j.prompt}\n\nThe attached image is the finished cover of this same book. Use it ONLY as a reference for palette, mood and visual language so this image belongs to the same world. Do NOT redraw it, do NOT copy its composition or subject, and do NOT put any text from it into this image.`;
