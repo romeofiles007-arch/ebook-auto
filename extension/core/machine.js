@@ -2342,6 +2342,30 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
     return this._authorRef;
   }
 
+  /**
+   * ปกที่วาดเสร็จแล้ว ใช้เป็นรูปอ้างอิงภาษาภาพของภาพที่เหลือในเล่ม
+   *
+   * ท่าที่ผู้ใช้ทำมือแล้วได้ผลคือแนบปกไปกับคำสั่งทุกใบ ภาพทั้งเล่มจึงมาจากโลกเดียวกัน
+   * ต่างจากการบรรยายสีและอารมณ์เป็นตัวหนังสือ ซึ่งโมเดลตีความใหม่ได้ทุกใบ
+   *
+   * ไม่มีปกก็ไม่เป็นไร — คืน null แล้วสร้างภาพต่อโดยไม่แนบ ดีกว่าหยุดทั้งรอบ
+   * เพราะผู้ใช้สั่งสร้างเฉพาะภาพประกอบโดยยังไม่มีปกได้
+   */
+  async coverStyleRef() {
+    if (this._coverRef !== undefined) return this._coverRef;
+    this._coverRef = null;
+    try {
+      const asset = await db.loadAsset(this.book.id, 'cover-front.png');
+      if (!asset?.blob) return this._coverRef;
+      const ready = await prepareRefImage(asset.blob);
+      this._coverRef = { name: 'cover-front.jpg', dataUrl: ready.dataUrl, bytes: ready.bytes, width: ready.width, height: ready.height };
+    } catch (e) {
+      this.log('warn', `เตรียมปกสำหรับใช้อ้างอิงภาษาภาพไม่สำเร็จ (${e?.message || e}) — สร้างภาพต่อโดยไม่แนบปก`);
+      this._coverRef = null;
+    }
+    return this._coverRef;
+  }
+
   async measure(sections) {
     const assets = await db.loadAssets(this.book.id);
     let pages;
@@ -3419,6 +3443,23 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
         const ref = needsRef ? await this.authorRef() : null;
         if (needsRef && !ref?.dataUrl) throw new Halt('หยุดสร้างภาพ: ไม่พบรูปผู้เขียนที่เลือกไว้ กรุณาแนบรูปใน Studio แล้วเริ่มต่อ');
         if (ref) this.log('ok', `ภาพ ${j.name} · แนบรูปผู้เขียน ${ref.name} (${ref.width}×${ref.height}px)`);
+
+        /**
+         * แนบปกเป็นตัวอ้างอิงภาษาภาพให้ลายพื้นหลังและภาพประกอบ
+         *
+         * แนบได้เฉพาะตอนที่ไม่ได้แนบรูปผู้เขียน — สองรูปในข้อความเดียวทำให้โมเดลสับสน
+         * ว่าหน้าไหนคือหน้าที่ต้องรักษา ซึ่งเป็นความเสียหายที่ผู้ใช้เห็นก็ต่อเมื่อเปิดเล่มแล้ว
+         *
+         * และต้องบอกให้ชัดว่ารูปที่แนบมาคือ "ของอ้างอิง" ไม่ใช่ "ของที่ต้องวาดซ้ำ"
+         * เคยมีรอบที่ลายพื้นหลังออกมาหน้าตาเหมือนปก ตอนที่ปกอยู่ในห้องแชตเดียวกัน
+         * การแนบปกเข้าไปตรง ๆ จึงเสี่ยงซ้ำรอยนั้น ถ้าไม่กำกับหน้าที่ของรูปไว้
+         */
+        const wantsCoverRef = !ref && (j.kind === 'pattern' || j.kind === 'interior');
+        const styleRef = wantsCoverRef ? await this.coverStyleRef() : null;
+        if (styleRef) {
+          j.prompt = `${j.prompt}\n\nThe attached image is the finished cover of this same book. Use it ONLY as a reference for palette, mood and visual language so this image belongs to the same world. Do NOT redraw it, do NOT copy its composition or subject, and do NOT put any text from it into this image.`;
+          this.log('ok', `ภาพ ${j.name} · แนบปกเป็นตัวอ้างอิงภาษาภาพ (${styleRef.width}×${styleRef.height}px) — อ้างอิงโทนและอารมณ์ ไม่ใช่ให้วาดซ้ำ`);
+        }
         /**
          * รูปผู้เขียนที่เราแนบไปเองต้องไม่มีวันถูกนับเป็นผลงานที่ ChatGPT วาด
          *
@@ -3427,6 +3468,11 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
          * ก็ต่อเมื่อเปิดไฟล์ที่ส่งออกแล้ว จับลายนิ้วมือรูปแนบไว้ตรงนี้ด้วย
          * ตัวกันภาพซ้ำที่มีอยู่แล้วจะปฏิเสธให้เองแล้วสั่งวาดใหม่
          */
+        if (styleRef?.dataUrl) {
+          // ปกที่แนบไปเองต้องไม่ถูกนับเป็นภาพใหม่ ถ้าโมเดลส่งปกกลับมาเฉย ๆ ต้องถือว่ายังไม่ได้ภาพ
+          this.usedImageKeys ||= new Set();
+          this.usedImageKeys.add(imageFingerprint(styleRef.dataUrl));
+        }
         if (ref?.dataUrl) {
           // ต้องสร้างถังก่อน ไม่ใช่ ?.add เฉย ๆ — ถังนี้เกิดหลังบันทึกภาพแรกสำเร็จ
           // ซึ่งแปลว่าตัวกันจะเงียบพอดีในรอบของรูปปก อันเป็นรูปที่โดนปัญหานี้จริง
@@ -3462,7 +3508,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
               widthMm: j.widthMm,
               heightMm: j.heightMm,
               quality: this.book.imageApiQuality || 'medium',
-              refImages: ref ? [await dataUrlToFile(ref.dataUrl, ref.name)] : [],
+              refImages: (ref || styleRef) ? [await dataUrlToFile((ref || styleRef).dataUrl, (ref || styleRef).name)] : [],
             });
             res = { status: 'ok', text: '', images: [], imageDataUrl: out.dataUrl, meta: { via: 'api', size: out.size, ref: !!ref } };
             const spent = this.recordImageUsage(out);
@@ -3486,7 +3532,9 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
             label: `สร้าง${j.what}${attempt > 1 ? ` (ลอง ${attempt})` : ''}`,
             wantImages: true,
             newThread,
-            attachments: ref ? [{ name: ref.name, dataUrl: ref.dataUrl }] : [],
+            attachments: (ref || styleRef)
+              ? [{ name: (ref || styleRef).name, dataUrl: (ref || styleRef).dataUrl }]
+              : [],
           });
 
           /**
