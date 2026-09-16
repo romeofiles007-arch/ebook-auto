@@ -106,7 +106,10 @@ test('ตอนที่ยังไม่มีเนื้อหา ไม่�
   assert.match(p, /HOW THIS ONE IS FRAMED/);
 });
 
-test('เนื้อหาจริงถูกส่งเข้าคำสั่งวาด และมีอำนาจเหนือชุดมุมกล้องสำเร็จรูป', () => {
+/**
+ * เนื้อหาคุมว่า "มีอะไรอยู่ในภาพ" — ข้อนี้ห้ามอ่อนลงเด็ดขาด ภาพต้องตรงกับเล่มเสมอ
+ */
+test('เนื้อหาจริงถูกส่งเข้าคำสั่งวาด และคุมสิ่งที่อยู่ในภาพ', () => {
   const p = interiorFigurePrompt('photoColor', 'สมุดจดออเดอร์', 120, 80, '3:2', {
     color: true,
     nearby: figureNearbyText(md, 'middle'),
@@ -115,7 +118,51 @@ test('เนื้อหาจริงถูกส่งเข้าคำส�
   assert.match(p, /WHAT THIS PART OF THE BOOK ACTUALLY DESCRIBES/);
   assert.match(p, /สมุดจดออเดอร์ปกหนังที่เปียกฝน/);
   assert.match(p, /Every place, object, action and detail in the picture must be something this passage names/);
-  assert.match(p, /the passage wins/);
+  assert.match(p, /Never swap them for a generic stand-in scene/);
+});
+
+/**
+ * แต่เนื้อหาไม่ได้คุม "กล้องยืนตรงไหน" — เดิมเขียนไว้ว่า "the passage wins" ลอย ๆ
+ * แล้วพังกับเล่มที่ทุกตอนบรรยายสถานการณ์เดียวกัน (เล่มสอนพูดหน้ากล้อง: ทุกตอนมีคนนั่งหน้ากล้อง)
+ * โมเดลสรุปว่าเนื้อหากำหนดมุมแล้ว จึงทิ้งรายการมุมกล้องทุกใบ ภาพทั้งเล่มออกมาเป็นรูปเดียวกันซ้ำ ๆ
+ *
+ * ของสองอย่างนี้ไม่เคยขัดกันจริง ฉากเดียวกันถ่ายได้แปดมุมโดยไม่ผิดเนื้อหาสักตัว
+ */
+test('เนื้อหาคุมสิ่งที่อยู่ในภาพ ส่วนมุมกล้องคุมว่ากล้องยืนตรงไหน', () => {
+  const p = interiorFigurePrompt('photoColor', 'สมุดจดออเดอร์', 120, 80, '3:2', {
+    color: true,
+    nearby: figureNearbyText(md, 'middle'),
+    figureIndex: 1,
+  });
+  assert.match(p, /This passage decides WHAT is in the picture\. It does not decide where the camera stands/);
+  assert.match(p, /this line decides where the camera stands and how close it is/);
+  assert.match(p, /HOW THIS ONE IS FRAMED — this line is not a suggestion/);
+  assert.ok(!/the passage wins/.test(p), 'คำที่ทำให้โมเดลทิ้งมุมกล้องทุกใบต้องไม่กลับมา');
+});
+
+/**
+ * ประตูหลังที่ยังต้องมี — ถ้าเนื้อหาระบุมุมไว้เป็นคำพูดจริง ๆ เนื้อหาต้องชนะ
+ * ไม่ใช่แค่บรรยายฉากแล้วถือว่าระบุมุมแล้ว
+ */
+test('เนื้อหายังชนะได้ ถ้าระบุมุมไว้เป็นคำพูด', () => {
+  const p = interiorFigurePrompt('photoColor', 'สมุดจดออเดอร์', 120, 80, '3:2', {
+    color: true,
+    nearby: figureNearbyText(md, 'middle'),
+    figureIndex: 1,
+  });
+  assert.match(p, /Override it only if the passage names a viewpoint in so many words/);
+});
+
+/**
+ * เล่มที่ทุกตอนเป็นฉากเดียวกันคือเคสที่ทำให้เรื่องนี้แตก ต้องสั่งตรง ๆ ว่ายิ่งเหมือนยิ่งต้องเปลี่ยนมุม
+ */
+test('ฉากซ้ำแบบเดิมคือเหตุผลให้เปลี่ยนมุม ไม่ใช่ข้ออ้างให้ใช้มุมเดิม', () => {
+  const p = interiorFigurePrompt('photoColor', 'คนนั่งหน้ากล้อง', 120, 80, '3:2', {
+    color: true,
+    nearby: figureNearbyText(md, 'middle'),
+    figureIndex: 2,
+  });
+  assert.match(p, /same kind of scene as other figures — especially then/);
 });
 
 test('เครื่องผลิตส่งเนื้อหาบริเวณนั้นไปให้จริง', async () => {

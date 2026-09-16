@@ -1681,11 +1681,29 @@ export function interiorFigurePrompt(styleKey, subject, widthMm, heightMm = 45, 
     ? `\nWHAT THIS PART OF THE BOOK ACTUALLY DESCRIBES — draw from this passage, not from stock imagery for the topic:\n"${nearby}"\n` +
       'Every place, object, action and detail in the picture must be something this passage names or clearly implies. ' +
       'If it names specific things, those specific things are what the reader must see. Never swap them for a generic stand-in scene. ' +
+      'This passage decides WHAT is in the picture. It does not decide where the camera stands — that is set below. ' +
       'The passage is written in the book\'s own language; draw what it describes, and put no text in the image.'
     : '';
+  /**
+   * มุมกล้องต้องชนะเสมอ เว้นแต่เนื้อหาระบุมุมไว้เป็นคำพูด
+   *
+   * เดิมเขียนว่า "ใช้มุมนี้ เว้นแต่เนื้อหาข้างบนบอกมุมที่ดีกว่า — เนื้อหาชนะ"
+   * ซึ่งฟังดูถูก แต่พังทันทีกับเล่มที่ทุกตอนบรรยายสถานการณ์เดียวกัน เช่นเล่มสอนพูดหน้ากล้อง
+   * ที่ทุกตอนพูดถึงคนนั่งหน้ากล้องเหมือนกันหมด โมเดลอ่านแล้วสรุปว่าเนื้อหากำหนดมุมแล้ว
+   * จึงทิ้งรายการมุมกล้องทุกใบ ผลคือภาพทั้งเล่มเป็นรูปเดียวกันซ้ำ ๆ ต่างกันแค่รายละเอียดเล็ก ๆ
+   *
+   * สองเรื่องนี้ไม่เคยขัดกันจริง เนื้อหาบอกว่า "มีอะไรอยู่ในภาพ" มุมกล้องบอกว่า
+   * "กล้องยืนตรงไหน ห่างแค่ไหน" ฉากเดียวกันถ่ายได้แปดมุมโดยไม่ผิดเนื้อหาสักตัว
+   * เนื้อหาจะชนะได้ต่อเมื่อมันระบุมุมไว้เป็นคำพูดจริง ๆ ไม่ใช่แค่บรรยายฉาก
+   */
   const variety =
-    `\nHOW THIS ONE IS FRAMED${nearby ? ' (use this unless the passage above implies a better vantage — the passage wins)' : ''}: ${shot}. ` +
+    `\nHOW THIS ONE IS FRAMED — this line is not a suggestion: ${shot}. ` +
     `Moment shown: ${moment}. ` +
+    (nearby
+      ? 'The passage above decides what appears in the picture; this line decides where the camera stands and how close it is. ' +
+        'Follow it even when this figure shows the same kind of scene as other figures — especially then, because that is when a book turns into one picture repeated. ' +
+        'Override it only if the passage names a viewpoint in so many words. '
+      : '') +
     'Do not reuse the vantage point, camera distance or arrangement of any other figure in this book. ' +
     'A book where every figure is framed the same way reads as one picture repeated, no matter how different the objects in it are.';
   const pxW = Math.round((widthMm / 25.4) * 300);
