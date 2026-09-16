@@ -337,18 +337,36 @@ export class Machine {
     if (this.turnNo > 0 && !noPacingNeeded) await sleep(jitter([lo, hi]));
 
     const n = ++this.turnNo;
-    this.emit({ type: 'turn.start', n, label: opts.label || '', prompt });
+
+    /**
+     * รหัสประจำเทิร์นที่หัวคำสั่ง — ตัวที่ทำให้ "จับข้อความที่ส่งไม่ได้" หายไป
+     *
+     * ฝั่งอ่านหน้าเว็บยืนยันว่าส่งสำเร็จด้วยการหา 120 ตัวอักษรแรกของคำสั่งในบทสนทนา
+     * แต่คำสั่งของเราขึ้นต้นเหมือนกันทุกใบ ทั้งสายเขียนเนื้อหาและสายภาพ
+     * ทุกใบจึงนับเป็น "ข้อความเดียวกัน" หมด
+     *
+     * ทางสำรองคือนับจำนวนข้อความ ซึ่งพังเมื่อบทสนทนายาว เพราะหน้าเว็บถอดข้อความเก่า
+     * ที่พ้นจอออกจาก DOM จำนวนที่นับได้จึงเท่าเดิมหรือลดลงทั้งที่เพิ่งส่งไปจริง ๆ
+     * ผลคืองานหยุดกลางคันแล้วกดต่อกี่ครั้งก็ล้มที่เดิม เพราะคำสั่งเดิมก็ซ้ำเหมือนเดิม
+     * (โค้ดฝั่งอ่านเขียนเตือนเรื่องนี้ไว้เองแล้ว แต่ดักไว้เฉพาะสายภาพ)
+     *
+     * แก้ที่ต้นทางถูกกว่าไปไล่แก้ทุกตัวนับ: ทำให้คำสั่งทุกใบไม่ซ้ำกันตั้งแต่ 120 ตัวแรก
+     * turnNo เดินหน้าอย่างเดียวและเพิ่มทุกครั้งที่ลองใหม่ด้วย รอบที่ลองซ้ำจึงไม่ชนของเดิม
+     */
+    const tagged = `[งาน #${n} · รหัสระบบ ไม่ต้องอ้างถึงในคำตอบ]\n${prompt}`;
+
+    this.emit({ type: 'turn.start', n, label: opts.label || '', prompt: tagged });
 
     // เทิร์นที่ขอภาพต้องออกทางสายภาพเสมอ ไม่ใช่สายที่ใช้เขียนข้อความ
     const line = opts.wantImages ? this.imgTr : this.tr;
     const startedAt = Date.now();
-    const res = await line.send(prompt, {...opts, recoverCompletedSetup:this.book.threadMode !== 'reuse',
+    const res = await line.send(tagged, {...opts, recoverCompletedSetup:this.book.threadMode !== 'reuse',
       ...(this.book.contentMode === 'items' && !opts.wantImages ? { itemReceipt: true } : {}),
     });
     res.meta = {...res.meta, elapsedMs:Date.now()-startedAt};
     await db.saveTurn(this.book.id, n, {
       label: opts.label || '',
-      prompt,
+      prompt: tagged,
       raw: res.text,
       status: res.status,
       images: res.images || [],
