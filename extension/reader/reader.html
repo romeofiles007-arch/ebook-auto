@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ebook Auto — อ่าน</title>
+<link rel="icon" type="image/png" href="../icons/icon-32.png">
+<link rel="stylesheet" href="reader.css">
+</head>
+<body>
+
+<header class="bar">
+  <button id="back" class="ghost" title="กลับไปชั้นหนังสือใน Studio">‹ ชั้นหนังสือ</button>
+  <button id="tocToggle" class="ghost" aria-label="สารบัญ" title="สารบัญ">☰</button>
+  <div class="who">
+    <b id="barTitle">กำลังเปิดเล่ม…</b>
+    <span id="barSub"></span>
+  </div>
+  <div class="tools">
+    <button id="editBtn" class="ghost" title="เปิดเล่มนี้ใน Studio เพื่อแก้ไขเนื้อหา">แก้ไขเล่มนี้</button>
+    <button id="modeBtn" class="ghost" title="สลับระหว่างเลื่อนยาวกับแบ่งหน้า">แบ่งหน้า</button>
+    <button id="savePdf" class="ghost" title="เรียงพิมพ์เล่มนี้เป็น PDF แล้วเก็บลงเครื่อง">บันทึก PDF</button>
+    <button id="saveEpub" class="ghost" title="บันทึกเป็นไฟล์ EPUB สำหรับเปิดด้วยแอปอ่านอื่น">EPUB</button>
+    <button id="sizeDown" class="ghost" title="ตัวอักษรเล็กลง">ก−</button>
+    <button id="sizeUp" class="ghost" title="ตัวอักษรใหญ่ขึ้น">ก+</button>
+    <button id="themeBtn" class="ghost" title="สลับกลางวัน/กลางคืน">◐</button>
+  </div>
+</header>
+
+<div id="saveNote" class="saveNote hidden"></div>
+
+<div class="shell">
+  <nav id="toc" class="toc" aria-label="สารบัญ"></nav>
+  <main class="stage">
+    <div id="viewport" class="viewport"><article id="page" class="page"></article></div>
+    <div class="pager">
+      <button id="prev" class="ghost">‹ ก่อนหน้า</button>
+      <span id="pos" class="pos"></span>
+      <button id="next" class="ghost">ถัดไป ›</button>
+    </div>
+  </main>
+</div>
+
+<script type="module" src="reader.js"></script>
+</body>
+</html>

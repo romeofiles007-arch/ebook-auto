@@ -309,6 +309,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return sendResponse({ ok: true, tabId: studio.id });
         }
         /**
+         * "เปิดเล่มนี้เพื่อแก้ไข" จากหน้าอ่าน — ต้องถึงทั้งหน้าที่เปิดค้างอยู่และหน้าที่เพิ่งเปิด
+         *
+         * หน้า Studio ที่เปิดค้างอยู่แล้วจะไม่อ่าน pendingUiCommand อีก เพราะมันอ่านตอนลงทะเบียนครั้งเดียว
+         * ถ้าฝากไว้อย่างเดียว คำสั่งจะเงียบหายทุกครั้งที่ Studio เปิดค้างอยู่ — ซึ่งเป็นกรณีปกติที่สุด
+         * จึงต้องกระจายก่อน แล้วค่อยฝากไว้เฉพาะตอนที่ไม่มีใครรับ
+         */
+        if (msg.command === 'openProject' && msg.bookId) {
+          const live = await chrome.runtime.sendMessage({ ...msg, _relayed: true }).catch(() => null);
+          if (!live?.ok) await S.set('pendingUiCommand', msg);
+          const studio = await ensureStudioTab(true);
+          return sendResponse({ ok: true, tabId: studio.id });
+        }
+        /**
          * หยุด/ทำต่อ สั่งงานที่กำลังเดินอยู่ในหน้า Studio ที่เปิดค้างไว้เท่านั้น
          *
          * ห้ามเปิดแท็บใหม่ให้เหมือนคำสั่งข้างบน เพราะหน้าที่เพิ่งเปิดไม่มีงานเดินอยู่
@@ -385,6 +398,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
 
         let attached = false;
+        let enterAttempted = false;
         try {
           await new Promise((resolve, reject) => {
             chrome.debugger.attach(target, '1.3', () =>
@@ -395,7 +409,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           const [focused] = await chrome.scripting.executeScript({
             target,
-            args: [text, !!msg.requireDraft],
+            args: [text, !!msg.requireDraft || !!msg.enterOnly],
             func: (expected, requireDraft) => {
               const box = document.querySelector('#prompt-textarea');
               if (!box) return false;
@@ -415,29 +429,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             },
           });
           if (!focused?.result) throw new Error(msg.requireDraft ? 'composer_changed_or_busy' : 'composer_not_found');
-          // Select through browser input so the editor's document, not only
-          // its rendered DOM, is replaced. insertText alone appends a second copy.
-          await cmd('Input.dispatchKeyEvent', {
-            type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
-          });
-          await cmd('Input.dispatchKeyEvent', {
-            type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
-          });
-          await cmd('Input.insertText', { text });
+          // Image jobs already have a verified draft: focus it and press Enter,
+          // without selecting/reinserting the prompt a second time.
+          // Typing/recovery still replaces the editor through browser input.
+          if (!msg.enterOnly) {
+            await cmd('Input.dispatchKeyEvent', {
+              type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
+            });
+            await cmd('Input.dispatchKeyEvent', {
+              type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65,
+            });
+            await cmd('Input.insertText', { text });
+          }
           await new Promise((r) => setTimeout(r, 400));
 
           const [verified] = await chrome.scripting.executeScript({
             target,
-            args: [text],
-            func: (expected) => {
+            args: [text, msg.enterOnly ? Number(msg.expectedAttachments || 0) : null],
+            func: (expected, expectedAttachments) => {
               const box = document.querySelector('#prompt-textarea');
               const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+              if (expectedAttachments !== null) {
+                const form = box?.closest('form');
+                if (!form) return false;
+                const thumbs = [...form.querySelectorAll('img[src^="blob:"]')];
+                if (thumbs.length !== expectedAttachments || thumbs.some(img => !img.complete || !img.naturalWidth)) return false;
+                if (form.querySelector('[data-testid*="upload" i][aria-busy="true"], [data-testid*="upload" i] [role="progressbar"]')) return false;
+              }
               return !!box && document.activeElement === box && norm(box.innerText) === norm(expected);
             },
           });
           if (!verified?.result) throw new Error('composer_text_mismatch');
 
           if (msg.send !== false) {
+            enterAttempted = true;
             for (const type of ['keyDown', 'char', 'keyUp']) {
               await cmd('Input.dispatchKeyEvent', {
                 type,
@@ -450,9 +475,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               });
             }
           }
-          return sendResponse({ ok: true });
+          return sendResponse({ ok: true, enterAttempted });
         } catch (e) {
-          return sendResponse({ ok: false, error: String(e?.message || e) });
+          return sendResponse({ ok: false, error: String(e?.message || e), enterAttempted });
         } finally {
           // ต้องถอนตัวเสมอ ไม่งั้นแถบเตือนจะค้างอยู่ทั้งวัน
           if (attached) chrome.debugger.detach(target, () => void chrome.runtime.lastError);

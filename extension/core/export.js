@@ -15,6 +15,9 @@ import { packAssets, toPdf } from '../typeset/compiler.js';
 import { buildDocument, buildItemsDocument } from '../typeset/template.js';
 import { buildDocx, readDocx } from './docx.js';
 import { countUnits } from './thai.js';
+import { stripEchoedHeading } from './extract.js';
+import { mdToHtml } from './md-html.js';
+import { frontMatterPages } from './book-parts.js';
 
 let exportDirectoryHandle = null;
 
@@ -391,7 +394,28 @@ export async function importDocx(book, file, { apply = false } = {}) {
   return { total: parsed.length, changes };
 }
 
-/** EPUB ขั้นต่ำที่เปิดได้จริง — ไม่มี ZWSP ไม่มีการจัดหน้า */
+/**
+ * ภาพหนึ่งรูปในไฟล์ EPUB — ชี้ไปที่ไฟล์ที่แพ็กอยู่ในตัวมันเอง
+ * ต้องเป็น XHTML คือ <img/> ปิดตัวเอง ไม่งั้นโปรแกรมอ่านบางตัวไม่ยอมเปิดไฟล์ให้เลย
+ */
+const epubFigure = (have) => ({ name, caption, widthPct }) => {
+  if (!have.has(name)) return caption ? `<p class="figmiss">[ภาพ: ${esc(caption)}]</p>` : '';
+  return (
+    `<figure><img src="img/${esc(name)}" alt="${esc(caption || name)}" style="width:${widthPct}%"/>` +
+    `${caption ? `<figcaption>${esc(caption)}</figcaption>` : ''}</figure>`
+  );
+};
+
+const EPUB_MEDIA = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+const epubMedia = (name) => EPUB_MEDIA[String(name).slice(String(name).lastIndexOf('.')).toLowerCase()] || 'image/png';
+
+/**
+ * EPUB ที่เปิดได้จริงและมีของครบ — ไม่มี ZWSP ไม่มีการจัดหน้า
+ *
+ * เดิมไฟล์นี้มีแต่ตัวหนังสือ ภาพในเล่มกับปกไม่เคยถูกแพ็กเข้าไป
+ * แถมเครื่องหมาย ![](fig:...) กับ :::box ก็ถูกพิมพ์เป็นข้อความดิบกลางหน้า
+ * เพราะตัวแปลง markdown ของไฟล์นี้ไม่เคยรู้จักมัน — ตอนนี้ใช้ตัวแปลงตัวเดียวกับหน้าอ่านแล้ว
+ */
 export async function exportEpub(book, sections) {
   if (referenceProblem(book)) throw new Error(referenceProblem(book));
   const title = book.outline?.title || 'book';
@@ -403,6 +427,18 @@ export async function exportEpub(book, sections) {
     `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`,
   );
 
+  /**
+   * ภาพทั้งหมดของเล่มเข้าไปอยู่ในไฟล์ .epub ด้วย
+   * ไฟล์ที่มีแต่ตัวหนังสือไม่ใช่ "เล่มเดียวกับที่พิมพ์" แต่เป็นแค่ต้นฉบับ
+   */
+  const images = (await db.loadAssets(book.id)).filter(
+    (a) => a?.blob?.size && (a.name?.startsWith('fig-') || a.name === 'cover-front.png'),
+  );
+  for (const a of images) files.set(`OEBPS/img/${a.name}`, new Uint8Array(await a.blob.arrayBuffer()));
+  const have = new Set(images.map((a) => a.name));
+  const md = (text) => mdToHtml(stripZwsp(text), { figure: epubFigure(have), xhtml: true });
+  const cover = have.has('cover-front.png');
+
   const chapters = isItemsBook(book)
     ? (book.outline.themes || []).map((theme, i) => {
         const body = sections
@@ -410,7 +446,7 @@ export async function exportEpub(book, sections) {
           .sort((a, b) => compareItemId(a.id, b.id))
           .map((item) => {
             const attribution = item.attribution ? `<footer>— ${esc(item.attribution)}</footer>` : '';
-            return `<blockquote>${mdToHtml(stripZwsp(item.md ?? item.text ?? ''))}${attribution}</blockquote>`;
+            return `<blockquote>${md(item.md ?? item.text ?? '')}${attribution}</blockquote>`;
           })
           .join('\n');
         return {
@@ -427,7 +463,8 @@ export async function exportEpub(book, sections) {
         const body = (ch.sections || [])
           .map((s, sceneIndex) => {
             const rec = sections.find((x) => x.id === s.id);
-            const text = mdToHtml(stripZwsp(rec?.md || ''));
+            // หัวข้อที่ต้นฉบับพิมพ์ซ้ำมาเองต้องถูกตัด ไม่งั้นได้หัวข้อเดียวกันสองครั้งติดกัน
+            const text = md(stripEchoedHeading(rec?.md || '', s));
             if (fiction) return `${sceneIndex ? '<div class="scene-break">* * *</div>\n' : ''}${text}`;
             return `<h2>${esc(s.title)}</h2>\n${text}`;
           })
@@ -438,6 +475,55 @@ export async function exportEpub(book, sections) {
   for (const [i, section] of backMatterSections(book).entries()) {
     chapters.push({ file: `back${i + 1}.xhtml`, title: section.title,
       html: xhtml(section.title, `<h1>${esc(section.title)}</h1>${section.lines.map((line) => `<p>${esc(line)}</p>`).join('\n')}`) });
+  }
+  /**
+   * ส่วนต้นเล่ม — ปกใน ลิขสิทธิ์ คำนำ สารบัญ
+   *
+   * ไฟล์ EPUB เดิมเริ่มที่บทที่ 1 เลย ทั้งที่เล่มที่พิมพ์ออกมามีหน้าพวกนี้อยู่
+   * คนที่สั่งให้เขียนคำนำแล้วเปิดไฟล์ไม่เจอ ย่อมคิดว่าระบบทำตกหล่น
+   * ใช้รายการเดียวกับที่หน้าอ่านและ Typst ใช้ เล่มทั้งสามทางจึงมีของเท่ากัน
+   */
+  // เล่มแบบรายชิ้นใช้ธีมเป็นหน่วยแทนบท แต่ไฟล์เรียงลำดับเดียวกัน จึงจับคู่ด้วยลำดับได้ทั้งสองแบบ
+  const chapterFile = new Map(
+    (isItemsBook(book) ? book.outline?.themes || [] : book.outline?.chapters || []).map((x, i) => [
+      String(x.n),
+      `ch${i + 1}.xhtml`,
+    ]),
+  );
+  const front = [];
+  for (const part of frontMatterPages(book)) {
+    const file = `front-${part.key}.xhtml`;
+    if (part.kind === 'titlepage') {
+      front.push({ file, title: part.label, inToc: false, html: xhtml(part.label,
+        `<div style="text-align:center;margin-top:18%"><h1 style="font-size:1.8em">${esc(part.title)}</h1>` +
+        `${part.subtitle ? `<p style="color:#666">${esc(part.subtitle)}</p>` : ''}` +
+        `${part.author ? `<p style="margin-top:3em">${esc(part.author)}</p>` : ''}</div>`) });
+    } else if (part.kind === 'lines') {
+      front.push({ file, title: part.label, inToc: false, html: xhtml(part.label,
+        `<div style="color:#666;font-size:.9em;line-height:2">${part.lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>`) });
+    } else if (part.kind === 'prose') {
+      front.push({ file, title: part.label, html: xhtml(part.label, `<h1>${esc(part.label)}</h1>${md(part.md)}`) });
+    } else if (part.kind === 'toc') {
+      const items = part.entries
+        .map((e) => {
+          const href = chapterFile.get(String(e.chapter ?? e.theme));
+          const style = e.depth > 1 ? ' style="margin-left:1.6em;font-size:.92em"' : '';
+          return `<p${style}>${href ? `<a href="${href}">${esc(e.text)}</a>` : esc(e.text)}</p>`;
+        })
+        .join('');
+      front.push({ file, title: part.label, inToc: false, html: xhtml(part.label, `<h1>${esc(part.label)}</h1>${items}`) });
+    }
+  }
+  chapters.unshift(...front);
+
+  // ปกต้องเป็นหน้าแรกของเล่ม ไม่ใช่ภาพที่แอบอยู่ในโฟลเดอร์แล้วไม่มีใครเห็น
+  if (cover) {
+    chapters.unshift({
+      file: 'cover.xhtml',
+      title: 'ปก',
+      inToc: false,
+      html: xhtml('ปก', `<div style="text-align:center;margin:0;padding:0"><img src="img/cover-front.png" alt="ปกของ ${esc(title)}" style="max-width:100%;height:auto"/></div>`),
+    });
   }
   for (const c of chapters) files.set(`OEBPS/${c.file}`, c.html);
 
@@ -455,6 +541,14 @@ export async function exportEpub(book, sections) {
 <manifest>
 <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
 ${chapters.map((c, i) => `<item id="c${i}" href="${c.file}" media-type="application/xhtml+xml"/>`).join('\n')}
+${images
+  .map(
+    (a, i) =>
+      `<item id="img${i}" href="img/${a.name}" media-type="${epubMedia(a.name)}"${
+        a.name === 'cover-front.png' ? ' properties="cover-image"' : ''
+      }/>`,
+  )
+  .join('\n')}
 </manifest>
 <spine>
 ${chapters.map((_, i) => `<itemref idref="c${i}"/>`).join('\n')}
@@ -467,6 +561,7 @@ ${chapters.map((_, i) => `<itemref idref="c${i}"/>`).join('\n')}
     xhtml(
       'สารบัญ',
       `<nav xmlns:epub="http://www.idpf.org/2007/ops" epub:type="toc"><h1>สารบัญ</h1><ol>${chapters
+        .filter((c) => c.inToc !== false)
         .map((c) => `<li><a href="${c.file}">${esc(c.title)}</a></li>`)
         .join('')}</ol></nav>`,
     ),
@@ -672,29 +767,6 @@ function compareItemId(a, b) {
 function xhtml(title, body) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" lang="th"><head><meta charset="utf-8"/><title>${esc(title)}</title></head><body>${body}</body></html>`;
-}
-
-function mdToHtml(md) {
-  return String(md)
-    .split(/\n{2,}/)
-    .map((block) => {
-      const h = block.match(/^(#{1,6})\s+(.*)$/);
-      if (h) return `<h${Math.min(6, h[1].length)}>${esc(h[2])}</h${Math.min(6, h[1].length)}>`;
-      if (/^\s*[-*+]\s/.test(block))
-        return `<ul>${block
-          .split('\n')
-          .map((l) => `<li>${inlineHtml(l.replace(/^\s*[-*+]\s/, ''))}</li>`)
-          .join('')}</ul>`;
-      return `<p>${inlineHtml(block).replace(/\n/g, '<br/>')}</p>`;
-    })
-    .join('\n');
-}
-
-function inlineHtml(s) {
-  return esc(s)
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|\W)\*([^*]+)\*/g, '$1<em>$2</em>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
 /**

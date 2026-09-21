@@ -11,6 +11,7 @@ import * as W from './workspace.js';
 import * as P from './prompts.js';
 import * as X from './extract.js';
 import * as B from './bible.js';
+import { parseContentDraft, recoverContentDraft, contentInputRequests } from './content-readiness.js';
 import * as R from './review.js';
 import { countUnits } from './thai.js';
 import {
@@ -726,6 +727,12 @@ ${P.NO_CITATION_RULE}
             // หน้าเว็บมักบอกมาด้วยว่าอีกกี่ชั่วโมง ซึ่งเป็นข้อมูลเดียวที่ใช้วางแผนต่อได้จริง
             (e.message ? `\nChatGPT แจ้งว่า: ${e.message}` : ''),
         );
+      } else if (e instanceof ContentInputNeeded) {
+        this.job.status = 'waiting_content_input';
+        this.job.error = e.message;
+        this.job.contentInput = e.requests;
+        delete this.job.contentInputOrigin;
+        this.log('info', e.message);
       } else if (e instanceof Halt) {
         this.job.status = 'paused';
         this.job.error = e.message; // เก็บเหตุผลไว้ให้หน้าจอบอกได้ว่าหยุดเพราะอะไร
@@ -800,6 +807,7 @@ ${P.NO_CITATION_RULE}
       const parsed = X.parseJson(lastRaw);
       errs = X.validateOutline(parsed);
       if (this.book.contentMode === 'fiction' && parsed) errs.push(...fictionOutlineErrors(parsed));
+      if (this.book.contentMode !== 'fiction' && parsed) errs.push(...nonfictionOutlineErrors(parsed));
 
       // ซอยถี่เกินไป = ทั้งเล่มจะเขียนเกินโควตาทุกตอน แล้วจำนวนหน้าจะไม่มีวันเข้าเป้า
       const cap = P.maxSectionsFor(this.book);
@@ -824,6 +832,7 @@ ${P.NO_CITATION_RULE}
           }
           errs = X.validateOutline(parsed);
           if (this.book.contentMode === 'fiction') errs.push(...fictionOutlineErrors(parsed));
+          else errs.push(...nonfictionOutlineErrors(parsed));
 
           // ยังไม่ครบอีก: เติมให้เองแล้วเดินต่อ ดีกว่าทิ้งสารบัญทั้งเล่มแล้วหยุดงาน
           if (errs.length) {
@@ -832,6 +841,7 @@ ${P.NO_CITATION_RULE}
               this.log('warn', `เติมข้อมูลให้เองแล้ว ${filled.length} ตอน (${filled.join(', ')}) — แก้ได้ทีหลังในหน้าตรวจงาน`);
               errs = X.validateOutline(parsed);
               if (this.book.contentMode === 'fiction') errs.push(...fictionOutlineErrors(parsed));
+              else errs.push(...nonfictionOutlineErrors(parsed));
             }
           }
         }
@@ -1545,6 +1555,65 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
     return String(rec?.md || rec?.text || '').trim().slice(-400);
   }
 
+  // Nonfiction has two persisted stages. Drafts are never printed or absorbed
+  // into the Bible: only the composed SEC body is a manuscript.
+  async prepareContentDrafts({ chapter, sections, isChapterStart }) {
+    const drafts = new Map();
+    let pending = [];
+    for (const s of sections) {
+      const rec = await db.loadSection(this.book.id, s.id);
+      if (rec?.locked || rec?.status === 'approved')
+        throw new Halt(`ตอน ${s.id} ถูกล็อกไว้ กรุณาปลดล็อกก่อนเขียนใหม่`);
+      const key = P.contentDraftKey(this.book, chapter, s);
+      if (rec?.contentDraft?.key === key && rec.contentDraft.md &&
+          Array.isArray(rec.contentDraft.meta?.missing_information)) {
+        drafts.set(s.id, rec.contentDraft);
+      } else pending.push(s);
+    }
+    const startsThread = pending.length > 0 && this.wantNewThread(isChapterStart);
+    for (let attempt = 0; pending.length && attempt < 2; attempt++) {
+      const prompt = P.contentDraftPrompt({ book: this.book, outline: this.book.outline,
+        bible: this.book.bible, chapter, sections: pending, withContext: isChapterStart });
+      const res = await this.turnWithRetry(prompt, {
+        label: `สาระดิบ · ตอน ${pending.map(s => s.id).join(', ')}`,
+        newThread: attempt === 0 && startsThread,
+      });
+      const retry = [];
+      for (const s of pending) {
+        const ex = parseContentDraft(res.text || '', s.id);
+        if (!ex) {
+          retry.push(s);
+          continue;
+        }
+        const contentDraft = { key: P.contentDraftKey(this.book, chapter, s),
+          md: ex.body, meta: ex.meta, createdAt: Date.now() };
+        const old = await db.loadSection(this.book.id, s.id);
+        await db.saveSection(this.book.id, { ...s, ...old, id: s.id,
+          chapter: chapter.n, md: old?.md || '', status: old?.status || 'draft', contentDraft });
+        drafts.set(s.id, contentDraft);
+      }
+      pending = retry;
+    }
+    if (pending.length) throw new Halt(`สร้างสาระดิบไม่ครบตอน ${pending.map(s => s.id).join(', ')} — เก็บตอนที่สำเร็จไว้แล้ว กดทำต่อเพื่อลองเฉพาะตอนที่ขาด`);
+    for (const s of sections) {
+      const draft = drafts.get(s.id);
+      if (!draft.meta.missing_information.length) continue;
+      this.log('info', `ตอน ${s.id}: กำลังเติมสาระที่ขาดก่อนเรียบเรียง`);
+      drafts.set(s.id, await recoverContentDraft({ book: this.book, chapter, section: s, draft,
+        request: prompt => this.turnWithRetry(prompt, { label: `สาระดิบ · เติมข้อมูลตอน ${s.id}` }),
+        persist: async contentDraft => {
+          const old = await db.loadSection(this.book.id, s.id);
+          await db.saveSection(this.book.id, { ...old, contentDraft });
+        },
+      }));
+    }
+    const requests = contentInputRequests(sections, drafts);
+    if (requests.length) throw new ContentInputNeeded(requests);
+    delete this.job.contentInput;
+    delete this.job.contentInputOrigin;
+    return { drafts, startsThread };
+  }
+
   async writeBatch({ chapter, sections, isChapterStart }) {
     const outline = this.book.outline;
     const bible = this.book.bible;
@@ -1553,12 +1622,20 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
     const next = flat[flat.findIndex((x) => x.id === lastId) + 1] || null;
     const ids = sections.map((s) => s.id);
 
-    const prompt = P.batchPrompt({
+    const twoPass = this.book.contentMode !== 'fiction' && this.book.contentMode !== 'items';
+    const prepared = twoPass
+      ? await this.prepareContentDrafts({ chapter, sections, isChapterStart })
+      : { drafts: new Map(), startsThread: false };
+    const makePrompt = twoPass ? P.composeBatchPrompt : P.batchPrompt;
+    const draftRecords = sections.map(s => ({ id: s.id, md: prepared.drafts.get(s.id)?.md || '' }));
+
+    const prompt = makePrompt({
       book: this.book,
       outline,
       bible,
       chapter,
       sections,
+      drafts: draftRecords,
       prevSummaries: B.prevSummaries(bible, outline, sections[0].id),
       prevTail: await this.tailBefore(flat, sections[0].id),
       nextSection: next,
@@ -1569,8 +1646,9 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
       withContext: isChapterStart,
     });
 
-    const label = `บทที่ ${chapter.n} · ตอน ${ids.join(', ')}`;
-    let res = await this.turnWithRetry(prompt, { label, newThread: this.wantNewThread(isChapterStart) });
+    const label = `${twoPass ? 'เรียบเรียง · ' : ''}บทที่ ${chapter.n} · ตอน ${ids.join(', ')}`;
+    let res = await this.turnWithRetry(prompt, { label,
+      newThread: prepared.startsThread ? false : this.wantNewThread(isChapterStart) });
     let raw = res.text || '';
 
     // ถ้าได้ไม่ครบทุกตอน ให้สั่งเขียนต่อเฉพาะตอนที่ยังขาด แทนที่จะยิงใหม่ทั้งชุด
@@ -1593,12 +1671,13 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
       if (!s) continue;
       this.log('warn', `ตอน ${id} ยังไม่ได้ ลองขอแบบเดี่ยวอีกครั้ง`);
       const solo = await this.turnWithRetry(
-        P.batchPrompt({
+        makePrompt({
           book: this.book,
           outline,
           bible,
           chapter,
           sections: [s],
+          drafts: draftRecords.filter(d => d.id === id),
           prevSummaries: B.prevSummaries(bible, outline, id),
           prevTail: await this.tailBefore(flat, id),
           // เดิมใส่ null เสมอ ทำให้ prompt เข้าใจผิดว่านี่คือฉากสุดท้ายของเล่มเสมอเวลาต้องขอเดี่ยว ๆ
@@ -1630,6 +1709,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
         const chars = countUnits(salvage, this.book.language);
         await db.saveSection(this.book.id, {
           id: s.id,
+          ...(twoPass ? { contentDraft: prepared.drafts.get(s.id) } : {}),
           title: s.title,
           chapter: chapter.n,
           md: salvage,
@@ -1668,6 +1748,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
           title: s.title,
           chapter: chapter.n,
           md: kept,
+          ...(twoPass ? { contentDraft: prepared.drafts.get(s.id) } : {}),
           chars: countUnits(kept, this.book.language),
           status: ex.status === 'short' ? 'short' : 'blocked',
           reason: ex.status,
@@ -1701,6 +1782,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
         title: s.title,
         chapter: chapter.n,
         md: ex.body,
+        ...(twoPass ? { contentDraft: prepared.drafts.get(s.id) } : {}),
         chars,
         status: 'generated',
         shortReason: String(ex.meta?.short_reason || ''),
@@ -1797,17 +1879,44 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
         noteTrouble({ step: 'consistency', symptom: 'review_unreadable', move: 'skip', detail: `บทที่ ${ch.n}: ${r.reason}`, by: 'เครื่องผลิต' });
         this.log('warn', `บทที่ ${ch.n}: ${r.reason} — ข้ามการตรวจบทนี้ไว้ก่อน แล้วทำบทถัดไปต่อ · ด่านก่อนส่งออกจะเตือนให้ตรวจใหม่`);
       } else if (r) {
-        B.setChapterSummary(this.book.bible, ch.n, r.chapter_summary || '');
-        const issues =
-          (r.duplicates?.length || 0) +
-          (r.term_conflicts?.length || 0) +
-          (r.continuity_issues?.length || 0) +
-          (r.unpaid_promises?.length || 0) +
-          (r.readability_issues?.length || 0);
-        this.log(issues ? 'warn' : 'ok', `บทที่ ${ch.n}: พบ ${issues} ประเด็นที่ควรดู`);
+        const countIssues = (review) =>
+          (review?.duplicates?.length || 0) +
+          (review?.term_conflicts?.length || 0) +
+          (review?.continuity_issues?.length || 0) +
+          (review?.unpaid_promises?.length || 0) +
+          (review?.readability_issues?.length || 0);
+        let finalReview = r;
+        const issues = countIssues(r);
+
+        if (issues) {
+          const repaired = await this.repairChapter(ch, r);
+          if (repaired.length) {
+            this.log('ok', `บทที่ ${ch.n}: ตรวจซ้ำหลังแก้ ${repaired.length} ตอน เพื่อยืนยันว่าปัญหาหายจริง`);
+            const updated = [];
+            for (const s of ch.sections) updated.push((await db.loadSection(this.book.id, s.id)) || s);
+            const verified = await this.reviewChapterFully(ch, updated);
+            if (verified?.skipped) {
+              finalReview = {
+                ...r,
+                coverage: {
+                  sections: updated.length,
+                  reviewed: 0,
+                  missed: updated.map((x) => String(x.id)),
+                  skipped: true,
+                  reason: `ตรวจยืนยันหลังแก้ไม่สำเร็จ: ${verified.reason}`,
+                },
+              };
+            } else if (verified) finalReview = verified;
+          }
+        }
+
+        const remaining = countIssues(finalReview);
+        B.setChapterSummary(this.book.bible, ch.n, finalReview.chapter_summary || '');
+        this.log(remaining ? 'warn' : 'ok', remaining
+          ? `บทที่ ${ch.n}: หลังตรวจและแก้ยังเหลือ ${remaining} ประเด็น — ด่านก่อนส่งออกจะไม่ปล่อยผ่าน`
+          : `บทที่ ${ch.n}: ตรวจแล้ว${issues ? ' แก้แล้ว และตรวจยืนยันซ้ำแล้ว' : ''} ไม่พบประเด็นค้าง`);
         this.book.review ||= {};
-        this.book.review[ch.n] = r;
-        if (issues) await this.repairChapter(ch, r);
+        this.book.review[ch.n] = finalReview;
       }
       await this.save();
     }
@@ -1968,6 +2077,27 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
 
     const finalGot = new Set((merged.section_verdicts || []).map((v) => String(v?.section || '')));
     const stillMissed = want.filter((id) => !finalGot.has(id));
+
+    // คำตัดสิน needs_fix ที่ไม่มีรายการปัญหาผูกกับตอนนั้น เคยถูกนับว่า "ตรวจครบ" แต่ไม่มีอะไรส่งให้ขั้นแก้
+    // แปลงเป็น readability issue สำรองเพื่อให้ทุกคำตัดสินที่ไม่ผ่านมีทางแก้จริงเสมอ
+    const issueSections = new Set([
+      ...(merged.duplicates || []),
+      ...(merged.continuity_issues || []),
+      ...(merged.unpaid_promises || []),
+      ...(merged.readability_issues || []),
+    ].map((it) => String(it?.section || '')).filter(Boolean));
+    for (const verdict of merged.section_verdicts || []) {
+      const sid = String(verdict?.section || '');
+      if (verdict?.verdict !== 'needs_fix' || !sid || issueSections.has(sid)) continue;
+      merged.readability_issues.push({
+        section: sid,
+        quote: '',
+        what: verdict.reason || verdict.note || 'บรรณาธิการตัดสินว่าตอนนี้ยังอ่านไม่ชัดหรือยังตอบโจทย์ไม่ครบ',
+        fix: 'หาใจความที่กำกวมหรือคำสัญญาที่ยังไม่ถูกจ่าย แล้วเขียนใหม่ให้ระบุการกระทำ สิ่งที่กล่าวถึง เงื่อนไข และผลลัพธ์',
+      });
+      issueSections.add(sid);
+    }
+
     // ตรวจไม่ครบ = บันทึกตามจริงแล้วเดินต่อ ด่านก่อนส่งออกอ่าน coverage นี้แล้วปัดกลับเอง
     if (stillMissed.length)
       this.log('warn', `บทที่ ${ch.n}: ยังไม่ได้คำตัดสินของตอน ${stillMissed.join(', ')} — บันทึกไว้ว่ายังไม่ได้ตรวจ แล้วทำบทถัดไปต่อ · ด่านก่อนส่งออกจะเตือนให้ตรวจใหม่`);
@@ -2001,7 +2131,8 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
    * ตอนที่ผู้ใช้ล็อกหรืออนุมัติแล้วห้ามแตะเด็ดขาด งานแก้ด้วยมือต้องไม่หายไปกับการแก้อัตโนมัติ
    */
   async repairChapter(chapter, review) {
-    if (this.book.autoRepair === false) return;
+    if (this.book.autoRepair === false) return [];
+    const repaired = [];
 
     const bySection = new Map();
     for (const it of R.chapterIssues(review, chapter.n)) {
@@ -2009,7 +2140,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
       if (!bySection.has(it.section)) bySection.set(it.section, []);
       bySection.get(it.section).push(it);
     }
-    if (!bySection.size) return;
+    if (!bySection.size) return repaired;
 
     /**
      * เพดานเดิม 3 ตอนต่อบท ทำให้การตรวจครบไม่มีความหมาย
@@ -2024,7 +2155,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
     const skipped = bySection.size - targets.length;
 
     for (const [sid, issues] of targets) {
-      if (this.stopRequested) return;
+      if (this.stopRequested) return repaired;
       const rec = await db.loadSection(this.book.id, sid);
       if (!rec || !(rec.md || '').trim()) continue;
       if (rec.locked || rec.status === 'approved') {
@@ -2065,6 +2196,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
       rec.repairedFor = issues.map((it) => it.label);
       B.absorb(this.book.bible, sid, ex.meta);
       await db.saveSection(this.book.id, rec);
+      repaired.push(sid);
       this.log(
         'ok',
         `ตอน ${sid} แก้แล้ว ${issues.length} ประเด็น (${issues.map((it) => it.label).join(', ')}) · ` +
@@ -2074,6 +2206,7 @@ ${multiTheme ? '- ภาพหน้าคั่นหมวด: target เป�
 
     if (skipped)
       this.log('warn', `บทที่ ${chapter.n} ยังมีอีก ${skipped} ตอนที่มีประเด็นค้าง เกินเพดาน ${cap} ตอนต่อบท ดูรายการได้ในผลตรวจ`);
+    return repaired;
   }
 
   // 6) ลูปนับหน้า — หัวใจของระบบ
@@ -4343,6 +4476,31 @@ export function promptForImage(book, name) {
 /** ช่องที่นิยายต้องมีครบทุกฉาก */
 const FICTION_SECTION_FIELDS = ['pov_character', 'scene_goal', 'conflict', 'turn'];
 
+/**
+ * หนังสือสารคดีต้องบอกตั้งแต่สารบัญว่าจะจ่ายสิ่งที่ชื่อและโจทย์สัญญาไว้ตรงไหน
+ * ด่านนี้ตรวจโครงสร้างที่พิสูจน์ได้ ไม่พยายามเดาความหมายจากชื่อด้วย regex
+ * ความครบเชิงความหมายถูกตรวจซ้ำโดยบรรณาธิการจาก reader_promises ชุดเดียวกันภายหลัง
+ */
+function nonfictionOutlineErrors(parsed) {
+  const errs = [];
+  const promises = parsed?.reader_promises;
+  if (!Array.isArray(promises) || !promises.length) return ['สารบัญขาด reader_promises ที่แตกคำสัญญาของชื่อ/หัวข้อเล่ม'];
+
+  const sectionIds = new Set((parsed?.chapters || []).flatMap((c) => (c.sections || []).map((s) => String(s.id || ''))));
+  const promiseIds = new Set();
+  for (const [i, p] of promises.entries()) {
+    const id = String(p?.id || '').trim();
+    const label = id || `ข้อ ${i + 1}`;
+    if (!id) errs.push(`reader_promises ข้อ ${i + 1} ขาด id`);
+    else if (promiseIds.has(id)) errs.push(`reader_promises ใช้ id ${id} ซ้ำ`);
+    else promiseIds.add(id);
+    if (!String(p?.promise || '').trim()) errs.push(`reader_promises ${label} ขาด promise`);
+    if (!Array.isArray(p?.sections) || !p.sections.length) errs.push(`reader_promises ${label} ยังไม่ผูกกับตอนที่จะจ่ายเนื้อหา`);
+    for (const sid of p?.sections || []) if (!sectionIds.has(String(sid))) errs.push(`reader_promises ${label} อ้างตอน ${sid} ที่ไม่มีในสารบัญ`);
+  }
+  return errs;
+}
+
 function fictionOutlineErrors(parsed) {
   const errs = [];
   if (!Array.isArray(parsed?.cast) || !parsed.cast.length) errs.push('นิยายขาด cast ตัวละคร');
@@ -5008,6 +5166,13 @@ class Halt extends Error {
   constructor(message, code = '') {
     super(message);
     this.code = code;
+  }
+}
+
+export class ContentInputNeeded extends Halt {
+  constructor(requests) {
+    super(`รอข้อมูลหรือแนวทางเพิ่มเติม: ${requests.map(r => `${r.id}: ${r.missing.join('; ')}`).join(' / ')}`, 'content_input_needed');
+    this.requests = requests;
   }
 }
 /**

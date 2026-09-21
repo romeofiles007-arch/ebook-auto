@@ -9,7 +9,12 @@ const sections = [
   { id: '1.2', title: 'ตัดคำ', problem: 'คนฟังหลงก่อนถึงจุดขำ', claim: 'เก็บคำที่ทำให้เข้าใจจุดเปลี่ยน', verdict: 'ตัดส่วนเกินโดยยังเข้าใจเรื่อง', beats: ['เทียบประโยคสองฉบับ', 'อธิบายผลของคำที่ตัด'], takeaways: ['แก้ประโยคได้'], not_here: 'การเลือกเหตุการณ์อยู่ตอน 1.1', quota: 1800, maxChars: 2200 },
 ];
 const chapter = { n: 1, title: 'วัตถุดิบและการแก้', objective: 'เลือกและแก้เรื่องสั้นหนึ่งเรื่อง', adds: 'วิธีตรวจต้นฉบับ', sections };
-const outline = { title: 'พูดให้ขำขึ้น', thesis: 'ฝึกเลือกและแก้เรื่องเล่าจากสิ่งรอบตัว', chapters: [chapter] };
+const outline = {
+  title: 'พูดให้ขำขึ้น',
+  thesis: 'ฝึกเลือกและแก้เรื่องเล่าจากสิ่งรอบตัว',
+  reader_promises: [{ id: 'P1', promise: 'แก้เรื่องเล่าหนึ่งเรื่องให้คนฟังตามทัน', sections: ['1.1', '1.2'] }],
+  chapters: [chapter],
+};
 const book = { topic: outline.title, audience: 'คนที่ต้องพูดในที่ทำงาน', tone: 'ตรงไปตรงมา', language: 'th', contentMode: 'prose', targetPages: 60, outline };
 const args = { book, outline, bible: B.emptyBible(), chapter, sections, withContext: true, prevSummaries: ['อธิบายขอบเขตหนังสือแล้ว'], prevTail: 'จึงเริ่มจากเรื่องที่สังเกตได้ก่อน', nextSection: { title: 'ทดลองเล่า' } };
 
@@ -22,7 +27,17 @@ test('batch assignment preserves distinct questions, boundaries and continuity',
   }
   assert.ok(prompt.includes(args.prevTail));
   assert.ok(prompt.includes('ทดลองเล่า'));
+  assert.ok(prompt.includes('แก้เรื่องเล่าหนึ่งเรื่องให้คนฟังตามทัน'));
+  assert.match(prompt, /ใครทำอะไร กับเรื่องใด/);
+  assert.match(prompt, /ไม่ใช้ “กลับไปดูข้อมูลจริง” โดยไม่บอกว่าดูอะไร/);
   assert.doesNotMatch(prompt, /ทุกตอนต้องเดินเป็น|ห้ามมีคำกันความแม้แต่คำเดียว|ห้ามกำกับว่า "สมมติ"/);
+});
+
+test('outline turns the title promise into mapped deliverables instead of generic filler', () => {
+  const prompt = P.outlinePrompt({ ...book, topic: 'ดวงปี 70 ครบ 12 ราศี' });
+  assert.match(prompt, /reader_promises/);
+  assert.match(prompt, /ถ้าชื่อมีจำนวนหรือรายการชัดเจน/);
+  assert.match(prompt, /ห้ามรวมเป็นกรอบทั่วไปแล้วปล่อยให้ผู้อ่านกรอกเอง/);
 });
 
 test('per-section response round-trips through the real extractor and bible', () => {
@@ -57,10 +72,13 @@ test('review and repair allow cuts while preserving evidence and image markers',
   const review = P.consistencyPrompt(chapter, [rec], args.bible, book);
   assert.match(review, /อ้างข้อความจริงใน quote/);
   assert.match(review, /ไม่ต้องเติมเนื้อหาแทน/);
+  assert.match(review, /เดินหน้า—ขยับแผนต่อ/);
+  assert.match(review, /แบบฟอร์มว่าง/);
   const repair = P.repairPrompt({ book, section: rec, currentText: rec.md, issues: [{ label: 'ซ้ำ', text: 'เกริ่นซ้ำ', fix: 'ตัดเกริ่น' }] });
   assert.ok(repair.includes(rec.not_here));
   assert.ok(repair.includes('fig:'));
   assert.ok(repair.includes('<<<META 1.1 BEGIN>>>'));
+  assert.match(repair, /ห้ามเพียงสลับคำกว้างเป็นคำกว้างอีกคำ/);
   assert.doesNotMatch(repair, /ไม่ใช่ปล่อยให้ตอนสั้นลง|บวกลบไม่เกิน 10 เปอร์เซ็นต์/);
 });
 

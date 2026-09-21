@@ -368,6 +368,7 @@ export function estimateTurns(book) {
   const batches = Math.ceil((chapters * Math.ceil(secPerChapter / fitPerTurn)) * 1.15);
 
   const write = batches;
+  const content = book.contentMode === 'fiction' || book.contentMode === 'items' ? 0 : batches;
   const continues = Math.ceil(batches * 0.2); // บางเทิร์นตอบไม่ครบ ต้องสั่งเขียนต่อ
   const consistency = book.runConsistency ? chapters : 0;
   /**
@@ -385,11 +386,11 @@ export function estimateTurns(book) {
    */
   const grow = 2;
 
-  const min = 1 + write + consistency + 1;
-  const likely = 1 + write + continues + consistency + rewrites + grow + 1;
-  const max = 1 + write + continues * 2 + consistency + rewrites * 2 + 8 + 1;
+  const min = 1 + content + write + consistency + 1;
+  const likely = 1 + content + write + continues * (content ? 2 : 1) + consistency + rewrites + grow + 1;
+  const max = 1 + content * 2 + write + continues * 2 + consistency + rewrites * 2 + 8 + 1;
 
-  return { chapters, batches, budget: Math.round(budget), min, likely, max };
+  return { chapters, batches, content, budget: Math.round(budget), min, likely, max };
 }
 
 /** คณิตศาสตร์ปก */

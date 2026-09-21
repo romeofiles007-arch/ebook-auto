@@ -21,6 +21,25 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
     (r?.coverage && r.coverage.reviewed < r.coverage.sections));
   if (incompleteReviews.length) fail('review_coverage', 'ยังตรวจคุณภาพไม่ครบ',
     `ตรวจบท ${incompleteReviews.map(([id]) => id).join(', ')} ใหม่ก่อนส่งออก`);
+  if (book.contentMode !== 'fiction' && book.contentMode !== 'items' && book.runConsistency) {
+    const expected = (book.outline?.chapters || []).map((c) => String(c.n));
+    const missing = expected.filter((n) => !book.review?.[n]);
+    if (missing.length) fail('review_missing', 'ยังไม่มีผลตรวจบรรณาธิการครบทุกบท', `ยังไม่ได้ตรวจบท ${missing.join(', ')}`);
+
+    const unresolved = Object.entries(book.review || {}).flatMap(([chapter, review]) => [
+      ...(review?.duplicates || []),
+      ...(review?.term_conflicts || []),
+      ...(review?.continuity_issues || []),
+      ...(review?.unpaid_promises || []),
+      ...(review?.readability_issues || []),
+    ].map((issue) => ({ chapter, issue })));
+    if (unresolved.length) fail(
+      'editorial_issues',
+      `ยังมีปัญหาเนื้อหาค้าง ${unresolved.length} จุด`,
+      `แก้และตรวจยืนยันใหม่ก่อนส่งออก · บทที่เกี่ยวข้อง ${[...new Set(unresolved.map((x) => x.chapter))].join(', ')}`,
+    );
+    else if (!missing.length && !incompleteReviews.length) ok('editorial_issues', 'ตรวจ แก้ และยืนยันเนื้อหาครบแล้ว');
+  }
   if (book.contentMode === 'items' && book.itemQuality?.passed === false) {
     const deferred = book.automation?.mode === 'full' && book.itemQuality.deferred && !book.itemQuality.pending;
     (deferred ? warn : fail)('item_quality', deferred ? 'รายชิ้นมีข้อเสนอแก้ไข เก็บไว้ให้ตรวจหลังจบงาน' : 'รายชิ้นยังไม่ผ่านการตรวจคุณภาพ', (book.itemQuality.issues || []).slice(0,5).map(x=>`${x.id}: ${x.reason}`).join(' · '));
@@ -104,6 +123,11 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
       id: 'คำเชื่อมเรียงความ',
       re: /(?:นอกจากนี้|อีกทั้ง|อย่างไรก็ตาม|ในขณะเดียวกัน|กล่าวได้ว่า|สิ่งสำคัญคือ|ท้ายที่สุดแล้ว)/g,
       why: 'ทะเบียนภาษาเรียงความ ไม่ใช่ภาษาที่คนเล่าให้คนฟัง',
+    },
+    {
+      id: 'คำกว้างลอย ๆ',
+      re: /(?:ภาพรวม|ประเด็น|จังหวะ|ข้อมูลจริง|เงื่อนไขสำคัญ|กลับไปดู|ขยับแผน)/g,
+      why: 'คำกว้างที่ต้องอ่านบริบทซ้ำเพื่อเดาว่าหมายถึงเรื่องใดหรือให้ทำอะไร',
     },
   ];
   const body = sections.map((s) => String(s.md || s.text || '')).join('\n');

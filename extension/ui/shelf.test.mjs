@@ -51,10 +51,25 @@ test('ปุ่มลบอยู่บนการ์ด และคลิก�
   assert.match(js, /deleteSavedProject\(el\.dataset\.drop\)/);
   // ปุ่มซ้อนในปุ่มไม่ได้ — การ์ดต้องเป็นกล่อง แล้วมีปุ่มเลือกกับปุ่มลบแยกกัน
   assert.match(js, /<div class="shelfBook\$\{/);
-  assert.match(js, /<button class="pick" data-book=/);
+  assert.match(js, /<button class="pick meta" data-book=/);
   assert.match(css, /\.shelfBook \.del\{/);
   // จอสัมผัสไม่มี hover ปุ่มต้องโผล่ให้เห็น
   assert.match(css, /@media \(hover:none\)\{\.shelfBook \.del\{opacity:1\}\}/);
+});
+
+/**
+ * ปกกับชื่อเป็นคนละปุ่ม เพราะคนคลิกด้วยเจตนาคนละอย่าง
+ * คลิกปก = หยิบมาอ่าน (ท่าเดียวกับหยิบหนังสือออกจากชั้นจริง)
+ * คลิกชื่อ = จัดการเล่ม ซึ่งเป็นทางเข้าเดียวของเล่มที่ยังทำไม่เสร็จ จึงห้ามถูกกลืนไป
+ */
+test('คลิกปกคืออ่าน คลิกชื่อคือแผงจัดการ — ต้องไม่แย่งกัน', () => {
+  assert.match(js, /<button class="pick read" data-read=/);
+  assert.match(js, /el\.onclick = \(\) => openReader\(el\.dataset\.read\)/);
+  assert.match(js, /el\.onclick = \(\) => openProjectDetail\(el\.dataset\.book, rows\)/);
+  // ป้ายบอกว่ากดปกแล้วได้อะไร ต้องไม่บังปกตอนที่ไม่ได้ชี้
+  assert.match(js, /<span class="readHint">อ่าน<\/span>/);
+  assert.match(css, /\.shelfBook \.readHint\{[^}]*opacity:0/);
+  assert.match(css, /\.shelfBook \.read:hover \.readHint/);
 });
 
 test('ObjectURL ต้องถูกคืนก่อนวาดใหม่ ไม่งั้นหน่วยความจำรั่วทุกครั้งที่รีเฟรช', () => {

@@ -22,8 +22,10 @@ test('หลักฐานคือช่องพิมพ์ที่ยั�
 test('ทั้งทางหลักและทางสำรองต้องเช็คหลักฐานก่อนยอมแพ้', () => {
   const start = adapter.indexOf("report(turnId, 'sending'");
   const send = adapter.slice(start, adapter.indexOf('const submittedAt = Date.now();', start));
-  const guarded = [...send.matchAll(/if \(!fresh && nothingWasSent\(prompt\)\)/g)];
-  assert.equal(guarded.length, 2, 'ต้องเช็คทั้งสองทาง');
+  assert.match(send, /if \(!fresh && native\?\.ok && nothingWasSent\(prompt\)\)/,
+    'หลัง Enter สำเร็จต้องเช็ค draft; ถ้าคำสั่งยังค้างหรือส่งล้มเหลวกลางทางห้ามสรุปว่ายังไม่ส่ง');
+  assert.match(send, /if \(!fresh && nothingWasSent\(prompt\)\)/,
+    'หลังทางสำรองต้องเช็ค draft ด้วย');
   // ต้องคืนรหัสที่ระบบกู้เองได้ ไม่ใช่รหัสที่กันทุกคนออก
   assert.match(send, /error:'send_action_not_accepted'/);
   // และยังต้องมี outcome_unknown ไว้สำหรับกรณีที่ตอบไม่ได้จริง ๆ

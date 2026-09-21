@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 const workerSource = await readFile(new URL('../sw.js', import.meta.url), 'utf8');
 const adapterSource = await readFile(new URL('./chatgpt.js', import.meta.url), 'utf8');
 
-function worker({ mismatch = false, staleDisabledStop = false, session = {} } = {}) {
+function worker({ mismatch = false, staleDisabledStop = false, realDraft = null, failEnter = false, session = {} } = {}) {
   let listener;
   const calls = [];
   const event = { addListener() {} };
@@ -32,12 +32,27 @@ function worker({ mismatch = false, staleDisabledStop = false, session = {} } = 
     debugger: {
       attach: (target, version, done) => { calls.push({ target, attach: true }); done(); },
       detach: (target, done) => { calls.push({ target, detach: true }); done(); },
-      sendCommand: (target, method, params, done) => { calls.push({ target, method, params }); done({}); },
+      sendCommand: (target, method, params, done) => {
+        calls.push({ target, method, params });
+        if (failEnter && params.key === 'Enter') chrome.runtime.lastError = { message: 'input connection lost' };
+        done({});
+        delete chrome.runtime.lastError;
+      },
     },
     scripting: { executeScript: async (request) => {
-      const verify = request.args?.length === 1;
+      const verify = typeof request.args?.[1] !== 'boolean';
       calls.push({ verify, target: request.target });
-      if (staleDisabledStop && request.args?.length === 2) {
+      if (realDraft) {
+        const thumbs = realDraft.thumbs || [];
+        const form = { querySelectorAll: () => thumbs, querySelector: () => realDraft.uploading ? {} : null };
+        const box = { innerText: realDraft.text, closest: () => form,
+          focus() { if (!realDraft.focusFails) page.document.activeElement = box; } };
+        const page = { document: { activeElement: null, querySelector: () => box, querySelectorAll: () => [] } };
+        // The focus from the first injection persists into the final verification.
+        if (verify && !realDraft.focusFails) page.document.activeElement = box;
+        return [{ result: vm.runInNewContext(`(${request.func.toString()})(...args)`, { ...page, args: request.args }) }];
+      }
+      if (staleDisabledStop && !verify) {
         const box = {
           innerText: request.args[0],
           focus() { page.document.activeElement = box; },
@@ -97,6 +112,122 @@ test('browser Enter ignores a disabled stale Stop spinner after an image complet
   const result = await w.send({ type: 'sw.forceSend', text: 'next image prompt', requireDraft: true });
   assert.equal(result.ok, true);
   assert.ok(w.calls.some((c) => c.params?.key === 'Enter'));
+});
+
+test('image send focuses the existing prompt and only dispatches Enter, after checking attachments', async () => {
+  const w = worker({ realDraft: { text: 'image prompt', thumbs: [{ complete: true, naturalWidth: 600 }] } });
+  const result = await w.send({ type: 'sw.forceSend', text: 'image prompt', enterOnly: true, expectedAttachments: 1 });
+  assert.equal(result.ok, true);
+  const input = w.calls.filter(c => c.method);
+  assert.deepEqual(input.map(c => c.params.key), ['Enter', 'Enter', 'Enter']);
+  assert.ok(w.calls.findIndex(c => c.verify) < w.calls.findIndex(c => c.method));
+});
+
+for (const [reason, draft] of Object.entries({
+  'wrong prompt': { text: 'old prompt' },
+  'missing attachment': { text: 'image prompt' },
+  'extra attachment': { text: 'image prompt', thumbs: [{ complete: true, naturalWidth: 600 }, { complete: true, naturalWidth: 600 }] },
+  'image still loading': { text: 'image prompt', thumbs: [{ complete: false, naturalWidth: 0 }] },
+  'upload in progress': { text: 'image prompt', thumbs: [{ complete: true, naturalWidth: 600 }], uploading: true },
+  'focus failed': { text: 'image prompt', focusFails: true },
+})) test(`image Enter is blocked for ${reason}`, async () => {
+  const w = worker({ realDraft: draft });
+  const result = await w.send({ type: 'sw.forceSend', text: 'image prompt', enterOnly: true, expectedAttachments: 1 });
+  assert.equal(result.ok, false);
+  assert.equal(result.enterAttempted, false);
+  assert.equal(w.calls.some(c => c.method), false);
+  assert.ok(w.calls.some(c => c.detach));
+});
+
+test('failed Enter reports an uncertain send rather than claiming no input occurred', async () => {
+  const w = worker({ failEnter: true });
+  const result = await w.send({ type: 'sw.forceSend', text: 'image prompt', enterOnly: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.enterAttempted, true);
+});
+
+async function sendBlock({ image = true, native = { ok: false, enterAttempted: false }, receipt = null, disconnected = false } = {}) {
+  const start = adapterSource.indexOf("report(turnId, 'sending', 'กำลังกดส่ง");
+  const end = adapterSource.indexOf("report(turnId,'submitted'", start);
+  const calls = [];
+  const context = {
+    opts: { wantImages: image, attachments: [{}] }, prompt: 'image prompt', turnId: 't1',
+    userMessagesBefore: {}, composerBox: {}, completedImageTurn: null,
+    report() {}, setTimeout() {}, Date,
+    chrome: { runtime: { sendMessage: async msg => { calls.push(msg); if (disconnected) throw new Error('worker disconnected'); return native; } } },
+    waitForDom: async fn => fn(), findUserReceipt: () => receipt,
+    nothingWasSent: () => true, composerMatches: () => true, stopButtonVisible: () => false,
+    clickSend: async () => { calls.push('DOM click'); return {}; },
+  };
+  const result = await vm.runInNewContext(`(async () => { ${adapterSource.slice(start, end)} return { status: 'submitted' }; })()`, context);
+  return { calls, result };
+}
+
+test('image jobs never switch to the DOM send button when native Enter is rejected', async () => {
+  const { calls, result } = await sendBlock();
+  assert.equal(calls[0].enterOnly, true);
+  assert.equal(calls[0].expectedAttachments, 1);
+  assert.equal(calls.includes('DOM click'), false);
+  assert.equal(result.meta.error, 'send_action_not_accepted');
+});
+
+test('text jobs retain their DOM fallback when native input was not attempted', async () => {
+  const { calls, result } = await sendBlock({ image: false });
+  assert.equal(calls[0].enterOnly, false);
+  assert.equal(calls.includes('DOM click'), true);
+  assert.equal(result.status, 'submitted');
+});
+
+test('uncertain native send never falls through to a second send, even with a full draft', async () => {
+  const { calls, result } = await sendBlock({ native: { ok: false, enterAttempted: true } });
+  assert.equal(calls.includes('DOM click'), false);
+  assert.equal(result.meta.error, 'outcome_unknown');
+});
+
+test('an uncertain Enter can still complete when its matching user receipt exists', async () => {
+  const { calls, result } = await sendBlock({ native: { ok: false, enterAttempted: true }, receipt: {} });
+  assert.equal(calls.includes('DOM click'), false);
+  assert.equal(result.status, 'submitted');
+});
+
+test('a disconnected image sender stops without assuming the full draft is safe to resend', async () => {
+  const { calls, result } = await sendBlock({ disconnected: true });
+  assert.equal(calls.includes('DOM click'), false);
+  assert.equal(result.meta.error, 'outcome_unknown');
+});
+
+async function imageSubmission({ ready = true } = {}) {
+  const start = adapterSource.indexOf('      let attachment = null;');
+  const end = adapterSource.indexOf("report(turnId,'submitted'", start);
+  const calls = [];
+  const box = { innerText: '' };
+  const context = {
+    opts: { wantImages: true, attachments: [{ dataUrl: 'data:image/png;base64,ref' }] },
+    prompt: 'image prompt', turnId: 't1', userMessagesBefore: {}, completedImageTurn: null,
+    S: { composer: '#prompt-textarea' }, $: () => box,
+    report() {}, setTimeout() {}, Date, napMs: async () => {}, waitComposerStable: async () => {},
+    attachFiles: async () => { calls.push('attach complete'); return { attached: 1, errors: [] }; },
+    imageDraftAttachmentsReady: () => { calls.push('check attachment'); return ready; },
+    injectText: async text => { calls.push('type prompt'); box.innerText = text; return box; },
+    chrome: { runtime: { sendMessage: async msg => { calls.push(msg.enterOnly ? 'Enter only' : 'other send'); return { ok: true }; } } },
+    waitForDom: async fn => fn(), findUserReceipt: () => ({}),
+    nothingWasSent: () => false, composerMatches: () => true, stopButtonVisible: () => false,
+    clickSend: async () => { throw new Error('image must not click DOM send'); },
+  };
+  const result = await vm.runInNewContext(`(async () => { ${adapterSource.slice(start, end)} return { status: 'submitted' }; })()`, context);
+  return { calls, result };
+}
+
+test('image submission waits for attachment readiness, types the prompt, then presses Enter', async () => {
+  const { calls, result } = await imageSubmission();
+  assert.deepEqual(calls, ['attach complete', 'check attachment', 'type prompt', 'Enter only']);
+  assert.equal(result.status, 'submitted');
+});
+
+test('attachment not ready stops the image flow before typing or Enter', async () => {
+  const { calls, result } = await imageSubmission({ ready: false });
+  assert.deepEqual(calls, ['attach complete', 'check attachment']);
+  assert.equal(result.meta.error, 'attachment_failed');
 });
 
 test('automatic image recovery uses the original tab and turn', async () => {

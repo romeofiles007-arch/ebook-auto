@@ -13,6 +13,7 @@ import { writeFile, readFile } from 'node:fs/promises';
 const typography = { bodyFont: 'Sarabun', sizePt: 15, lineHeight: 1.7, marginsMm: { inner: 18, outer: 14, top: 16, bottom: 18 } };
 const proseOutline = {
   title: 'หนังสือทดสอบ', subtitle: 'รอง', thesis: 'แกนของเล่ม', voice_card: 'เป็นกันเอง',
+  reader_promises: [{ id: 'P1', promise: 'ทำข้อหนึ่งและข้อสองได้', sections: ['1.1', '1.2'] }],
   chapters: [
     { n: 1, title: 'บทแรก', objective: 'ปูพื้น', adds: 'ข้อมูลใหม่', sections: [
       { id: '1.1', title: 'ตอนหนึ่ง', quota: 2000, takeaways: ['ข้อหนึ่ง'], claim: 'ข้ออ้าง' },
@@ -29,7 +30,7 @@ const proseBible = () => {
 
 export function buildSamples() {
   const out = {};
-  for (const genre of ['how-to', 'self', 'business']) {
+  for (const genre of ['how-to', 'explainer', 'case', 'self', 'textbook', 'workbook', 'business']) {
     const book = {
       id: 'p', contentMode: 'prose', genre, genreBrief: `แนว ${genre}`, topic: 'หัวข้อ', audience: 'ผู้อ่าน', tone: 'เป็นกันเอง',
       language: 'th', targetPages: 120, sectionLength: 'auto', authorVoice: 'auto', frontMatter: ['title', 'toc'], backMatter: [],
@@ -39,6 +40,12 @@ export function buildSamples() {
     const bible = proseBible();
     const ch = proseOutline.chapters[0];
     const sec = { ...ch.sections[0], chars: 1500, md: 'เนื้อหาเดิม' };
+    const writingArgs = { book, outline: proseOutline, bible, chapter: ch, sections: ch.sections, withContext: true };
+    out[`prose/${genre}/content`] = P.contentDraftPrompt(writingArgs);
+    out[`prose/${genre}/recovery`] = P.contentRecoveryPrompt({ ...writingArgs, sections: [ch.sections[0]],
+      draft: { md: 'สาระเดิม', meta: { missing_information: ['ข้อมูลที่ต้องเติม'] } } });
+    out[`prose/${genre}/compose`] = P.composeBatchPrompt({ ...writingArgs,
+      drafts: ch.sections.map(s => ({ id: s.id, md: 'สาระต้นทางเฉพาะตอน ' + s.id })) });
     out[`prose/${genre}/outline`] = P.outlinePrompt(book);
     out[`prose/${genre}/batch`] = P.batchPrompt({ book, outline: proseOutline, bible, chapter: ch, sections: ch.sections, prevSummaries: ['ก่อนหน้า'], prevTail: 'ท้ายตอน', nextSection: proseOutline.chapters[1].sections[0], withContext: true });
     out[`prose/${genre}/section`] = P.sectionPrompt({ book: { ...book, bible }, outline: proseOutline, chapter: ch, section: ch.sections[1], prevSummaries: [], nextSection: null });

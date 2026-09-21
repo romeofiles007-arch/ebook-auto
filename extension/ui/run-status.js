@@ -1,6 +1,6 @@
 export const STATE_LABELS = {
   ready: 'พร้อมเริ่ม', working: 'กำลังทำงาน', waiting: 'รอระบบ',
-  input: 'รอคุณเลือกใน Studio', stopped: 'หยุด / มีปัญหา', done: 'เสร็จสมบูรณ์',
+  input: 'รอข้อมูล / รอคุณเลือก', stopped: 'หยุด / มีปัญหา', done: 'เสร็จสมบูรณ์',
 };
 
 // Only explicit transitions change the lamp. Silence changes the age, never the outcome.

@@ -48,3 +48,13 @@ test('บรรทัดต่อของข้อถูกดึงเข้�
 test('บล็อกอื่นปิดรายการเสมอ ข้อความหลังหัวข้อไม่ถูกดูดเข้าไปเป็นเนื้อของข้อ', () => {
   assert.equal(mdToTypst('- ข้อ\n### หัวข้อใหม่\nย่อหน้า'), '- ข้อ\n=== หัวข้อใหม่\n\nย่อหน้า');
 });
+
+test('กล่องสรุปสั้นอยู่หน้าเดียว แต่เวิร์กชีตยาวแบ่งหน้าได้แทนการล้นทับเลขหน้า', () => {
+  const short = mdToTypst(':::box สรุป\n- หนึ่ง\n- สอง\n:::');
+  assert.match(short, /breakable: false/);
+
+  const rows = Array.from({ length: 12 }, (_, i) => `- เดือนที่ ${i + 1}: ______`).join('\n');
+  const long = mdToTypst(`:::box ปฏิทิน 12 เดือน\n${rows}\n:::`);
+  assert.match(long, /breakable: true/);
+  assert.match(long, /เดือนที่ 12/);
+});

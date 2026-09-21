@@ -62,6 +62,15 @@ test('legacy skipped review blocks export, untouched legacy reviews retain behav
   }
 });
 
+test('nonfiction export is blocked while verified editorial issues remain',()=>{
+  const base={contentMode:'prose',runConsistency:true,targetPages:24,typography:{marginsMm:{inner:20}},trim:{widthMm:148,heightMm:210},
+    outline:{chapters:[{n:1,sections:[{id:'1.1'}]}]}};
+  const bad={...base,review:{1:{coverage:{sections:1,reviewed:1,missed:[]},readability_issues:[{section:'1.1',what:'คำกว้าง'}]}}};
+  assert.equal(preflight({book:bad,sections:[{id:'1.1',md:'เนื้อหา'}],pages:24}).checks.find(x=>x.id==='editorial_issues').level,'fail');
+  const good={...base,review:{1:{coverage:{sections:1,reviewed:1,missed:[]},readability_issues:[],duplicates:[],term_conflicts:[],unpaid_promises:[]}}};
+  assert.equal(preflight({book:good,sections:[{id:'1.1',md:'เนื้อหา'}],pages:24}).checks.find(x=>x.id==='editorial_issues').level,'ok');
+});
+
 test('a stuck disabled ChatGPT composer is a no-cost failure CEO can recover', () => {
   const block = src.slice(src.indexOf('const NO_COST_ERRORS'), src.indexOf('export class Machine'));
   const scope = {};

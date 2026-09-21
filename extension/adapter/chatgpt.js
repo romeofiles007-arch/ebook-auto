@@ -664,6 +664,14 @@
   const waitForThumbs = (want) =>
     waitForDom(() => countAttachmentThumbs() >= want, { timeoutMs: 45000 }).then((v) => !!v);
 
+  function imageDraftAttachmentsReady(want) {
+    const form = $(S.composer)?.closest('form');
+    if (!form) return false;
+    const thumbs = attachmentThumbs();
+    return thumbs.length === want && thumbs.every(img => img.complete && img.naturalWidth > 0)
+      && !form.querySelector('[data-testid*="upload" i][aria-busy="true"], [data-testid*="upload" i] [role="progressbar"]');
+  }
+
   // ---------- ฉีดข้อความ ----------
   async function injectText(text, turnId = null) {
     const box = await waitForComposer();
@@ -2234,6 +2242,12 @@
         }
       }
 
+      if (opts.wantImages && !await waitForDom(
+        () => imageDraftAttachmentsReady(opts.attachments?.length || 0), { timeoutMs: 45000 },
+      )) return { turnId, status: 'error', text: '', meta: {
+        error: 'attachment_failed', detail: 'รูปแนบยังไม่พร้อมหรือจำนวนไม่ตรง — ยังไม่ได้พิมพ์หรือส่งคำสั่งภาพ',
+      } };
+
       report(turnId, 'typing', `กำลังส่ง Prompt ไป ChatGPT:\n${String(prompt).slice(0, 4000)}`);
       /**
        * เขียนข้อความไม่สำเร็จ ก็ต้องเดินต่อไปหาทางสำรองเหมือนกัน
@@ -2281,8 +2295,8 @@
       /**
        * ใช้ input ของเบราว์เซอร์กด Enter เป็นทางหลัก เหมือนผู้ใช้วาง Prompt แล้วกดส่งเอง
        *
-       * injectText ด้านบนใช้ช่องทางเดียวกันพิมพ์ข้อความไว้แล้ว ตรงนี้ให้เบราว์เซอร์เลือกข้อความ
-       * ตรวจซ้ำว่า draft ตรงกัน แล้วกด Enter จริงในครั้งเดียว วิธีนี้ไม่ผูกกับปุ่ม React ที่อาจถูก
+       * งานภาพไม่เลือกหรือวางข้อความซ้ำ: ตรวจรูปแนบและ draft ที่พิมพ์ไว้ แล้วกด Enter จริง
+       * งานข้อความยังใช้ทางกู้ช่องพิมพ์เดิม วิธีนี้ไม่ผูกกับปุ่ม React ที่อาจถูก
        * สร้างใหม่หรือค้างเป็นวงกลมระหว่างที่เรากำลังหา element
        */
       try {
@@ -2293,19 +2307,21 @@
          * ไม่ถูกเรียก แล้ว sendMessage รอไปเรื่อย ๆ — ตรงนี้เคยเป็น await เปล่า ๆ จึงค้างได้ถาวร
          * ที่ขั้น "กดส่ง Prompt" ซึ่งเป็นอาการเดียวกับที่ฝั่งพิมพ์เคยเป็นและแก้ไปแล้ว
          *
-         * หมดเวลาแล้วไม่ใช่จุดจบ: นับเป็น "ช่องทางเบราว์เซอร์ปฏิเสธก่อนแตะ input" แล้วตกไปใช้
-         * ปุ่มบนหน้าเป็นทางสำรอง ซึ่งเขียนรองรับไว้อยู่แล้วและตรวจใบเสร็จก่อนเสมอ จึงไม่ส่งซ้ำ
+         * หมดเวลาไม่ได้พิสูจน์ว่ายังไม่กด Enter: รอยืนยันข้อความและหยุดถ้าผลไม่แน่นอน
+         * ห้ามกดซ้ำ ส่วนงานภาพไม่ใช้ปุ่ม DOM เป็นทางสำรองเลย
          */
         const native = await Promise.race([
-          chrome.runtime.sendMessage({type:'sw.forceSend',text:prompt,requireDraft:true}),
-          new Promise((r) => setTimeout(() => r({ ok: false, error: 'ให้เบราว์เซอร์กดส่งให้ไม่ตอบใน 45 วินาที' }), 45000)),
+          chrome.runtime.sendMessage({type:'sw.forceSend',text:prompt,requireDraft:true,
+            enterOnly: !!opts.wantImages, expectedAttachments: opts.attachments?.length || 0}),
+          new Promise((r) => setTimeout(() => r({ ok: false, enterAttempted: true,
+            error: 'ให้เบราว์เซอร์กดส่งให้ไม่ตอบใน 45 วินาที' }), 45000)),
         ]);
         sendError = native?.error || '';
-        if (native?.ok) {
+        if (native?.ok || native?.enterAttempted) {
           fresh = await waitForDom(()=>findUserReceipt(prompt,userMessagesBefore),{timeoutMs:15000});
           // Enter ถูกกดไปแล้ว ถ้ายังหาใบเสร็จไม่เจอ ผลลัพธ์ไม่แน่นอน ห้ามไปคลิกซ้ำ
           // Prompt ยังอยู่ในช่องพิมพ์ครบ = Enter ไม่ติด ไม่ต้องเดา และลองใหม่ได้ปลอดภัย
-          if (!fresh && nothingWasSent(prompt)) return {turnId,status:'error',text:'',meta:{
+          if (!fresh && native?.ok && nothingWasSent(prompt)) return {turnId,status:'error',text:'',meta:{
             error:'send_action_not_accepted',
             detail:'กด Enter แล้วแต่ Prompt ยังอยู่ในช่องพิมพ์ครบและยังไม่มีการตอบ — คำสั่งไม่ได้ถูกส่ง ลองใหม่ได้',
             sendMs:Date.now()-sendStartedAt,
@@ -2318,10 +2334,19 @@
         }
       } catch (e) {
         sendError = e?.message || String(e);
+        if (opts.wantImages) {
+          // A lost worker connection does not prove Enter was never dispatched.
+          fresh = await waitForDom(()=>findUserReceipt(prompt,userMessagesBefore),{timeoutMs:15000});
+          if (!fresh) return {turnId,status:'error',text:'',meta:{
+            error:'outcome_unknown',
+            detail:`ช่องทางกด Enter ขาดการเชื่อมต่อ (${sendError}) — ยังยืนยันไม่ได้และไม่ส่งซ้ำ`,
+            sendMs:Date.now()-sendStartedAt,
+          }};
+        }
       }
 
       // ช่องทางเบราว์เซอร์ปฏิเสธก่อนแตะ input จึงยังใช้ปุ่มบนหน้าเป็นทางสำรองได้โดยไม่ส่งซ้ำ
-      if (!fresh) {
+      if (!fresh && !opts.wantImages) {
         if (stopButtonVisible()) return {turnId,status:'error',text:'',meta:{error:'previous_turn_running'}};
         try {
           fresh = await clickSend(composerBox, 12000, prompt, turnId, userMessagesBefore);
@@ -2447,11 +2472,24 @@
         imageKey: () => readImages(imgsBefore, anchor).join('|'),
       });
 
-      if (status !== 'ok') return { turnId, status, text: '', meta: {
-        model: modelBefore,
-        sendMs, answerMs:Date.now()-submittedAt,
-        ...(['timeout','no_response'].includes(status) ? {error:'outcome_unknown', detail:'ข้อความส่งถึงบทสนทนาแล้ว แต่ยังไม่ได้คำตอบที่ยืนยันได้ จึงไม่ส่งข้อความซ้ำ'} : {}),
-      } };
+      /**
+       * คำตอบว่าง — ต้องบอกด้วยว่าว่างแบบไหน ไม่ใช่ส่งแค่คำว่า empty กลับไป
+       *
+       * "ช่องว่างเปล่าสนิท" กับ "มีแต่ป้าย Searching websites" เป็นคนละอาการ
+       * และชั้นบนใช้ข้อความนี้ตัดสินใจว่าจะสั่งใหม่แบบห้ามใช้เครื่องมือหรือไม่
+       * ถ้าไม่ส่งไปด้วย ชั้นบนก็ได้แต่ยิงคำสั่งเดิมซ้ำจนครบสามรอบแล้วล้มเหมือนเดิม
+       */
+      if (status !== 'ok') {
+        const seen = status === 'empty' ? String(readAnswer(anchor)?.text || '').trim().slice(0, 120) : '';
+        return { turnId, status, text: '', meta: {
+          model: modelBefore,
+          sendMs, answerMs:Date.now()-submittedAt,
+          ...(status === 'empty'
+            ? { note: seen ? `หน้าเว็บมีแต่ "${seen}" ซึ่งไม่ใช่คำตอบ` : 'ช่องคำตอบว่างเปล่า ไม่มีข้อความเลย' }
+            : {}),
+          ...(['timeout','no_response'].includes(status) ? {error:'outcome_unknown', detail:'ข้อความส่งถึงบทสนทนาแล้ว แต่ยังไม่ได้คำตอบที่ยืนยันได้ จึงไม่ส่งข้อความซ้ำ'} : {}),
+        } };
+      }
 
       const { text, blocks } = readAnswer(anchor);
 

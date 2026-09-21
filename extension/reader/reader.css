@@ -1,0 +1,146 @@
+/**
+ * หน้าอ่าน — คนละอารมณ์กับ Studio โดยตั้งใจ
+ *
+ * Studio เป็นห้องเครื่อง จึงมืดและแน่นไปด้วยตัวเลขกับปุ่ม
+ * แต่หน้านี้มีงานเดียวคือให้อ่านหนังสือได้นาน ๆ พื้นจึงเป็นสีกระดาษ
+ * บรรทัดแคบ และไม่มีอะไรกะพริบอยู่ข้างตัวอักษร
+ */
+@font-face{font-family:"Sarabun";src:url("../fonts/Sarabun-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"Sarabun";src:url("../fonts/Sarabun-Italic.ttf") format("truetype");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:"Sarabun";src:url("../fonts/Sarabun-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:"Sarabun";src:url("../fonts/Sarabun-BoldItalic.ttf") format("truetype");font-weight:700;font-style:italic;font-display:swap}
+
+*{box-sizing:border-box}
+:root{--paper:#f7f4ec;--ink:#20242c;--dim:#6d7381;--line:#e0d9c9;--accent:#5d78ff;--box:#efe9db}
+html[data-theme=night]{--paper:#12151c;--ink:#dfe5f1;--dim:#8794a8;--line:#28303f;--accent:#8fa6ff;--box:#1a202b}
+html{color-scheme:light;background:var(--paper)}
+html[data-theme=night]{color-scheme:dark}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Sarabun",system-ui,-apple-system,"Segoe UI",sans-serif}
+
+.bar{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:12px;padding:10px 16px;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.bar .who{min-width:0;flex:1;line-height:1.3}
+.bar .who b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+.bar .who span{display:block;color:var(--dim);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .tools{display:flex;gap:6px;flex-shrink:0}
+button.ghost{border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink);font-family:inherit;font-weight:700;font-size:14px;padding:7px 11px;cursor:pointer}
+button.ghost:hover{border-color:var(--accent);color:var(--accent)}
+button.ghost[disabled]{opacity:.35;cursor:default;border-color:var(--line);color:var(--ink)}
+
+/* ผลของการบันทึกไฟล์ — ต้องบอกที่เก็บจริง ไม่ใช่แค่ "สำเร็จ" ซึ่งไม่ช่วยให้หาไฟล์เจอ */
+.saveNote{margin:0;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--box);font-size:13.5px;line-height:1.75}
+.saveNote b{font-weight:700}
+.saveNote code{background:transparent;border:1px solid var(--line);border-radius:5px;padding:.1em .4em;font-size:.92em;word-break:break-all}
+.saveNote.bad{color:#b4404f}
+html[data-theme=night] .saveNote.bad{color:#ff9aa6}
+.hidden{display:none}
+
+.shell{display:grid;grid-template-columns:270px 1fr;align-items:start}
+.toc{position:sticky;top:53px;max-height:calc(100vh - 53px);overflow:auto;padding:16px 10px 40px;border-right:1px solid var(--line)}
+.toc .grp{color:var(--dim);font-size:11.5px;font-weight:700;letter-spacing:.04em;margin:14px 8px 6px}
+.toc button{display:block;width:100%;text-align:left;border:0;border-radius:8px;background:transparent;color:var(--ink);font-family:inherit;font-size:13.5px;line-height:1.45;padding:8px 10px;cursor:pointer}
+.toc button:hover{background:var(--box)}
+.toc button.sel{background:var(--box);box-shadow:inset 3px 0 var(--accent);font-weight:700}
+.toc button .n{display:block;color:var(--dim);font-size:11.5px;font-weight:400;margin-top:2px}
+.shell.tocOff{grid-template-columns:1fr}
+.shell.tocOff .toc{display:none}
+/**
+ * จอแคบ สารบัญเป็นลิ้นชักที่ปิดอยู่ ไม่ใช่ของที่กองทับเนื้อหา
+ * เปิดค้างไว้แล้วต้องเลื่อนผ่านสารบัญทั้งชุดกว่าจะถึงตัวหนังสือ
+ * พอเลือกบทแล้วจึงต้องปิดเองทันที (ดู closeTocOnNarrow ใน reader.js)
+ */
+@media (max-width:900px){.shell{grid-template-columns:1fr}.toc{display:none}.shell.tocOn .toc{display:block;position:static;max-height:none;border-right:0;border-bottom:1px solid var(--line)}}
+
+.stage{min-width:0;padding:0 20px 60px}
+.page{max-width:44rem;margin:32px auto 0;font-size:var(--fs,18px);line-height:1.95}
+
+/**
+ * โหมดแบ่งหน้า — เนื้อหาเดิมถูกจัดใหม่เป็นคอลัมน์ที่กว้างเท่าหน้าจอ แล้วเลื่อนทีละคอลัมน์
+ *
+ * ใช้ CSS multicolumn ล้วน ไม่ได้พึ่งไลบรารีอ่าน EPUB ตัวไหน
+ * ซึ่งสำคัญ เพราะ CSP ของส่วนขยายห้ามโหลดสคริปต์จากที่อื่นอยู่แล้ว
+ * ความกว้าง ความสูง และจำนวนหน้าคำนวณด้วย JS เพราะขึ้นกับขนาดจอและขนาดตัวอักษรที่ผู้ใช้ปรับ
+ */
+.viewport.paged{position:relative;overflow:hidden;max-width:44rem;margin:20px auto 0;perspective:2000px}
+.viewport.paged .page{max-width:none;margin:0;column-fill:auto}
+
+/**
+ * พลิกหน้ากระดาษ — หน้าที่กำลังจะผ่านไปถูกถ่ายสำเนาทับไว้ แล้วหมุนออกรอบสันหนังสือ
+ *
+ * ต้องเป็นสำเนา ไม่ใช่ตัวจริง เพราะตัวจริงต้องเปลี่ยนไปเป็นหน้าใหม่ทันทีเพื่อให้เห็นอยู่ข้างใต้
+ * ไปข้างหน้าหมุนรอบขอบซ้าย (เหมือนพลิกไปหน้าถัดไป) ถอยหลังหมุนรอบขอบขวา
+ * เงาที่ค่อย ๆ เข้มระหว่างหมุนคือสิ่งที่ทำให้ตาอ่านว่าเป็นกระดาษ ไม่ใช่ภาพแบน ๆ ที่หมุนอยู่
+ */
+.flipClip{position:absolute;inset:0;overflow:hidden;background:var(--paper);backface-visibility:hidden;will-change:transform;z-index:2}
+.flipClip.fwd{transform-origin:left center}
+.flipClip.back{transform-origin:right center}
+.flipClip .page{position:absolute;top:0;left:0}
+.flipShade{position:absolute;inset:0;pointer-events:none;opacity:0;background:linear-gradient(90deg,#0009,#0000 60%)}
+.flipClip.fwd .flipShade{background:linear-gradient(90deg,#0009,#0000 55%)}
+.flipClip.back .flipShade{background:linear-gradient(270deg,#0009,#0000 55%)}
+@media (prefers-reduced-motion:reduce){.flipClip{display:none}}
+/* ของที่ถูกผ่าครึ่งคาหน้าแล้วอ่านไม่รู้เรื่อง ต้องยกไปทั้งก้อน */
+.viewport.paged .page h1,.viewport.paged .page h2,.viewport.paged .page h3,
+.viewport.paged .page figure,.viewport.paged .page .box,.viewport.paged .page blockquote{break-inside:avoid}
+.viewport.paged .page h1,.viewport.paged .page h2{break-after:avoid}
+.viewport.paged .page figure img,.viewport.paged .page figure .slot{max-height:52vh;width:auto;max-width:100%}
+.viewport.paged .page p{margin-bottom:.9em}
+.page h1{font-size:1.5em;line-height:1.4;margin:0 0 .2em}
+.page h2{font-size:1.18em;margin:2em 0 .4em}
+.page h3{font-size:1.05em;margin:1.6em 0 .3em}
+.page p{margin:0 0 1.15em;text-align:justify;text-justify:inter-word}
+.page ul,.page ol{margin:0 0 1.15em;padding-left:1.6em}
+.page li{margin:.3em 0}
+.page code{background:var(--box);border-radius:5px;padding:.08em .35em;font-size:.9em}
+.page .chapterHead{color:var(--dim);font-size:.78em;font-weight:700;letter-spacing:.06em;margin-bottom:.4em}
+.page .rule{height:1px;background:var(--line);margin:2.2em 0}
+.page .scene{text-align:center;color:var(--dim);letter-spacing:.5em;margin:1.6em 0}
+
+/* ภาพในเล่ม — โครงถูกวางไว้ก่อน แล้วไฟล์ภาพค่อยไหลเข้าทีหลัง
+   ถ้าไม่จองพื้นที่ไว้ ตัวหนังสือจะกระโดดทุกครั้งที่ภาพโหลดเสร็จ */
+.page figure{margin:1.8em 0;text-align:center}
+.page figure img{max-width:100%;border-radius:10px;display:block;margin:0 auto}
+.page figure .slot{border:1px dashed var(--line);border-radius:10px;color:var(--dim);font-size:.8em;display:flex;align-items:center;justify-content:center;min-height:120px;padding:16px}
+.page figcaption{color:var(--dim);font-size:.82em;line-height:1.6;margin-top:.6em}
+
+/* ตาราง — ตัวเลขที่ต้นฉบับสั่งให้ชิดขวาต้องเรียงหลักตรงกัน ไม่งั้นเทียบด้วยตาไม่ได้ */
+.page table{width:100%;border-collapse:collapse;margin:1.6em 0;font-size:.92em;line-height:1.7}
+.page th,.page td{border:1px solid var(--line);padding:8px 11px;vertical-align:top}
+.page th{background:var(--box);font-weight:700}
+.page td[style*="right"],.page th[style*="right"]{font-variant-numeric:tabular-nums}
+.page tbody tr:nth-child(even){background:color-mix(in srgb,var(--box) 45%,transparent)}
+/* จอแคบ ตารางกว้างต้องเลื่อนได้ ไม่ใช่ดันหน้าทั้งหน้าให้ล้น */
+@media (max-width:560px){.page table{display:block;overflow-x:auto}}
+
+.page .box{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;background:var(--box);padding:14px 18px;margin:1.6em 0}
+.page .box b{display:block;margin-bottom:.4em}
+.page .box ul{margin:0;padding-left:1.3em}
+
+.page blockquote{margin:1.6em 0;padding:0;text-align:center}
+.page blockquote footer{color:var(--dim);font-size:.82em;margin-top:.5em}
+
+/* ปก/ปกใน — สัดส่วนเดียวกับหน้ากระดาษจริง เหมือนที่ชั้นหนังสือใช้ */
+.cover{max-width:23rem;margin:0 auto;aspect-ratio:148/210;border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f7f4ec;color:#20242c}
+.cover img{width:100%;height:100%;object-fit:cover;display:block}
+.cover .inner{text-align:center;padding:10%}
+.cover .inner .t{font-size:1.25em;font-weight:700;line-height:1.45}
+.cover .inner .a{margin-top:1.2em;font-size:.82em;color:#6d7381}
+.coverMeta{text-align:center;color:var(--dim);font-size:.82em;margin-top:1.4em;line-height:1.9}
+
+/* หน้าปกใน ลิขสิทธิ์ สารบัญ — หน้ากระดาษจริงของเล่ม ไม่ใช่ส่วนติดต่อของหน้าเว็บ */
+.titleLeaf{text-align:center;padding:3.5em 0 4em}
+.titleLeaf .t{font-size:1.9em;font-weight:700;line-height:1.4}
+.titleLeaf .s{margin-top:1em;color:var(--dim);font-size:1.02em;line-height:1.6}
+.titleLeaf .a{margin-top:3.2em;font-size:.95em}
+.colophon{color:var(--dim);font-size:.88em;line-height:2.1;padding:2.5em 0}
+.tocPage{display:flex;flex-direction:column;margin-top:.5em}
+.tocPage button{text-align:left;border:0;background:transparent;color:var(--ink);font-family:inherit;
+  font-size:.95em;line-height:1.7;padding:7px 10px;border-radius:7px;cursor:pointer}
+.tocPage button:hover{background:var(--box)}
+.tocPage button.d1{font-weight:700;margin-top:.5em}
+.tocPage button.d2{padding-left:2.2em;color:var(--dim);font-size:.9em}
+
+.note{border:1px solid var(--line);border-radius:10px;background:var(--box);color:var(--dim);font-size:.85em;line-height:1.75;padding:12px 15px;margin:0 0 1.6em}
+.note b{color:var(--ink)}
+
+.pager{display:flex;align-items:center;gap:12px;max-width:44rem;margin:36px auto 0;padding-top:18px;border-top:1px solid var(--line)}
+.pager .pos{flex:1;text-align:center;color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}

@@ -176,9 +176,27 @@ test('กล่องเปล่าทุกใบ = ว่างจริง �
  */
 test('ชั้นรายงานผลตีตรา outcome_unknown เฉพาะ timeout กับ no_response เท่านั้น', () => {
   const stamp = adapterSource.slice(
-    adapterSource.indexOf("if (status !== 'ok') return {"),
+    adapterSource.indexOf("if (status !== 'ok') {"),
     adapterSource.indexOf('const { text, blocks } = readAnswer(anchor);'),
   );
   assert.match(stamp, /\['timeout','no_response'\]\.includes\(status\)/);
-  assert.ok(!/empty/.test(stamp), 'empty ต้องไม่ถูกกวาดเข้าไปในรหัสที่ห้ามกู้');
+  // รหัสที่ห้ามกู้ต้องถูกตีตราใต้เงื่อนไขนั้นเงื่อนไขเดียว ไม่มีทางอื่นเข้าถึง
+  assert.equal((stamp.match(/outcome_unknown/g) || []).length, 1);
+  assert.ok(
+    !/\['timeout','no_response','empty'\]|status === 'empty'[^\n]*outcome_unknown/.test(stamp),
+    'empty ต้องไม่ถูกกวาดเข้าไปในรหัสที่ห้ามกู้',
+  );
+});
+
+/**
+ * "สถานะ empty" เฉย ๆ บอกผู้ใช้ไม่ได้ว่าต้องทำอะไรต่อ และบอกชั้นบนไม่ได้ว่าควรเปลี่ยนคำสั่งไหม
+ * ตัวอ่านหน้าเว็บเห็นอยู่แล้วว่าบนจอมีอะไร เหตุผลนั้นต้องเดินทางไปกับผลลัพธ์ด้วย
+ */
+test('คำตอบว่างต้องบอกด้วยว่าว่างแบบไหน', () => {
+  const stamp = adapterSource.slice(
+    adapterSource.indexOf("if (status !== 'ok') {"),
+    adapterSource.indexOf('const { text, blocks } = readAnswer(anchor);'),
+  );
+  assert.match(stamp, /status === 'empty' \? String\(readAnswer\(anchor\)\?\.text \|\| ''\)/);
+  assert.match(stamp, /note: seen \? `หน้าเว็บมีแต่ "\$\{seen\}" ซึ่งไม่ใช่คำตอบ` : 'ช่องคำตอบว่างเปล่า ไม่มีข้อความเลย'/);
 });

@@ -10,6 +10,7 @@ import { mountRunTimer, nextClock } from './run-timer.js';
 
 const paintRunStatus = mountRunStatus(document.querySelector('main'), async (state) => {
   if (state.action === 'resume') return resumeGo();
+  if (state.action === 'resolveContent') return resumeGo();
   const target = document.getElementById(state.action || 'start');
   target?.scrollIntoView({behavior:'smooth', block:'start'});
 });
@@ -60,7 +61,11 @@ import {
   backCoverPrompt,
   coverTextBaked,
   sectionPrompt,
+  contentDraftPrompt,
+  contentDraftKey,
+  composeBatchPrompt,
 } from '../core/prompts.js';
+import { parseContentDraft, recoverContentDraft, contentInputRequests } from '../core/content-readiness.js';
 import { parseJson, extractSection, citationGutted } from '../core/extract.js';
 import { supervisorPrompt, parseSupervisorDecision, repairPrompt, ALL_SUPERVISOR_ACTIONS } from '../core/supervisor.js';
 import { noteTrouble as recordTrouble, troubleSummary, startTrouble } from '../core/dispatch.js';
@@ -906,7 +911,13 @@ function turnErrorMessage(res) {
   const why = res?.meta?.error ? ` (${res.meta.error})` : '';
   if (res?.meta?.error === 'chat_page_not_ready' || res?.meta?.error === 'adapter_unavailable')
     return 'หน้า ChatGPT ยังเปิดไม่พร้อม — เปิดแท็บ chatgpt.com ค้างไว้แล้วลองใหม่อีกครั้ง';
-  return `ChatGPT ตอบกลับสถานะ ${res?.status || 'error'}${why}`;
+  /**
+   * "สถานะ empty" อย่างเดียวบอกผู้ใช้ไม่ได้ว่าต้องทำอะไรต่อ
+   * ตัวอ่านหน้าเว็บรู้อยู่แล้วว่าเห็นอะไรบนจอ (ช่องว่างเปล่า หรือป้ายอย่าง "Searching websites")
+   * เหตุผลนั้นต้องเดินทางมาถึงหน้าจอด้วย ไม่ใช่จบอยู่ในบันทึกเหตุการณ์
+   */
+  const note = res?.meta?.note ? ` — ${String(res.meta.note).slice(0, 160)}` : '';
+  return `ChatGPT ตอบกลับสถานะ ${res?.status || 'error'}${why}${note}`;
 }
 
 function retryNotice(box, n, max, what, res) {
@@ -961,6 +972,27 @@ async function sendTurn(transport, prompt, opts = {}, { attempts = 3, onRetry, p
         'system',
         'คำตอบเหลือแต่หมุดอ้างอิง — สั่งใหม่แบบห้ามค้นเว็บ',
         `ขั้น ${opts.label || '-'} · ChatGPT แทนเนื้อหาจริงด้วย contentReference/oaicite ยิงซ้ำคำสั่งเดิมจะได้ผลเดิม`,
+      );
+    }
+    /**
+     * คำตอบว่างเปล่าก็เป็นการตัดสินใจของโมเดล ไม่ใช่จังหวะที่พลาด
+     *
+     * เหตุผลเดียวกับกรณีหมุดอ้างอิงข้างบน แต่ของเดิมดักเฉพาะตอนที่ "มีข้อความแต่ใช้ไม่ได้"
+     * พอคำตอบว่างสนิท citationGutted('') เป็นเท็จ คำสั่งจึงไม่เคยถูกเปลี่ยนเลยสักรอบ
+     * ทั้งสามรอบของบันไดกู้ยิงคำสั่งเดิมเป๊ะ ๆ ChatGPT ก็ตัดสินใจเหมือนเดิมทั้งสามรอบ
+     * (ไปค้นเว็บ หรือคิดเงียบแล้วจบโดยไม่พิมพ์อะไร) ผู้ใช้จึงเห็น "สถานะ empty" ทุกครั้งที่กด
+     *
+     * ห้องใหม่กับโหลดแท็บแก้อาการของหน้าเว็บ ไม่ได้แก้การตัดสินใจของโมเดล — ต้องเปลี่ยนคำสั่ง
+     */
+    if (res.status === 'empty' && askText === prompt) {
+      noteTrouble({ step: opts.label || '', symptom: 'empty_answer', move: 'harden_prompt', by: 'หน้า Studio' });
+      askText = `${prompt}\n\n${NO_CITATION_RULE}\n\nรอบที่แล้วคุณไม่ได้พิมพ์คำตอบออกมาเลย${
+        res.meta?.note ? ` (${res.meta.note})` : ''
+      }\nรอบนี้ห้ามค้นเว็บ ห้ามเรียกเครื่องมือใด ๆ ห้ามตอบเป็นป้ายบอกสถานะ\nให้พิมพ์คำตอบเป็นข้อความล้วนในบล็อกโค้ดเดียวออกมาทันทีจากที่คุณรู้อยู่แล้ว`;
+      addEvent(
+        'system',
+        'ChatGPT ตอบกลับว่าง — สั่งใหม่แบบห้ามใช้เครื่องมือ',
+        `ขั้น ${opts.label || '-'} · ${res.meta?.note || 'ไม่มีข้อความในช่องคำตอบ'} — ยิงซ้ำคำสั่งเดิมจะได้ผลเดิม`,
       );
     }
     /**
@@ -2106,6 +2138,7 @@ function readForm() {
 function updateEstimate() {
   const p = TRIM_PRESETS[val('trim', 'a5')] || TRIM_PRESETS.a5;
   const draft = {
+    contentMode: val('contentMode', 'prose'),
     targetPages: Number($('pages').value) || 120,
     trim: { preset: val('trim', 'a5') },
     calibration: { charsPerPage: p.seedCPP },
@@ -2134,7 +2167,7 @@ function updateEstimate() {
   $('estimate').innerHTML =
     `คาดว่าจะใช้ราว <span class="big">${e.likely}</span> ${viaApi ? 'เทิร์น API' : 'ข้อความ ChatGPT'} ` +
     `<b>(ช่วงประมาณ ${e.min}–${e.max} ไม่ใช่เพดาน)</b><br>` +
-    `ราว ${e.chapters} บท · เขียน ${e.batches} ${viaApi ? 'เทิร์น' : 'ข้อความ'}${perSection ? ' (ทีละตอน)' : ' (รวมหลายตอนต่อข้อความ)'} · เนื้อหา ${e.budget.toLocaleString()} อักษร<br>` +
+    `ราว ${e.chapters} บท · ${e.content ? `สร้างสาระ ${e.content} + เรียบเรียง ${e.batches}` : `เขียน ${e.batches}`} ${viaApi ? 'เทิร์น' : 'ข้อความ'}${perSection ? ' (ทีละตอน)' : ' (รวมหลายตอนต่อข้อความ)'} · เนื้อหา ${e.budget.toLocaleString()} อักษร<br>` +
     `ตัวอย่างเวลาเนื้อหาราว ${mins} นาที หากเฉลี่ย ${secPerTurn} วินาทีต่อข้อความ · เป็นสมมติฐาน ไม่ใช่เวลาที่วัดจริง และยังไม่รวมภาพหรือการลองซ้ำเพิ่มเติม` +
     (viaApi
       ? `<br>ทาง API ไม่มีลิมิตข้อความรายสามชั่วโมง แต่คิดเงินตาม token ที่ใช้จริง`
@@ -2475,6 +2508,7 @@ function shouldAutoContinue({ unattended: on, busy, job, quietMs }) {
   if (!on || busy || !job) return false;
   if (job.step === 'done') return false;
   if (job.status === 'rate_limited') return false; // ชนลิมิตแล้ว กดต่อคือไปชนซ้ำ
+  if (job.status === 'waiting_content_input') return false;
   return quietMs >= AUTO_CONTINUE_QUIET_MS;
 }
 
@@ -2848,6 +2882,7 @@ async function runMachine() {
   }
 
   if (r?.stopped && r.stopped !== 'done') {
+    if (r.stopped === 'waiting_content_input') return presentContentInput();
     if (r.stopped === 'rate_limited' || r.stopped === 'paused') return halted();
     return fail(new Error(book.job?.error || `งานหยุด: ${r.stopped}`));
   }
@@ -2918,7 +2953,9 @@ function showResume(b) {
     return $('resume').classList.add('hidden');
   }
   $('resume').classList.remove('hidden');
-  runState('stopped', b.job?.error || 'มีเล่มที่ยังไม่เสร็จบันทึกไว้ เลือกทำต่อจากขั้นเดิมได้', 'resume', 'ทำต่อจากงานที่บันทึก');
+  const needsContent = b.job?.status === 'waiting_content_input';
+  runState(needsContent ? 'input' : 'stopped', b.job?.error || 'มีเล่มที่ยังไม่เสร็จบันทึกไว้ เลือกทำต่อจากขั้นเดิมได้',
+    needsContent ? 'resolveContent' : 'resume', needsContent ? 'เพิ่มข้อมูล / เลือกแนวทาง' : 'ทำต่อจากงานที่บันทึก');
   /**
    * การ์ดงานค้าง = ยืนอยู่หน้าเริ่มต้น ไม่ได้อยู่ในงานนั้น
    *
@@ -2968,6 +3005,7 @@ async function clearImageGiveUp() {
 }
 
 async function resumeGo() {
+  if (book?.job?.status === 'waiting_content_input') return openContentInput();
   /**
    * ห้ามเดินเครื่องซ้อนเครื่องที่เดินอยู่
    *
@@ -2999,6 +3037,7 @@ async function resumeGo() {
     return false;
   }
 
+  if (book.job.status === 'waiting_content_input') return openContentInput();
   $('resume').classList.add('hidden');
   $('start').classList.add('hidden');
   // มีคนมาดูแล้วและสั่งเดินต่อ คำตัดสิน "หยุดรอคุณ" ของผู้คุมจึงหมดหน้าที่
@@ -3348,10 +3387,17 @@ async function renderShelf(rows) {
        * การ์ดทั้งใบเคยเป็น <button> ตัวเดียว ซึ่งซ้อนปุ่มข้างในไม่ได้ (HTML ไม่ยอม
        * และเบราว์เซอร์จะยุบให้เอง แล้วคลิกลบจะกลายเป็นคลิกเปิดเล่ม)
        * จึงแยกเป็นกล่องครอบ + ปุ่มเลือกเล่ม + ปุ่มลบที่ลอยอยู่มุมปก
+       *
+       * ปกกับชื่อแยกเป็นคนละปุ่ม เพราะคนคลิกด้วยเจตนาคนละอย่าง
+       * คลิกที่ "ปก" คือจะอ่านเล่มนั้น — เป็นท่าเดียวกับหยิบหนังสือออกจากชั้นจริง
+       * ส่วนคลิกที่ "ชื่อกับสถานะ" คือจะจัดการเล่ม (เปิดแก้ไข เปลี่ยนชื่อ ลบ)
+       * ถ้ารวมเป็นปุ่มเดียว ฝั่งใดฝั่งหนึ่งต้องเสียทางเข้าไป
        */
       return `<div class="shelfBook${r.id === shelfSelected ? ' sel' : ''}">
-        <button class="pick" data-book="${esc(r.id)}" title="${esc(r.title)}">
-          <div class="cover">${art}</div>
+        <button class="pick read" data-read="${esc(r.id)}" title="อ่าน “${esc(r.title)}”" aria-label="อ่าน ${esc(r.title)}">
+          <div class="cover">${art}<span class="readHint">อ่าน</span></div>
+        </button>
+        <button class="pick meta" data-book="${esc(r.id)}" title="รายละเอียดของ “${esc(r.title)}”">
           <div class="name">${esc(r.title)}</div>
           <div class="when"><i class="dot ${st.cls}"></i>${esc(st.text)}${when ? ` · ${esc(when)}` : ''}${r.shared ? ' · Shared' : ''}</div>
         </button>
@@ -3361,6 +3407,9 @@ async function renderShelf(rows) {
     .join('');
   list.querySelectorAll('[data-book]').forEach((el) => {
     el.onclick = () => openProjectDetail(el.dataset.book, rows);
+  });
+  list.querySelectorAll('[data-read]').forEach((el) => {
+    el.onclick = () => openReader(el.dataset.read);
   });
   list.querySelectorAll('[data-drop]').forEach((el) => {
     el.onclick = (ev) => {
@@ -3373,6 +3422,15 @@ async function renderShelf(rows) {
   if (shelfSelected && rows.some((r) => r.id === shelfSelected)) openProjectDetail(shelfSelected, rows);
   else $('projectDetail').classList.add('hidden');
 }
+
+/**
+ * อ่านเล่มนี้ — เปิดหน้าอ่านเป็นแท็บของตัวเอง ไม่ใช่ในหน้านี้
+ *
+ * Studio อาจกำลังเดินงานอยู่ ถ้าเอาหน้าอ่านมาทับก็เท่ากับตัดจอที่ใช้ดูงานทิ้ง
+ * หน้าอ่านอ่านฐานข้อมูลเดียวกันแบบอ่านอย่างเดียว จึงเปิดคู่กันไปได้
+ */
+const openReader = (id) =>
+  chrome.tabs.create({ url: chrome.runtime.getURL(`reader/reader.html?book=${encodeURIComponent(id)}`) });
 
 /** รายละเอียดของเล่มที่คลิก พร้อมปุ่มที่ทำอะไรกับเล่มนั้นได้จริง */
 async function openProjectDetail(id, rows) {
@@ -3401,12 +3459,14 @@ async function openProjectDetail(id, rows) {
       </div>
       <div class="actions">
         <button class="primary inline" data-detail-open>${r.isPhase2 ? 'เปิด Phase 2' : 'เปิดและแก้ไข'}</button>
+        <button data-detail-read>อ่าน</button>
         <button data-detail-rename>แก้ชื่อ</button>
         <button data-detail-close>ปิด</button>
         <button class="danger" data-detail-drop>ลบ</button>
       </div>
     </div>`;
   box.querySelector('[data-detail-open]').onclick = () => openSavedProject(id);
+  box.querySelector('[data-detail-read]').onclick = () => openReader(id);
   box.querySelector('[data-detail-rename]').onclick = () => renameSavedProject(id);
   box.querySelector('[data-detail-drop]').onclick = () => deleteSavedProject(id);
   box.querySelector('[data-detail-close]').onclick = () => {
@@ -3776,6 +3836,11 @@ async function regenerateSection() {
   btn.disabled = true;
   try {
     const out = await writeSectionWithAi(selected, (msg) => ($('secStat').textContent = msg));
+    if (out.inputNeeded) {
+      $('secStat').textContent = out.error;
+      await presentContentInput();
+      return;
+    }
     if (!out.ok) {
       $('secStat').textContent = `เขียนตอน ${selected} ไม่สำเร็จ — ${out.error}`;
       status(`เขียนตอน ${selected} ไม่สำเร็จ`);
@@ -3824,6 +3889,10 @@ ${list}`)) return;
   try {
     for (const [i, s] of todo.entries()) {
       const out = await writeSectionWithAi(s.id, (msg) => status(`(${i + 1}/${todo.length}) ${msg}`));
+      if (out.inputNeeded) {
+        await presentContentInput();
+        break;
+      }
       if (out.ok) done++;
       else addEvent('system', `เขียนตอน ${s.id} ไม่สำเร็จ`, out.error);
       renderSecList();
@@ -3909,6 +3978,130 @@ async function reviewItemsBeforeProceed() {
   }
 }
 
+async function presentContentInput() {
+  stopAutoPilot();
+  runState('input', book.job.error, 'resolveContent', 'เพิ่มข้อมูล / เลือกแนวทาง');
+  status('รอข้อมูลหรือแนวทางเพิ่มเติม — งานเดิมบันทึกไว้แล้ว');
+  $('create').disabled = false;
+  chime('attention');
+}
+
+async function openContentInput() {
+  if (!book?.id || !book.job?.contentInput?.length) return;
+  const existing = document.getElementById('contentInputDialog');
+  if (existing) { existing.focus(); return; }
+  const dialog = document.createElement('dialog');
+  dialog.id = 'contentInputDialog';
+  dialog.className = 'content-input-dialog';
+  const form = document.createElement('form');
+  const heading = document.createElement('h2');
+  heading.textContent = 'เพิ่มฐานเนื้อหา แล้วทำต่อจากตอนเดิม';
+  const explanation = document.createElement('p');
+  explanation.textContent = 'ระบบลองเติมสาระแล้ว แต่บางเรื่องต้องใช้ข้อมูลหรือแนวทางจากคุณ ต้นฉบับเดิมยังอยู่ครบ เลือกวิธีเขียนโดยไม่ต้องเริ่มเล่มใหม่';
+  form.append(heading, explanation);
+  const fields = [];
+  for (const request of book.job.contentInput) {
+    const group = document.createElement('fieldset');
+    const legend = document.createElement('legend');
+    legend.textContent = `${request.id} ${request.title}`;
+    const missing = document.createElement('p');
+    missing.textContent = `ที่ยังต้องการ: ${request.missing.join('; ')}`;
+    group.append(legend, missing);
+    const input = book.contentInputs?.[request.id] || book.contentAuthoring || {};
+    const labelField = (text, control) => {
+      const label = document.createElement('label');
+      label.append(document.createTextNode(text), control);
+      group.append(label);
+      return control;
+    };
+    const mode = document.createElement('select');
+    for (const [value, text] of [['', 'เลือกแนวทาง'], ['sources', 'เรียบเรียงจากข้อมูล / แหล่งที่ให้'],
+      ['interpretation', 'เขียนต้นฉบับใหม่เชิงตีความ / ความเชื่อ / สมมติ']]) {
+      const option = document.createElement('option'); option.value = value; option.textContent = text; mode.append(option);
+    }
+    mode.value = input.allowOriginalInterpretation ? 'interpretation' : input.sourceText || input.guidance ? 'sources' : '';
+    mode.required = true;
+    labelField('แนวทางการเขียน', mode);
+    const source = document.createElement('textarea'); source.rows = 5; source.value = input.sourceText || '';
+    source.placeholder = 'วางข้อมูลต้นทางหรือข้อความจากแหล่งที่ต้องการใช้ พร้อมชื่อ/ลิงก์ที่มา (ลิงก์อย่างเดียวอาจยังอ่านเนื้อหาไม่ได้)';
+    labelField('ข้อมูลเพิ่มเติมสำหรับตอนนี้', source);
+    const guidance = document.createElement('textarea'); guidance.rows = 2; guidance.value = input.guidance || '';
+    guidance.placeholder = 'เช่น แนวทางพยากรณ์ที่ต้องการใช้ หรือสิ่งที่ควรอธิบายเพิ่มเติม';
+    labelField('แนวทางเพิ่มเติมจากคุณ', guidance);
+    const scope = document.createElement('input'); scope.type = 'checkbox';
+    labelField('ใช้แนวทางนี้กับตอนอื่นในเล่มด้วย (ไม่คัดลอกข้อมูลเฉพาะตอน)', scope);
+    fields.push({ id: request.id, mode, source, guidance, scope });
+    form.append(group);
+  }
+  const note = document.createElement('p');
+  note.textContent = 'การตีความใช้สำหรับงานความเชื่อหรือสร้างสรรค์เท่านั้น ไม่ใช่การอนุญาตให้แต่งข้อเท็จจริง งานวิจัย หรือข้อมูลทางการแพทย์ กฎหมาย และการเงิน';
+  const error = document.createElement('p'); error.setAttribute('role', 'alert');
+  const submit = document.createElement('button'); submit.type = 'submit'; submit.textContent = 'บันทึกและทำต่อ';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'ไว้เลือกภายหลัง';
+  cancel.onclick = () => { dialog.close(); dialog.remove(); };
+  dialog.addEventListener('cancel', () => dialog.remove());
+  form.append(note, error, submit, cancel);
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (fields.some(f => f.mode.value === 'sources' && !f.source.value.trim() && !f.guidance.value.trim())) {
+      error.textContent = 'แนวทางเรียบเรียงจากข้อมูลต้องมีข้อมูลต้นทางหรือคำสั่งเพิ่มเติมก่อนทำต่อ';
+      return;
+    }
+    const unchanged = fields.every(f => {
+      const input = { sourceText: f.source.value.trim(), guidance: f.guidance.value.trim(),
+        allowOriginalInterpretation: f.mode.value === 'interpretation' };
+      const old = book.contentInputs?.[f.id] || book.contentAuthoring || {};
+      return input.sourceText === (old.sourceText || '') && input.guidance === (old.guidance || '') &&
+        input.allowOriginalInterpretation === !!old.allowOriginalInterpretation && !f.scope.checked;
+    });
+    if (unchanged) {
+      error.textContent = 'ข้อมูลและแนวทางยังเหมือนเดิม กรุณาเพิ่มข้อมูลหรือเปลี่ยนแนวทางก่อนทำต่อ';
+      return;
+    }
+    submit.disabled = true;
+    cancel.disabled = true;
+    const before = { contentInputs: book.contentInputs, contentAuthoring: book.contentAuthoring,
+      job: { ...book.job } };
+    try {
+      book.contentInputs = { ...book.contentInputs };
+      for (const f of fields) {
+        const input = { sourceText: f.source.value.trim(), guidance: f.guidance.value.trim(),
+          allowOriginalInterpretation: f.mode.value === 'interpretation' };
+        book.contentInputs[f.id] = input;
+        if (f.scope.checked) book.contentAuthoring = { guidance: input.guidance,
+          allowOriginalInterpretation: input.allowOriginalInterpretation };
+      }
+      const origin = book.job.contentInputOrigin;
+      delete book.job.contentInput;
+      delete book.job.contentInputOrigin;
+      book.job.error = '';
+      book.job.status = origin?.type === 'regenerate' ? origin.previousStatus : 'paused';
+      await db.saveBook(book);
+      await syncSharedProject(book.id).catch(e => addEvent('system', 'บันทึกข้อมูลในเครื่องแล้ว แต่ยังซิงก์ไม่สำเร็จ', e.message));
+      dialog.close(); dialog.remove();
+      if (origin?.type === 'regenerate') {
+        const out = await writeSectionWithAi(origin.id, status);
+        if (out.inputNeeded) return presentContentInput();
+        if (!out.ok) return fail(new Error(out.error));
+        renderSecList();
+        if (selected === origin.id) selectSection(selected);
+        runState('ready', `เขียนตอน ${origin.id} ใหม่แล้ว ต้นฉบับเดิมอยู่ในประวัติตอน`);
+      } else await resumeGo();
+    } catch (e) {
+      if (dialog.isConnected) {
+        book.contentInputs = before.contentInputs;
+        book.contentAuthoring = before.contentAuthoring;
+        book.job = before.job;
+        error.textContent = e.message;
+      }
+      else fail(e);
+    } finally { submit.disabled = false; cancel.disabled = false; }
+  };
+  dialog.append(form);
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
 async function writeSectionWithAi(id, report = () => {}) {
   if (isItemBook(book)) return writeItemWithAi(id, report);
   const rec = sections.find((x) => x.id === id);
@@ -3916,6 +4109,7 @@ async function writeSectionWithAi(id, report = () => {}) {
   const chapter = (outline?.chapters || []).find((c) => (c.sections || []).some((x) => x.id === id));
   const section = (chapter?.sections || []).find((x) => x.id === id);
   if (!rec || !chapter || !section) return { ok: false, error: 'ตอนนี้ไม่มีอยู่ในสารบัญแล้ว จึงสั่งเขียนใหม่ไม่ได้' };
+  if (rec.locked || rec.status === 'approved') return { ok: false, error: 'ปลดล็อกตอนนี้ก่อนสั่งเขียนใหม่' };
 
   const flat = (outline.chapters || []).flatMap((c) => c.sections || []);
   const next = flat[flat.findIndex((x) => x.id === id) + 1] || null;
@@ -3923,16 +4117,63 @@ async function writeSectionWithAi(id, report = () => {}) {
   try {
     report(`กำลังให้ ChatGPT เขียนตอน ${id}...`);
     await focusChat(book);
+    const transport = makeTransport(transportKind(book), transportOpts({}, book));
+    const writingArgs = { book, outline, bible: book.bible || B.emptyBible(), chapter,
+      section, sections: [section], withContext: true,
+      prevSummaries: B.prevSummaries(book.bible || B.emptyBible(), outline, id), nextSection: next };
+    const twoPass = book.contentMode !== 'fiction';
+    let prompt;
+    if (twoPass) {
+      const key = contentDraftKey(book, chapter, section);
+      if (rec.contentDraft?.key !== key || !rec.contentDraft.md ||
+          !Array.isArray(rec.contentDraft.meta?.missing_information)) {
+        report(`กำลังสร้างสาระตอน ${id} ก่อนเรียบเรียง...`);
+        const draftPrompt = contentDraftPrompt(writingArgs);
+        const draftRes = await sendTurn(transport, draftPrompt,
+          { label: `สาระดิบ · ตอน ${id} ใหม่` }, {
+            onRetry: n => report(`สร้างสาระตอน ${id} ยังไม่ครบ กำลังลองใหม่ ${n + 1}`),
+            parse: r => {
+              const draft = parseContentDraft(r.text, id);
+              return draft
+                ? { data: draft } : { error: `สาระตอน ${id} หรือ META.missing_information ยังไม่ครบ` };
+            },
+          });
+        if (!draftRes?.data) return { ok: false, error: draftRes?.error || 'สร้างสาระไม่สำเร็จ' };
+        rec.contentDraft = { key, md: draftRes.data.body, meta: draftRes.data.meta, createdAt: Date.now() };
+        await db.saveSection(book.id, rec);
+      }
+      rec.contentDraft = await recoverContentDraft({ book, chapter, section, draft: rec.contentDraft,
+        request: recoveryPrompt => sendTurn(transport, recoveryPrompt,
+          { label: `สาระดิบ · เติมข้อมูลตอน ${id} ใหม่` }, {
+            parse: r => {
+              const draft = parseContentDraft(r.text, id);
+              return draft ? { data: draft } : { error: 'คำตอบเติมสาระหรือ META ยังไม่ครบ' };
+            },
+          }),
+        persist: async contentDraft => {
+          rec.contentDraft = contentDraft;
+          await db.saveSection(book.id, rec);
+          await db.saveBook(book);
+        },
+      });
+      const requests = contentInputRequests([section], new Map([[id, rec.contentDraft]]));
+      if (requests.length) {
+        book.job ||= {};
+        const previousStatus = book.job.contentInputOrigin?.previousStatus || book.job.status || 'idle';
+        book.job.status = 'waiting_content_input';
+        book.job.contentInput = requests;
+        book.job.contentInputOrigin = { type: 'regenerate', id, previousStatus };
+        book.job.error = `รอข้อมูลหรือแนวทางเพิ่มเติม: ${requests[0].missing.join('; ')}`;
+        await db.saveBook(book);
+        await syncSharedProject(book.id);
+        return { ok: false, inputNeeded: true, error: book.job.error };
+      }
+      report(`กำลังเรียบเรียงตอน ${id} ให้เหมาะกับหมวด...`);
+      prompt = composeBatchPrompt({ ...writingArgs, drafts: [{ id, md: rec.contentDraft.md }] });
+    } else prompt = sectionPrompt(writingArgs);
     const res = await sendTurn(
-      makeTransport(transportKind(book), transportOpts({}, book)),
-      sectionPrompt({
-        book,
-        outline,
-        chapter,
-        section,
-        prevSummaries: B.prevSummaries(book.bible || B.emptyBible(), outline, id),
-        nextSection: next,
-      }),
+      transport,
+      prompt,
       { label: `เขียนตอน ${id} ใหม่` },
       {
         onRetry: (n, max, r) => report(`เขียนตอน ${id} ยังไม่สำเร็จ กำลังลองใหม่ ${n + 1}/${max}${r?.error ? ` — ${r.error}` : ''}`),
@@ -3978,6 +4219,7 @@ async function renderHistory() {
   // แกะตอนที่เลือกกลับออกมาเพื่อให้กู้เนื้อหาที่เคยเขียนทับไปแล้วได้
   const turns = await db.loadTurns(book.id);
   const turnHistory = turns
+    .filter(turn => !String(turn.label || '').startsWith('สาระดิบ'))
     .map((turn) => {
       const id = String(selected).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const match = String(turn.raw || '').match(new RegExp(`<<<SEC ${id} BEGIN>>>([\\s\\S]*?)<<<SEC ${id} END>>>`));
@@ -6723,6 +6965,17 @@ async function initializeStudio() {
 initializeStudio();
 
 function handleUiCommand(m) {
+  /**
+   * เปิดเล่มนี้เพื่อแก้ไข — สั่งมาจากหน้าอ่าน
+   *
+   * คลิกปกบนชั้นหนังสือพาไปหน้าอ่าน ซึ่งเป็นสิ่งที่คนคาดหวังเวลาหยิบหนังสือจากชั้น
+   * แต่ถ้าที่นั่นไม่มีทางกลับเข้างาน คนที่อยากแก้เล่มจะติดอยู่ในหน้าอ่านโดยไม่รู้ว่าต้องทำยังไง
+   * (เกิดขึ้นจริงทันทีที่เปลี่ยนคลิกการ์ด) ประตูนี้จึงต้องมีคู่กับหน้าอ่านเสมอ
+   */
+  if (m?.type === 'ui.command' && m.command === 'openProject' && m.bookId) {
+    openSavedProject(m.bookId).catch(fail);
+    return;
+  }
   if (m?.type === 'ui.command' && m.command === 'trendRandom') {
     $('title').value = m.title || '';
     if (typeof m.audience === 'string') $('audience').value = m.audience;
@@ -6764,6 +7017,12 @@ chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
    * แผงข้างใช้คำตอบนี้แยกระหว่าง "สั่งแล้ว" กับ "ไม่มีหน้า Studio เปิดอยู่"
    * ถ้าเงียบไป ผู้ใช้จะเห็นว่าสั่งสำเร็จทั้งที่ไม่มีใครฟังอยู่เลย
    */
+  // หน้าอ่านส่งเล่มกลับเข้ามาแก้ไข — ต้องตอบรับ เพื่อให้ฝั่งนั้นรู้ว่ามีหน้า Studio รับงานแล้ว
+  if (m?.type === 'ui.command' && m.command === 'openProject' && m.bookId) {
+    handleUiCommand(m);
+    sendResponse({ ok: true });
+    return true;
+  }
   if (m?.type === 'ui.command' && (m.command === 'stopJob' || m.command === 'resumeJob')) {
     if (m.command === 'stopJob') {
       stopRun('สั่งหยุดจากแผงข้าง');

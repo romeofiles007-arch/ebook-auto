@@ -11,6 +11,7 @@ import { coverTextBaked, backCoverTextBaked } from '../core/prompts.js';
 import { referenceLines, REFERENCE_STYLES } from '../core/references.js';
 import { stripEchoedHeading } from '../core/extract.js';
 import { itemTypeSize, ITEM_BLOCK_KINDS } from '../core/items.js';
+import { readTable } from '../core/md-table.js';
 
 const mm = (v) => `${round(v)}mm`;
 const pt = (v) => `${round(v)}pt`;
@@ -90,10 +91,14 @@ function figureToTypst(m, have, prompts = new Map()) {
  */
 function boxToTypst(title, lines, t) {
   const items = lines.map((l) => `  #text[${inline(l.replace(/^\s*[-*+]\s*/, ''))}]`).join('\n  #v(0.35em)\n');
+  // กล่องสั้นควรอยู่เป็นชิ้นเดียว แต่กล่องแบบปฏิทิน/เวิร์กชีตอาจยาวเกินพื้นที่พิมพ์ทั้งหน้า
+  // ถ้าบังคับ breakable: false Typst จะดันหรือวาดล้นจนบรรทัดท้ายกับเลขหน้าทับกัน และข้อมูลท้ายกล่องหาย
+  // ใช้จำนวนบรรทัดเป็นสัญญาณที่คาดเดาได้: กล่องเกิน 6 บรรทัดยอมแบ่งหน้า ส่วนกล่องสรุปสั้นยังไม่แตก
+  const breakable = lines.length > 6 ? 'true' : 'false';
   return `#block(
   width: 100%, inset: 10pt, radius: 3pt,
   stroke: 0.6pt + luma(150), fill: luma(247),
-  breakable: false,
+  breakable: ${breakable},
 )[
   ${title ? `#text(weight: 600, size: ${pt(t.sizePt * 0.98)})[${inline(title)}] #v(0.5em)` : ''}
   #set par(first-line-indent: 0pt)
@@ -101,19 +106,7 @@ ${items}
 ]`;
 }
 
-// ตาราง Markdown: | หัว | หัว | ตามด้วยแถว --- และข้อมูล
-// ยอมรับทั้งขีดสั้นและขีดยาว เพราะโมเดลบางครั้งแทน --- ด้วย — ตอนเขียนภาษาไทย
-function splitTableRow(line) {
-  const s = String(line).trim().replace(/^\|/, '').replace(/\|$/, '');
-  return s.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, '|'));
-}
-
-function isTableDivider(line) {
-  const cells = splitTableRow(line);
-  return cells.length > 1 && cells.every((cell) => /^:?[\-–—]{1,}:?$/.test(cell.replace(/\s/g, '')));
-}
-
-function tableToTypst(rows, t) {
+function tableToTypst(rows, align, t) {
   const cols = Math.max(1, ...rows.map((r) => r.length));
   const columnSpec = Array.from({ length: cols }, () => '1fr').join(', ');
   const normalized = rows.map((r) => Array.from({ length: cols }, (_, i) => r[i] || ''));
@@ -125,13 +118,18 @@ function tableToTypst(rows, t) {
     .flatMap((row) => row.map((cell) => `  [${inline(cell)}]`))
     .join(',\n');
   const fontSize = Math.max(7, Math.min(10, (t.sizePt || 14) * (cols >= 6 ? 0.58 : cols >= 4 ? 0.68 : 0.78)));
+  /**
+   * คอลัมน์ตัวเลขที่เขียน ---: ไว้ ต้องชิดขวาจริงในเล่ม
+   * ของเดิมชิดซ้ายหมดทุกคอลัมน์ ตัวเลขคนละหลักจึงเรียงไม่ตรงกันจนเทียบด้วยตายาก
+   */
+  const alignSpec = Array.from({ length: cols }, (_, i) => `${align?.[i] || 'left'} + top`).join(', ');
   return `#block(width: 100%)[
   #set text(size: ${pt(fontSize)})
   #set par(first-line-indent: 0pt, leading: 0.3em)
   #table(
     columns: (${columnSpec}),
     inset: 3.5pt,
-    align: left + top,
+    align: (${alignSpec}),
     stroke: 0.4pt + luma(175),
     table.header(
 ${header}
@@ -213,16 +211,11 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
     }
 
     // ต้องตรวจตารางก่อนตรวจเส้นคั่น มิฉะนั้นแถว |---|---| จะถูกมองเป็นข้อความธรรมดา
-    if (line.includes('|') && idx + 1 < lines.length && isTableDivider(lines[idx + 1])) {
-      const rows = [splitTableRow(line)];
-      idx += 2; // ข้ามแถวแบ่งหัวตาราง
-      while (idx < lines.length && lines[idx].includes('|') && lines[idx].trim()) {
-        rows.push(splitTableRow(lines[idx]));
-        idx++;
-      }
-      idx--; // คืนหนึ่งตำแหน่งให้ for-loop
+    const table = readTable(lines, idx);
+    if (table) {
+      idx = table.next - 1; // คืนหนึ่งตำแหน่งให้ for-loop
       listCtx = null;
-      out.push(tableToTypst(rows, t), '');
+      out.push(tableToTypst(table.rows, table.align, t), '');
       continue;
     }
 
