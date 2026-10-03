@@ -56,7 +56,9 @@
       '[data-message-author-role="assistant"], [data-turn="assistant"]:not(:has([data-message-author-role="assistant"])), [data-turn-key] [data-chatgpt-search-message-ids]:not([data-chatgpt-search-unit-key$=":user"])',
     userTurn: '[data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]',
     turnContainer: 'main',
-    codeBlock: 'pre code',
+    // โครงใหม่เลิกใช้ <pre> — บล็อกโค้ดเหลือ <code> ในกล่อง data-markdown-copy="code-block"
+    // ถ้าหาไม่เจอ ตัวอ่านจะถอยไปอ่านทั้งกล่องคำตอบ แล้วได้ป้ายภาษา ("JSON", "Markdown") ติดมาเป็นบรรทัดแรก
+    codeBlock: 'pre code, [data-markdown-copy="code-block"] code',
     copyButton: '[data-testid="copy-turn-action-button"], button[aria-label*="Copy" i]',
     modelBadge: '[data-testid="model-switcher-dropdown-button"], button[aria-label*="model" i]',
     newChatButton: '[data-testid="create-new-chat-button"], button[aria-label*="new chat" i], button[title*="new chat" i], a[aria-label*="new chat" i], a[href="/"]',
@@ -132,6 +134,7 @@
       assistantTurn: /data-turn-key|data-chatgpt-search/,
       userTurn: /data-chatgpt-search/,
       modelBadge: /aria-label/,
+      codeBlock: /data-markdown-copy/,
     };
     for (const [key, re] of Object.entries(knowsNewLayout)) {
       if (!re.test(String(S[key] || ''))) S[key] = DEFAULT_SELECTORS[key];

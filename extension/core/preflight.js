@@ -146,6 +146,32 @@ export function preflight({ book, sections, pages, assetNames = [] }) {
         .join(' · ') + ' — สั่งเขียนใหม่เฉพาะตอนที่หนาแน่นที่สุด หรือแก้ในเวิร์ดก่อนส่งพิมพ์',
     );
 
+  /**
+   * ช่องที่โมเดลเว้นไว้ให้ "เติมเอง" แล้วไม่มีใครเติม — [ชื่อยา] [ระบุจำนวน] [ใส่ชื่อ…]
+   *
+   * เห็นในเล่มจริง: ตารางตัวอย่างบันทึกอาการเขียนว่า "ยาที่ได้รับ: [ชื่อยา] 08:15" ครบทั้งสามแถว
+   * ผู้อ่านเปิดมาเจอตัวอย่างที่ไม่บอกสิ่งที่ตัวอย่างควรบอก และไม่มีด่านไหนของระบบเห็นมันเลย
+   * เพราะมันเป็นข้อความถูกไวยากรณ์ ไม่ใช่ตอนว่างและไม่ใช่ตัวอักษรที่พิมพ์ไม่ออก
+   *
+   * ไม่นับลิงก์ [ข้อความ](ที่อยู่) เครื่องหมายภาพ และเลขอ้างอิง [1] ซึ่งเป็นวงเล็บเหลี่ยมที่ตั้งใจ
+   */
+  const BLANK_SLOT = /\[(?!\d+\])([^\]\n]{1,40})\](?!\()/g;
+  const slots = [];
+  for (const sec of sections) {
+    const text = String(sec.md || sec.text || '').replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+    for (const m of text.matchAll(BLANK_SLOT)) slots.push({ id: sec.id, what: m[0] });
+  }
+  if (!slots.length) ok('blanks', 'ไม่มีช่องว่างที่รอให้เติมค้างอยู่ในเนื้อหา');
+  else {
+    const kinds = [...new Set(slots.map((s) => s.what))];
+    const ids = [...new Set(slots.map((s) => s.id))];
+    warn(
+      'blanks',
+      `มีช่องที่เว้นไว้ให้เติมค้างอยู่ ${slots.length} จุด`,
+      `${kinds.slice(0, 6).join(' · ')} — ตอน ${ids.slice(0, 8).join(', ')} — แก้ตอนนั้นให้ใส่ค่าจริง หรือสั่งเขียนใหม่ ก่อนส่งพิมพ์`,
+    );
+  }
+
   const blocked = sections.filter((s) => s.status === 'blocked');
   const draft = sections.filter((s) => !s.md?.trim());
   if (!blocked.length && !draft.length) ok('sections', `ทุกตอนมีเนื้อหาครบ ${sections.length} ตอน`);

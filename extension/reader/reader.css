@@ -104,8 +104,10 @@ html[data-theme=night] .saveNote.bad{color:#ff9aa6}
 
 /* ตาราง — ตัวเลขที่ต้นฉบับสั่งให้ชิดขวาต้องเรียงหลักตรงกัน ไม่งั้นเทียบด้วยตาไม่ได้ */
 .page table{width:100%;border-collapse:collapse;margin:1.6em 0;font-size:.92em;line-height:1.7}
-.page th,.page td{border:1px solid var(--line);padding:8px 11px;vertical-align:top}
-.page th{background:var(--box);font-weight:700}
+.page table{border-bottom:2px solid var(--ink)}
+.page table.nohead{border-top:2px solid var(--ink)}
+.page th,.page td{border:0;padding:9px 12px;vertical-align:top}
+.page th{font-weight:700;border-top:2px solid var(--ink);border-bottom:1px solid var(--ink)}
 .page td[style*="right"],.page th[style*="right"]{font-variant-numeric:tabular-nums}
 .page tbody tr:nth-child(even){background:color-mix(in srgb,var(--box) 45%,transparent)}
 /* จอแคบ ตารางกว้างต้องเลื่อนได้ ไม่ใช่ดันหน้าทั้งหน้าให้ล้น */

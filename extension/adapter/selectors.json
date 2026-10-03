@@ -6,7 +6,7 @@
   "assistantTurn": "[data-message-author-role=\"assistant\"], [data-turn=\"assistant\"]:not(:has([data-message-author-role=\"assistant\"])), [data-turn-key] [data-chatgpt-search-message-ids]:not([data-chatgpt-search-unit-key$=\":user\"])",
   "userTurn": "[data-message-author-role=\"user\"], [data-chatgpt-search-unit-key$=\":user\"]",
   "turnContainer": "main",
-  "codeBlock": "pre code",
+  "codeBlock": "pre code, [data-markdown-copy=\"code-block\"] code",
   "copyButton": "[data-testid=\"copy-turn-action-button\"], button[aria-label*=\"Copy\" i]",
   "modelBadge": "[data-testid=\"model-switcher-dropdown-button\"], button[aria-label*=\"model\" i]",
   "newChatButton": "[data-testid=\"create-new-chat-button\"], a[href=\"/\"][data-discover]",

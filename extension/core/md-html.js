@@ -10,6 +10,7 @@
  */
 
 import { readTable } from './md-table.js';
+import { stripDesignNotes } from './extract.js';
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 export const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ESC[c]);
@@ -57,7 +58,7 @@ const readerFigure = ({ name, caption, widthPct, heightMm }) =>
 export function mdToHtml(md, opts = {}) {
   const out = [];
   // ตารางต้องถูกแยกออกก่อนตัดย่อหน้า เพราะแถวของมันคั่นด้วยบรรทัดว่างได้
-  for (const chunk of chunkByTables(String(md))) {
+  for (const chunk of chunkByTables(stripDesignNotes(md))) {
     if (chunk.rows) out.push(tableHtml(chunk, opts));
     else out.push(blocksToHtml(chunk.text, opts));
   }
@@ -90,20 +91,29 @@ function chunkByTables(md) {
  * EPUB ไม่มีไฟล์สไตล์ของตัวเอง เส้นตารางจึงต้องติดไปกับแท็กเลย
  * ไม่งั้นได้ตารางไร้เส้นที่อ่านไม่ออกว่าช่องไหนเป็นของแถวไหน
  */
-const CELL_STYLE = 'border:1px solid #ccc;padding:5px 9px;vertical-align:top';
+const CELL_STYLE = 'padding:7px 10px;vertical-align:top';
+// หน้าตาเดียวกับเล่มพิมพ์: เส้นหนาบนสุด-ล่างสุด เส้นบางใต้หัวคอลัมน์ ไม่มีเส้นตั้ง แถวสลับสีอ่อน
+const HEAD_STYLE = ';font-weight:700;border-top:2px solid #333;border-bottom:1px solid #333';
+const ZEBRA_STYLE = ';background:#f4f4f2';
 
-function tableHtml({ rows, align }, opts = {}) {
+function tableHtml({ rows, align, lead = [], header = true }, opts = {}) {
   const inlineStyle = !!opts.xhtml;
   const cols = Math.max(1, ...rows.map((r) => r.length));
   const at = (i) => align?.[i] || 'left';
-  const cell = (tag, text, i) =>
-    `<${tag}${inlineStyle ? ` style="${CELL_STYLE};text-align:${at(i)}${tag === 'th' ? ';font-weight:700' : ''}"` : ` style="text-align:${at(i)}"`}>${inlineHtml(text)}</${tag}>`;
-  const row = (cells, tag) =>
-    `<tr>${Array.from({ length: cols }, (_, i) => cell(tag, cells[i] || '', i)).join('')}</tr>`;
-  const body = rows.slice(1).map((r) => row(r, 'td')).join('');
+  const cell = (tag, text, i, zebra) =>
+    `<${tag}${inlineStyle ? ` style="${CELL_STYLE};text-align:${at(i)}${tag === 'th' ? HEAD_STYLE : zebra ? ZEBRA_STYLE : ''}"` : ` style="text-align:${at(i)}"`}>${inlineHtml(text)}</${tag}>`;
+  const row = (cells, tag, zebra = false) =>
+    `<tr>${Array.from({ length: cols }, (_, i) => cell(tag, cells[i] || '', i, zebra)).join('')}</tr>`;
+  const body = (header ? rows.slice(1) : rows).map((r, n) => row(r, 'td', n % 2 === 1)).join('');
+  // ตารางไม่มีหัว: เส้นบนที่ปกติมากับหัวคอลัมน์ต้องย้ายมาอยู่ที่ตัวตารางแทน
+  const tableAttr = inlineStyle
+    ? ` style="border-collapse:collapse;width:100%;border-bottom:2px solid #333${header ? '' : ';border-top:2px solid #333'}"`
+    : header ? '' : ' class="nohead"';
   return (
-    `<table${inlineStyle ? ' style="border-collapse:collapse;width:100%"' : ''}>` +
-    `<thead>${row(rows[0], 'th')}</thead>` +
+    // ข้อความที่เขียนปนมากับตาราง (คำนำ · ป้าย "ตัวอย่างสมมติ:") ยังต้องอยู่ วางไว้เหนือตาราง
+    lead.map((text) => `<p>${inlineHtml(text)}</p>`).join('') +
+    `<table${tableAttr}>` +
+    (header ? `<thead>${row(rows[0], 'th')}</thead>` : '') +
     `${body ? `<tbody>${body}</tbody>` : ''}</table>`
   );
 }

@@ -9,7 +9,7 @@
 import { prepareForTypeset, THAI_GAP } from '../core/thai.js';
 import { coverTextBaked, backCoverTextBaked } from '../core/prompts.js';
 import { referenceLines, REFERENCE_STYLES } from '../core/references.js';
-import { stripEchoedHeading } from '../core/extract.js';
+import { stripEchoedHeading, stripDesignNotes } from '../core/extract.js';
 import { itemTypeSize, ITEM_BLOCK_KINDS } from '../core/items.js';
 import { readTable } from '../core/md-table.js';
 
@@ -106,34 +106,66 @@ ${items}
 ]`;
 }
 
-function tableToTypst(rows, align, t) {
+function tableToTypst(rows, align, t, hasHeader = true) {
   const cols = Math.max(1, ...rows.map((r) => r.length));
-  const columnSpec = Array.from({ length: cols }, () => '1fr').join(', ');
   const normalized = rows.map((r) => Array.from({ length: cols }, (_, i) => r[i] || ''));
-  const header = normalized[0]
-    .map((cell) => `    [#text(weight: 600)[${inline(cell)}]]`)
-    .join(',\n');
-  const body = normalized
-    .slice(1)
-    .flatMap((row) => row.map((cell) => `  [${inline(cell)}]`))
-    .join(',\n');
+  /**
+   * ความกว้างคอลัมน์ตามเนื้อหา ไม่ใช่หารเท่ากันทุกช่อง
+   *
+   * หารเท่ากันทำให้คอลัมน์ "เวลา" ที่มีแค่ 08:00 กว้างเท่าคอลัมน์คำอธิบายยาวสามบรรทัด
+   * ช่องสั้นจึงโล่งเปล่า ส่วนช่องยาวถูกบีบจนตัดคำถี่และตารางสูงเกินจำเป็น
+   * มีเพดานทั้งสองด้าน: ช่องสั้นสุดยังต้องพอวางหัวคอลัมน์ ช่องยาวสุดต้องไม่กินตารางทั้งใบ
+   * (สระบน-ล่างและวรรณยุกต์ไม่กินความกว้าง จึงไม่นับ)
+   */
+  const visibleLength = (cell) => [...String(cell).replace(/[ัิ-ฺ็-๎*_`]/g, '')].length;
+  const longest = Array.from({ length: cols }, (_, i) => Math.max(...normalized.map((r) => visibleLength(r[i]))));
+  /**
+   * คอลัมน์สั้น (เวลา ตัวเลข หน่วย) ให้ Typst วัดจากเนื้อหาจริง ไม่ใช่เดาจากจำนวนตัวอักษร
+   *
+   * รอบแรกให้ทุกคอลัมน์เป็นสัดส่วน fr ตามความยาว คอลัมน์ "08:00" ได้ที่แคบกว่าตัวหนังสือของมันเอง
+   * ข้อความที่ตัดคำไม่ได้จึงล้นไปทับคอลัมน์ข้าง ๆ (เห็นในเล่มจริง: "08:0038.7°Cปวดหัว" ซ้อนกัน)
+   * auto ไม่มีทางแคบกว่าเนื้อหา ส่วนคอลัมน์ยาวแบ่งที่ที่เหลือกันตามสัดส่วน
+   * ถ้าทุกคอลัมน์สั้นหมด ใช้สัดส่วนทั้งใบ ตารางจะได้กว้างเต็มหน้าเหมือนเดิม
+   */
+  const SHORT = 10;
+  const allShort = longest.every((n) => n <= SHORT);
+  const columnSpec = longest
+    .map((n) => (!allShort && n <= SHORT ? 'auto' : `${Math.min(26, Math.max(6, n))}fr`))
+    .join(', ');
+  const cellsOf = (list, bold) =>
+    list
+      .flatMap((row) => row.map((cell) => (bold ? `    [#text(weight: 600)[${inline(cell)}]]` : `  [${inline(cell)}]`)))
+      .join(',\n');
+  // ตารางที่ไม่มีแถวชื่อคอลัมน์ ห้ามเอาแถวข้อมูลแถวแรกไปทำตัวหนาเป็นหัว
+  const header = hasHeader ? cellsOf([normalized[0]], true) : '';
+  const body = cellsOf(hasHeader ? normalized.slice(1) : normalized, false);
+  const headerPart = hasHeader ? `,\n    table.header(\n${header}\n    ),\n    table.hline(stroke: 0.45pt + luma(45))` : '';
+  const zebra = hasHeader ? 'y > 0 and calc.even(y)' : 'calc.odd(y)';
   const fontSize = Math.max(7, Math.min(10, (t.sizePt || 14) * (cols >= 6 ? 0.58 : cols >= 4 ? 0.68 : 0.78)));
   /**
    * คอลัมน์ตัวเลขที่เขียน ---: ไว้ ต้องชิดขวาจริงในเล่ม
    * ของเดิมชิดซ้ายหมดทุกคอลัมน์ ตัวเลขคนละหลักจึงเรียงไม่ตรงกันจนเทียบด้วยตายาก
    */
   const alignSpec = Array.from({ length: cols }, (_, i) => `${align?.[i] || 'left'} + top`).join(', ');
+  /**
+   * หน้าตาแบบตารางในหนังสือพิมพ์จริง ไม่ใช่ตารางสเปรดชีต
+   *
+   * ของเดิมตีเส้นเทารอบทุกช่อง ซึ่งเป็นหน้าตาของโปรแกรมตาราง ไม่ใช่ของหนังสือ
+   * เส้นตั้งแย่งสายตาจากตัวหนังสือ และกรอบที่ปิดทุกด้านทำให้ทั้งก้อนดูหนักกว่าเนื้อหารอบข้าง
+   * แบบที่โรงพิมพ์ใช้มีเส้นแค่สามเส้น: หนาบนสุด บางใต้หัวคอลัมน์ หนาล่างสุด
+   * ส่วนการแยกแถวใช้แถบสีอ่อนสลับ ซึ่งนำสายตาตามแนวนอนได้โดยไม่ต้องมีเส้น
+   */
   return `#block(width: 100%)[
   #set text(size: ${pt(fontSize)})
   #set par(first-line-indent: 0pt, leading: 0.3em)
   #table(
     columns: (${columnSpec}),
-    inset: 3.5pt,
+    inset: (x: 4.5pt, y: 5pt),
     align: (${alignSpec}),
-    stroke: 0.4pt + luma(175),
-    table.header(
-${header}
-    )${body ? `,\n${body}` : ''}
+    stroke: none,
+    fill: (x, y) => if ${zebra} { luma(245) },
+    table.hline(stroke: 0.9pt + luma(45))${headerPart}${body ? `,\n${body}` : ''},
+    table.hline(stroke: 0.9pt + luma(45))
   )
 ]`;
 }
@@ -171,7 +203,7 @@ function betweenListItems(out, lines, idx) {
 }
 
 export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 }, prompts = new Map()) {
-  const lines = String(md).replace(/\r\n/g, '\n').split('\n');
+  const lines = stripDesignNotes(String(md).replace(/\r\n/g, '\n')).split('\n');
   const out = [];
   let inFence = false;
   let fenceBuf = [];
@@ -215,7 +247,9 @@ export function mdToTypst(md, baseLevel = 3, have = new Set(), t = { sizePt: 15 
     if (table) {
       idx = table.next - 1; // คืนหนึ่งตำแหน่งให้ for-loop
       listCtx = null;
-      out.push(tableToTypst(table.rows, table.align, t), '');
+      // ข้อความที่เขียนปนมากับตารางยังต้องอยู่ในเล่ม วางเป็นย่อหน้าเหนือตาราง
+      for (const text of table.lead || []) out.push(inline(text), '');
+      out.push(tableToTypst(table.rows, table.align, t, table.header !== false), '');
       continue;
     }
 
