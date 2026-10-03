@@ -158,3 +158,35 @@ test('ค่าที่บันทึกไว้จากรุ่นก่�
   assert.match(S.modelBadge, /aria-label/);
   assert.equal(S.stopButton, '[data-testid="my-own-stop"]', 'ค่าที่ผู้ใช้ปรับเองในช่องอื่นต้องไม่ถูกแตะ');
 });
+
+/**
+ * หน้าเว็บโครงใหม่ซ่อนห้องเดิมไว้ทั้งหน้าตอนเปิดห้องใหม่ ไม่ได้ถอดออก
+ * จึงมีช่องพิมพ์สองอัน และอันแรกในเอกสารคืออันที่ซ่อนอยู่ — เห็นจริงตอนสร้างภาพปกหน้า:
+ * "ช่องพิมพ์ของห้องแชตใหม่ยังไม่พร้อม" ทั้งที่ช่องพิมพ์ของห้องใหม่อยู่บนจอแล้ว
+ */
+test('มีช่องพิมพ์สองอัน ต้องได้อันที่มองเห็น ไม่ใช่อันของห้องเดิมที่ถูกซ่อน', async () => {
+  const hidden = { offsetParent: null, id: 'old' };
+  const shown = { offsetParent: {}, id: 'new' };
+  const context = {
+    document: {
+      querySelector: () => hidden,
+      querySelectorAll: () => [hidden, shown],
+      body: {},
+    },
+    window: {},
+    Node: { DOCUMENT_POSITION_FOLLOWING: 4 },
+    chrome: { storage: { local: { get: async () => ({}) } }, runtime: { onMessage: { addListener() {} } } },
+  };
+  vm.runInNewContext(adapterSource.replace(/\}\)\(\);\s*$/, 'globalThis.fixture = { pick: (s) => $(s) }; })();'), context);
+  await Promise.resolve();
+  assert.equal(context.fixture.pick('x').id, 'new');
+  // ไม่มีอันไหนมองเห็นเลย = คืนอันแรกเหมือนเดิม ผู้เรียกตัดสินเองว่าพร้อมหรือยัง
+  shown.offsetParent = null;
+  assert.equal(context.fixture.pick('x').id, 'old');
+});
+
+test('บทสนทนาของห้องที่ถูกซ่อนไม่ถูกนับเป็นของห้องนี้ และภาพย่อไฟล์แนบนับทั้ง blob: กับ data:', () => {
+  // นับคำตอบของห้องเดิมด้วย = "ห้องใหม่ยังมีคำตอบเดิมค้างอยู่" ทุกครั้งที่เปิดห้องใหม่ให้งานภาพ
+  assert.doesNotMatch(adapterSource, /\$\$\(S\.(?:assistantTurn|userTurn)\)(?!\.filter\(\(el\) => el\.offsetParent !== null\))/);
+  assert.match(adapterSource, /img\[src\^="blob:"\], img\[src\^="data:image\/"\]/);
+});

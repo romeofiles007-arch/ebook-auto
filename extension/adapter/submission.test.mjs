@@ -84,3 +84,19 @@ test('ข้อความอื่นที่ขึ้นต้นคนล�
   rows = [node('new', 'คำสั่งอื่นที่ไม่เกี่ยวกันเลย')];
   assert.equal(ctx.findUserReceipt('คุณคือบรรณาธิการ ' + 'ก'.repeat(300), before), null);
 });
+
+/** หน้าเว็บโครงใหม่วาดข้อความของเราเป็น markdown — ดอกจัน รั้วโค้ด ขีดนำรายการ หายไปจากตัวอักษรที่อ่านกลับมา */
+test('ข้อความที่ถูกวาดเป็น markdown ยังนับเป็นใบเสร็จของเราได้', () => {
+  const sent = '[งาน #7 · รหัสระบบ ไม่ต้องอ้างถึงในคำตอบ]\n**หน้าที่รอบนี้**: ตอบในบล็อกโค้ด ```json เดียว\n- ข้อแรก\n- ข้อสอง ' + 'ก'.repeat(300);
+  const shown = '[งาน #7 · รหัสระบบ ไม่ต้องอ้างถึงในคำตอบ]\nหน้าที่รอบนี้: ตอบในบล็อกโค้ด json เดียว\nข้อแรก\nข้อสอง ' + 'ก'.repeat(120) + '\n…\nShow more';
+  let rows = [];
+  const ctx = { $$: () => rows, S: {}, normalizeMessage: (s) => String(s).replace(/\s+/g, ' ').trim() };
+  vm.createContext(ctx);
+  vm.runInContext(['userMessageKey', 'userReceiptText', 'snapshotUserMessages', 'findUserReceipt'].map((n) => fn(n)).join('\n'), ctx);
+  const before = ctx.snapshotUserMessages();
+  rows = [node('new', shown)];
+  assert.equal(ctx.findUserReceipt(sent, before), rows[0]);
+  // งานคนละรหัสต้องไม่ถูกนับ แม้เนื้อหาที่เหลือจะเหมือนกันทุกตัว
+  rows = [node('other', shown.replace('#7', '#8'))];
+  assert.equal(ctx.findUserReceipt(sent, before), null);
+});

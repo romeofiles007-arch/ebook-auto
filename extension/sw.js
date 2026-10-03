@@ -411,7 +411,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             target,
             args: [text, !!msg.requireDraft || !!msg.enterOnly],
             func: (expected, requireDraft) => {
-              const box = document.querySelector('#prompt-textarea, form div.ProseMirror[contenteditable="true"]');
+              // ห้องเดิมที่ถูกซ่อนไว้ก็มีช่องพิมพ์ของตัวเอง ต้องเอาอันที่มองเห็น
+              const box = [...document.querySelectorAll('#prompt-textarea, form div.ProseMirror[contenteditable="true"]')]
+                .find((el) => el.offsetParent !== null) || document.querySelector('#prompt-textarea, form div.ProseMirror[contenteditable="true"]');
               if (!box) return false;
               if (requireDraft) {
                 const norm = s => String(s || '').replace(/\s+/g,' ').trim();
@@ -449,12 +451,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             target,
             args: [text, msg.enterOnly ? Number(msg.expectedAttachments || 0) : null],
             func: (expected, expectedAttachments) => {
-              const box = document.querySelector('#prompt-textarea, form div.ProseMirror[contenteditable="true"]');
+              // ห้องเดิมที่ถูกซ่อนไว้ก็มีช่องพิมพ์ของตัวเอง ต้องเอาอันที่มองเห็น
+              const box = [...document.querySelectorAll('#prompt-textarea, form div.ProseMirror[contenteditable="true"]')]
+                .find((el) => el.offsetParent !== null) || document.querySelector('#prompt-textarea, form div.ProseMirror[contenteditable="true"]');
               const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
               if (expectedAttachments !== null) {
                 const form = box?.closest('form');
                 if (!form) return false;
-                const thumbs = [...form.querySelectorAll('img[src^="blob:"]')];
+                // ภาพย่อเปลี่ยนจาก blob: เป็น data:image/… เมื่ออัปโหลดเสร็จ ต้องนับทั้งสองแบบ
+                const thumbs = [...form.querySelectorAll('img[src^="blob:"], img[src^="data:image/"]')];
                 if (thumbs.length !== expectedAttachments || thumbs.some(img => !img.complete || !img.naturalWidth)) return false;
                 if (form.querySelector('[data-testid*="upload" i][aria-busy="true"], [data-testid*="upload" i] [role="progressbar"]')) return false;
               }

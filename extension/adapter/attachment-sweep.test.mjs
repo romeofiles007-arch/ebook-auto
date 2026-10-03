@@ -16,7 +16,8 @@ const src = await readFile(new URL('./chatgpt.js', import.meta.url), 'utf8');
 test('นับไฟล์แนบเฉพาะในกรอบช่องพิมพ์ ไม่ใช่ทั้งหน้า', () => {
   const fn = src.slice(src.indexOf('const attachmentThumbs = () => {'), src.indexOf('const countAttachmentThumbs'));
   assert.match(fn, /\$\(S\.composer\)\?\.closest\('form'\)/);
-  assert.match(fn, /form \? \$\$\('img\[src\^="blob:"\]', form\) : \[\]/);
+  // ภาพย่อเริ่มเป็น blob: แล้วเปลี่ยนเป็น data:image/… เมื่ออัปโหลดเสร็จ ต้องนับทั้งสองแบบ และยังต้องอยู่ในกรอบช่องพิมพ์
+  assert.match(fn, /form \? \$\$\('img\[src\^="blob:"\], img\[src\^="data:image\/"\]', form\) : \[\]/);
   // ห้ามกลับไปกวาดทั้งเอกสารอีก
   assert.ok(!/\$\$\('img\[src\^="blob:"\]'\)\s*;/.test(src), 'ยังมีที่ที่กวาดทั้งหน้าอยู่');
 });

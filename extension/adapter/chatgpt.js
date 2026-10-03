@@ -54,7 +54,9 @@
     stopButton: '[data-testid="stop-button"], button[aria-label*="Stop" i]',
     assistantTurn:
       '[data-message-author-role="assistant"], [data-turn="assistant"]:not(:has([data-message-author-role="assistant"])), [data-turn-key] [data-chatgpt-search-message-ids]:not([data-chatgpt-search-unit-key$=":user"])',
-    userTurn: '[data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]',
+    // ตัวท้ายคือฟองข้อความที่ไม่ได้อยู่ในกล่องที่มีป้าย ":user" — เผื่อจังหวะที่หน้าเว็บวาดข้อความก่อนติดป้าย
+    userTurn:
+      '[data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"], [data-user-message-bubble]:not([data-chatgpt-search-unit-key$=":user"] *)',
     turnContainer: 'main',
     // โครงใหม่เลิกใช้ <pre> — บล็อกโค้ดเหลือ <code> ในกล่อง data-markdown-copy="code-block"
     // ถ้าหาไม่เจอ ตัวอ่านจะถอยไปอ่านทั้งกล่องคำตอบ แล้วได้ป้ายภาษา ("JSON", "Markdown") ติดมาเป็นบรรทัดแรก
@@ -142,7 +144,23 @@
     if (o.limitPatterns?.length) LIMITS = o.limitPatterns;
   });
 
-  const $ = (sel, root = document) => root.querySelector(sel);
+  /**
+   * หน้าเว็บโครงใหม่ไม่ถอดห้องเดิมออกตอนเปิดห้องใหม่ — มันซ่อนไว้ทั้งหน้า (display: none)
+   *
+   * หลังกด New chat จึงมีช่องพิมพ์สองอัน บทสนทนาสองชุด และช่องแนบไฟล์สองชุดอยู่ในหน้าเดียวกัน
+   * ของห้องเดิมมาก่อนในเอกสาร querySelector จึงหยิบอันที่ซ่อนอยู่ทุกครั้ง
+   * (เห็นจริง: "ช่องพิมพ์ของห้องแชตใหม่ยังไม่พร้อม" แล้วรอหน้าพร้อมอีก 60 วินาทีเปล่า ๆ
+   *  ทั้งที่ช่องพิมพ์ของห้องใหม่อยู่บนจอตั้งแต่วินาทีแรก)
+   *
+   * ตัวแรกที่ "มองเห็น" คือตัวที่ผู้ใช้เห็น ถ้าไม่มีตัวไหนมองเห็นเลยค่อยคืนตัวแรกเหมือนเดิม
+   * offsetParent เป็น null เฉพาะตอนถูกซ่อนด้วย display: none (หรือเป็น fixed ซึ่งของพวกนี้ไม่ใช่)
+   */
+  const inView = (el) => el.offsetParent !== null;
+  const $ = (sel, root = document) => {
+    const first = root.querySelector(sel);
+    if (!first || first.offsetParent !== null) return first;
+    return [...root.querySelectorAll(sel)].find(inView) || first;
+  };
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   /**
    * รอหนึ่งเฟรม — แต่ต้องเดินต่อได้แม้แท็บไม่ได้วาดเฟรมเลย
@@ -282,7 +300,7 @@
 
   /** ข้อความล่าสุดที่ "เรา" ส่ง ใช้เป็นหมุดว่าอะไรคือคำตอบของเทิร์นนี้ */
   function lastUserTurn() {
-    const turns = $$(S.userTurn);
+    const turns = $$(S.userTurn).filter((el) => el.offsetParent !== null);
     return turns[turns.length - 1] || null;
   }
 
@@ -307,7 +325,7 @@
    * ถึงจะจำได้ถูก การเทียบตำแหน่งใน DOM ให้คำตอบเดียวกันโดยไม่ต้องรออะไรเลยสักมิลลิวินาที
    */
   function assistantAfter(anchor) {
-    const turns = $$(S.assistantTurn);
+    const turns = $$(S.assistantTurn).filter((el) => el.offsetParent !== null);
     if (!anchor) return turns[turns.length - 1] || null;
     for (let i = turns.length - 1; i >= 0; i--) {
       if (anchor.compareDocumentPosition(turns[i]) & Node.DOCUMENT_POSITION_FOLLOWING) return turns[i];
@@ -317,7 +335,7 @@
 
   /** ทุกกล่องคำตอบที่อยู่หลังข้อความที่เราเพิ่งส่ง เรียงตามหน้าเว็บ */
   function assistantTurnsAfter(anchor) {
-    const turns = $$(S.assistantTurn);
+    const turns = $$(S.assistantTurn).filter((el) => el.offsetParent !== null);
     if (!anchor) return turns;
     return turns.filter((t) => anchor.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING);
   }
@@ -405,7 +423,12 @@
     if (shell) {
       return (
         [...shell.querySelectorAll(S.copyButton)].find(
-          (b) => !b.closest(S.userTurn) && !b.closest(S.assistantTurn),
+          // แถบปุ่มจริงอยู่ "หลัง" คำตอบเสมอ ปุ่มของข้อความเราอยู่ก่อน — กันไว้อีกชั้นเผื่อกล่องข้อความเราไม่มีป้ายกำกับ
+          (b) =>
+            !b.closest(S.userTurn) &&
+            !b.closest(S.assistantTurn) &&
+            !b.closest('[data-user-message-bubble]') &&
+            (!turn.compareDocumentPosition || !!(turn.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)),
         ) || null
       );
     }
@@ -552,7 +575,7 @@
   function stopButtonVisible() { return !!visibleStopButton(); }
 
   function lastAssistantTurn() {
-    const turns = $$(S.assistantTurn);
+    const turns = $$(S.assistantTurn).filter((el) => el.offsetParent !== null);
     return turns[turns.length - 1] || null;
   }
 
@@ -616,7 +639,10 @@
     const thumbsAdded = () => countAttachmentThumbs() - before;
 
     // ทางที่ 1 — ช่องแนบไฟล์จริงของหน้าเว็บ
-    const inputs = $$(S.fileInput).filter((el) => !el.accept || /image|\*/i.test(el.accept));
+    // เฉพาะช่องแนบของช่องพิมพ์ที่มองเห็น — ห้องเดิมที่ถูกซ่อนไว้ก็มีช่องแนบของตัวเอง ใส่ไฟล์ผิดช่องแล้วภาพย่อไม่ขึ้น
+    const liveForm = $(S.composer)?.closest('form');
+    const ownInputs = liveForm ? $$(S.fileInput, liveForm) : [];
+    const inputs = (ownInputs.length ? ownInputs : $$(S.fileInput)).filter((el) => !el.accept || /image|\*/i.test(el.accept));
     for (const input of inputs) {
       try {
         input.files = list;
@@ -678,7 +704,9 @@
      * ไม่ใช่งานวาดใหม่ — แล้วก็หยุดคิดกลางคัน ไม่ได้ภาพสักใบ
      */
     const form = $(S.composer)?.closest('form');
-    return form ? $$('img[src^="blob:"]', form) : [];
+    // ภาพย่อเริ่มเป็น blob: แล้วพออัปโหลดเสร็จ หน้าเว็บโครงใหม่เปลี่ยนเป็น data:image/… (ราวสองวินาที)
+    // นับแค่ blob: จะเห็นเป็น "ไม่มีไฟล์แนบ" ตอนกดส่ง และตัวล้างก็มองไม่เห็นรูปที่ค้างจากรอบก่อน
+    return form ? $$('img[src^="blob:"], img[src^="data:image/"]', form) : [];
   };
   const countAttachmentThumbs = () => attachmentThumbs().length;
 
@@ -1197,7 +1225,7 @@
     return normalizeMessage(body ? (body.innerText || body.textContent) : (node.innerText || node.textContent));
   }
   function snapshotUserMessages(itemReceipt = false) {
-    const rows = $$(S.userTurn).map(node => ({
+    const rows = $$(S.userTurn).filter((el) => el.offsetParent !== null).map(node => ({
       key:userMessageKey(node), text:userReceiptText(node, itemReceipt),
       turn:turnIndexOf(node),
     }));
@@ -1217,11 +1245,43 @@
    * การพับตัดท้ายเสมอ หัวข้อความจึงเป็นลายเซ็นที่รอด และยังเข้มพอ:
    * ต้องขึ้นต้นตรงกัน 120 ตัวอักษรแรก และต้องเป็นข้อความที่เพิ่งโผล่ใหม่เท่านั้น
    */
+  /**
+   * หลักฐานตอนหาใบเสร็จไม่เจอ — ครั้งหน้าที่หยุดด้วย outcome_unknown ต้องรู้ทันทีว่าเพราะอะไร
+   * "ไม่มีข้อความของเราเลย" กับ "มีแต่หน้าตาไม่ตรง" เป็นคนละปัญหา และแก้คนละที่
+   */
+  function receiptEvidence(prompt, sendError = '') {
+    const all = $$(S.userTurn).filter((el) => el.offsetParent !== null);
+    const tail = all[all.length - 1];
+    const clip = (t) => normalizeMessage(t).slice(0, 60);
+    return [
+      `ข้อความฝั่งเราบนหน้า ${all.length} ใบ`,
+      tail ? `ใบล่าสุดขึ้นต้น “${clip(userReceiptText(tail))}”` : '',
+      `ที่ส่งขึ้นต้น “${clip(prompt)}”`,
+      sendError ? `ทางกดส่ง: ${sendError}` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
   function findUserReceipt(prompt, before) {
     const expected = normalizeMessage(prompt);
     const head = expected.slice(0, 120);
-    const sameMessage = (text) => text === expected || (!!head && text.startsWith(head));
-    const all = $$(S.userTurn);
+    /**
+     * หน้าเว็บโครงใหม่ "วาด" ข้อความของเราเป็น markdown ไม่ได้แสดงดิบ ๆ เหมือนเดิม
+     *
+     * รั้วโค้ดกลายเป็นกล่องโค้ดที่มีปุ่ม Copy ตัวหนาเสียดอกจัน รายการเสียขีดนำ
+     * ตัวอักษรที่อ่านกลับมาจึงไม่ตรงกับ Prompt ที่ส่งไปทุกตัว ถ้าเครื่องหมายพวกนั้นตกอยู่ใน
+     * 120 ตัวแรก การเทียบหัวข้อความแบบตรงตัวจะหาใบเสร็จของตัวเองไม่เจอ ทั้งที่ข้อความส่งไปแล้วจริง
+     * แล้วจบเป็น outcome_unknown ซึ่งหยุดทั้งงาน
+     *
+     * ทางที่สามจึงเทียบเฉพาะตัวอักษรกับตัวเลข ทิ้งเครื่องหมายและช่องว่างทั้งหมดไปก่อน
+     * ยังเข้มพอ: ทุก Prompt ขึ้นต้นด้วยรหัสงานของตัวเอง และต้องเป็นข้อความที่เพิ่งโผล่ใหม่เท่านั้น
+     */
+    const lettersOnly = (t) => String(t || '').replace(/[^\p{L}\p{N}\p{M}]+/gu, '');
+    const looseHead = lettersOnly(head).slice(0, 80);
+    const sameMessage = (text) =>
+      text === expected ||
+      (!!head && text.startsWith(head)) ||
+      (looseHead.length >= 30 && lettersOnly(text.slice(0, 600)).startsWith(looseHead));
+    const all = $$(S.userTurn).filter((el) => el.offsetParent !== null);
     const matches = all.filter(node =>
       sameMessage(userReceiptText(node, before.itemReceipt === true)));
     const oldKeys = new Set(before.map(row=>row.key).filter(Boolean));
@@ -1421,7 +1481,7 @@
 
       // คำตอบใหม่คือคำตอบที่อยู่หลังข้อความที่เราเพิ่งส่ง ตรวจได้ทันทีโดยไม่ต้องรอ
       // minAssistantCount เป็นตัวกันพลาดเฉพาะกรณีที่ปักหมุดไม่สำเร็จเท่านั้น
-      const isNew = () => !!assistantAfter(anchor) && $$(S.assistantTurn).length >= minAssistantCount;
+      const isNew = () => !!assistantAfter(anchor) && $$(S.assistantTurn).filter((el) => el.offsetParent !== null).length >= minAssistantCount;
 
       const check = () => {
         if (done) return;
@@ -1728,7 +1788,7 @@
    */
   function scanImages(before = { sources: new Set(), elements: new Set() }, anchor = null) {
     anchor = liveAnchor(anchor);
-    const nextUser = anchor && $$(S.userTurn).find(
+    const nextUser = anchor && $$(S.userTurn).filter((el) => el.offsetParent !== null).find(
       (node) => node !== anchor && (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING),
     );
     const beforeSources = before?.sources instanceof Set ? before.sources : before instanceof Set ? before : new Set();
@@ -2142,7 +2202,7 @@
    */
   async function newThread({ mustBeEmpty = false } = {}) {
     const beforeUrl = location.href;
-    const beforeTurns = $$(S.assistantTurn).length;
+    const beforeTurns = $$(S.assistantTurn).filter((el) => el.offsetParent !== null).length;
 
     const clickNewChat = () => {
       /**
@@ -2179,8 +2239,8 @@
     const switched = await waitForDom(
       () =>
         location.href !== beforeUrl ||
-        $$(S.assistantTurn).length < beforeTurns ||
-        $$(S.assistantTurn).length === 0
+        $$(S.assistantTurn).filter((el) => el.offsetParent !== null).length < beforeTurns ||
+        $$(S.assistantTurn).filter((el) => el.offsetParent !== null).length === 0
           ? true
           : null,
       { timeoutMs: 10000 },
@@ -2194,7 +2254,7 @@
      * เพราะห้องเดิมมีภาพของรูปก่อนหน้าค้างอยู่ เครื่องมือจึงเข้าโหมดแก้ภาพเองโดยอัตโนมัติ
      * ต่อให้เขียนกำกับในคำสั่งหนักแค่ไหนก็ไม่ชนะบริบทของห้อง
      */
-    const after = $$(S.assistantTurn).length;
+    const after = $$(S.assistantTurn).filter((el) => el.offsetParent !== null).length;
     if (!switched && after > 0 && after >= beforeTurns) {
       return { ok: false, reason: `คลิกเริ่มแชตใหม่แล้วแต่ยังอยู่ห้องเดิม (คำตอบเดิมค้างอยู่ ${after} รายการ · URL ไม่เปลี่ยน)` };
     }
@@ -2205,11 +2265,11 @@
      * ค้างไว้อีกเสี้ยววินาทีหลัง URL เปลี่ยนแล้ว ถ้าเช็คจังหวะนั้นจะฟ้องผิดทุกครั้ง
      */
     if (mustBeEmpty) {
-      const empty = await waitForDom(() => ($$(S.assistantTurn).length === 0 ? true : null), { timeoutMs: 8000 });
+      const empty = await waitForDom(() => ($$(S.assistantTurn).filter((el) => el.offsetParent !== null).length === 0 ? true : null), { timeoutMs: 8000 });
       if (!empty) {
         return {
           ok: false,
-          reason: `ห้องแชตใหม่ยังมีคำตอบเดิมค้างอยู่ ${$$(S.assistantTurn).length} รายการ — เครื่องมือสร้างภาพจะเข้าโหมดแก้ภาพเดิม`,
+          reason: `ห้องแชตใหม่ยังมีคำตอบเดิมค้างอยู่ ${$$(S.assistantTurn).filter((el) => el.offsetParent !== null).length} รายการ — เครื่องมือสร้างภาพจะเข้าโหมดแก้ภาพเดิม`,
         };
       }
     }
@@ -2418,7 +2478,7 @@
           }};
           if (!fresh) return {turnId,status:'error',text:'',meta:{
             error:'outcome_unknown',
-            detail:'เบราว์เซอร์กด Enter แล้ว แต่ยังจับข้อความที่ส่งไม่ได้ — ไม่กดซ้ำเพื่อป้องกันงานซ้อน',
+            detail:`เบราว์เซอร์กด Enter แล้ว แต่ยังจับข้อความที่ส่งไม่ได้ — ไม่กดซ้ำเพื่อป้องกันงานซ้อน [${receiptEvidence(prompt, sendError)}]`,
             sendMs:Date.now()-sendStartedAt,
           }};
         }
@@ -2459,7 +2519,7 @@
         // Empty/replaced composer is ambiguous, NOT evidence that nothing was sent.
         fresh = await waitForDom(()=>findUserReceipt(prompt,userMessagesBefore),{timeoutMs:15000});
         if (!fresh) return {turnId,status:'error',text:'',meta:{
-          error:'outcome_unknown', detail:'ช่องพิมพ์เปลี่ยนหรือเริ่มตอบแล้ว แต่ยังจับข้อความที่ส่งไม่ได้ — ไม่ส่งซ้ำ',
+          error:'outcome_unknown', detail:`ช่องพิมพ์เปลี่ยนหรือเริ่มตอบแล้ว แต่ยังจับข้อความที่ส่งไม่ได้ — ไม่ส่งซ้ำ [${receiptEvidence(prompt, sendError)}]`,
           sendMs:Date.now()-sendStartedAt,
         }};
       }
