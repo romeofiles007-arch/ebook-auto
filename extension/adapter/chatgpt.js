@@ -28,15 +28,37 @@
   window.__ebookAutoAdapter = true;
   window.__ebookAutoAdapterAlive = adapterAlive;
 
+  /**
+   * หน้า ChatGPT ถูกเขียนใหม่ทั้งโครง (ต.ค. 2026) — ของเก่าหายไปพร้อมกันหมด
+   *
+   * สิ่งที่หายไป: #prompt-textarea · [data-message-author-role] · <article> ·
+   * data-testid="conversation-turn-N" และ testid ของปุ่มส่ง/หยุด/คัดลอก/สลับโมเดลทั้งชุด
+   * อาการแรกที่เห็นคือค้างที่ "รอหน้า ChatGPT พร้อม" เพราะหาช่องพิมพ์ไม่เจอตั้งแต่ด่านแรก
+   * แต่ถึงผ่านด่านนั้นได้ ด่านถัดไปก็พังต่อทุกด่านด้วยเหตุผลเดียวกัน
+   *
+   * โครงใหม่ (อ่านจากหน้าจริง):
+   *   div[data-turn-key]                                   หนึ่งเทิร์น = คำสั่งของเรา + คำตอบ อยู่กล่องเดียวกัน
+   *     div[data-content-search-turn-key="fallback-turn-4"]  เลขลำดับเทิร์น
+   *       div[data-chatgpt-search-unit-key="…:0:user"]       ข้อความของเรา (+ ปุ่ม Copy message ของมันเอง)
+   *         div[data-user-message-bubble]
+   *       div[data-chatgpt-search-message-ids]               คำตอบ (เทิร์นข้อความมี unit-key "…:assistant" ด้วย เทิร์นภาพไม่มี)
+   *         h4[data-conversation-role="assistant"]           หัว "ChatGPT said:" ที่มองไม่เห็นแต่ติดมาใน innerText
+   *       button[aria-label="Copy"] …                        แถบปุ่ม เป็นพี่น้องของคำตอบ ไม่ได้อยู่ข้างใน
+   *
+   * selector ทุกตัวเก็บของเก่าไว้ข้างหน้า เผื่อบัญชีที่ยังได้หน้าเดิม
+   */
   const DEFAULT_SELECTORS = {
-    composer: '#prompt-textarea, div[contenteditable="true"][id="prompt-textarea"]',
+    composer:
+      '#prompt-textarea, form div.ProseMirror[contenteditable="true"], div[contenteditable="true"][role="textbox"][data-composer-markdown]',
     sendButton: '[data-testid="send-button"], button[aria-label*="send" i], button[aria-label*="ส่ง" i], button[title*="send" i]',
     stopButton: '[data-testid="stop-button"], button[aria-label*="Stop" i]',
-    assistantTurn: '[data-message-author-role="assistant"], [data-turn="assistant"]:not(:has([data-message-author-role="assistant"]))',
+    assistantTurn:
+      '[data-message-author-role="assistant"], [data-turn="assistant"]:not(:has([data-message-author-role="assistant"])), [data-turn-key] [data-chatgpt-search-message-ids]:not([data-chatgpt-search-unit-key$=":user"])',
+    userTurn: '[data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]',
     turnContainer: 'main',
     codeBlock: 'pre code',
     copyButton: '[data-testid="copy-turn-action-button"], button[aria-label*="Copy" i]',
-    modelBadge: '[data-testid="model-switcher-dropdown-button"]',
+    modelBadge: '[data-testid="model-switcher-dropdown-button"], button[aria-label*="model" i]',
     newChatButton: '[data-testid="create-new-chat-button"], button[aria-label*="new chat" i], button[title*="new chat" i], a[aria-label*="new chat" i], a[href="/"]',
     errorRetry: '[data-testid="regenerate-thread-error-button"]',
     limitNotice:
@@ -100,9 +122,19 @@
 
   chrome.storage.local.get(['selectors', 'limitPatterns']).then((o) => {
     if (o.selectors) S = { ...DEFAULT_SELECTORS, ...o.selectors };
-    // Migrate the old saved selector too: image-only replies now use data-turn.
-    if (S.assistantTurn === '[data-message-author-role="assistant"]') {
-      S.assistantTurn = DEFAULT_SELECTORS.assistantTurn;
+    /**
+     * ค่าที่เคยบันทึกไว้จากหน้าตั้งค่าคือ "ค่าตั้งต้นของรุ่นก่อน" เกือบทุกครั้ง ไม่ใช่ค่าที่ตั้งใจปรับเอง
+     * ถ้าปล่อยให้มันทับ ค่าตั้งต้นใหม่จะไม่มีวันได้ใช้ และหน้าเว็บโครงใหม่ก็จะหาอะไรไม่เจอเหมือนเดิม
+     * ตัวที่ไม่รู้จักโครงใหม่เลยจึงถูกแทนด้วยค่าตั้งต้น ส่วนตัวที่ผู้ใช้ปรับให้รู้จักแล้วยังอยู่ครบ
+     */
+    const knowsNewLayout = {
+      composer: /ProseMirror|role="textbox"/,
+      assistantTurn: /data-turn-key|data-chatgpt-search/,
+      userTurn: /data-chatgpt-search/,
+      modelBadge: /aria-label/,
+    };
+    for (const [key, re] of Object.entries(knowsNewLayout)) {
+      if (!re.test(String(S[key] || ''))) S[key] = DEFAULT_SELECTORS[key];
     }
     if (o.limitPatterns?.length) LIMITS = o.limitPatterns;
   });
@@ -247,7 +279,7 @@
 
   /** ข้อความล่าสุดที่ "เรา" ส่ง ใช้เป็นหมุดว่าอะไรคือคำตอบของเทิร์นนี้ */
   function lastUserTurn() {
-    const turns = $$('[data-message-author-role="user"]');
+    const turns = $$(S.userTurn);
     return turns[turns.length - 1] || null;
   }
 
@@ -287,7 +319,21 @@
     return turns.filter((t) => anchor.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING);
   }
 
-  const turnHasContent = (t) => !!t && (!!(t.innerText || '').trim() || !!t.querySelector('img'));
+  /**
+   * ข้อความของคำตอบ โดยไม่มีหัว "ChatGPT said:" ติดมา
+   *
+   * โครงใหม่ใส่ h4 สำหรับโปรแกรมอ่านหน้าจอไว้ "ข้างใน" กล่องคำตอบ มองไม่เห็นบนจอ
+   * แต่ innerText นับมันด้วย คำตอบทุกใบจึงขึ้นต้นว่า "ChatGPT said:" ตามด้วยบรรทัดว่าง
+   * ปล่อยไว้แล้ว JSON ที่ตอบมาแบบไม่มีบล็อกโค้ดจะแกะไม่ออกทุกครั้ง กล่องที่ยังว่างจะถูกนับว่ามีเนื้อ
+   * และป้าย "Thinking" จะไม่ตรงกับตัวจับป้ายอีกต่อไป
+   */
+  function turnText(t) {
+    const all = t?.innerText || '';
+    const head = t?.querySelector?.('[data-conversation-role]')?.innerText || '';
+    return head && all.startsWith(head) ? all.slice(head.length).replace(/^\s+/, '') : all;
+  }
+
+  const turnHasContent = (t) => !!t && (!!turnText(t).trim() || !!t.querySelector('img'));
 
   /**
    * กล่องคำตอบใบที่มีของจริง ไม่ใช่ใบสุดท้ายที่บังเอิญว่างเปล่า
@@ -342,6 +388,25 @@
   }
 
   function actionBarFor(turn) {
+    /**
+     * โครงใหม่: แถบปุ่มเป็นพี่น้องของกล่องคำตอบ อยู่ในกล่องเทิร์นเดียวกับข้อความของเรา
+     *
+     * การไต่ขึ้นทีละชั้นแบบเดิมใช้ไม่ได้ที่นี่ และพังไปทางอันตรายด้วย: ชั้นแรกที่ไต่ถึง
+     * มีปุ่ม "Copy message" ของข้อความเราเองอยู่ ซึ่งโผล่ตั้งแต่วินาทีที่ส่ง
+     * ถ้านับมันเป็นแถบปุ่ม ทุกคำตอบจะถูกตัดสินว่าจบตั้งแต่ยังพ่นได้ไม่กี่ตัวอักษร
+     *
+     * กล่องเทิร์นหนึ่งใบมีคำสั่งเดียวกับคำตอบของมันเท่านั้น จึงไม่มีทางหยิบแถบปุ่มของเทิร์นอื่น
+     * ที่ต้องกันมีสองอย่าง: ปุ่มของข้อความฝั่งเรา กับปุ่มที่อยู่ในเนื้อคำตอบ (หัวบล็อกโค้ด)
+     */
+    const shell = turn?.closest?.('[data-turn-key]');
+    if (shell) {
+      return (
+        [...shell.querySelectorAll(S.copyButton)].find(
+          (b) => !b.closest(S.userTurn) && !b.closest(S.assistantTurn),
+        ) || null
+      );
+    }
+
     const root = $(S.turnContainer) || document.body;
     let el = turn;
     for (let depth = 0; el && el !== root && depth < 8; el = el.parentElement, depth++) {
@@ -397,7 +462,7 @@
    */
   const PLACEHOLDER =
     /^(?:thinking|reasoning|analy[sz]ing|working on it|thought for [^\n]{0,24}|(?:search|brows|read|find|gather|visit|check)(?:ing|ed|s)?(?:\s+\d{1,4})?(?:\s+(?:the\s+)?(?:web|websites?|sites?|sources?|results?|links?|pages?))?(?:\s+\d{1,4})?|[A-Za-z][a-z]{2,}ing(?:\s+[A-Za-z0-9'’-]{1,20}){0,4}|กำลัง(?:คิด|ค้นหา|ค้น|อ่าน|ตรวจ|รวบรวม)[^\n]{0,24})[.…·\s]*$/i;
-  const isThinkingOnly = (turn) => PLACEHOLDER.test((turn?.innerText || '').trim());
+  const isThinkingOnly = (turn) => PLACEHOLDER.test(turnText(turn).trim());
 
   function report(turnId, phase, detail, note) {
     chrome.runtime.sendMessage({ type: 'gpt.progress', turnId, phase, detail, note }).catch(() => {});
@@ -408,7 +473,7 @@
     // "usage limit" เอง ทำให้ระบบหยุดทั้งที่ ChatGPT ไม่ได้ติดลิมิตจริง
     // ตรวจเฉพาะ UI แจ้งเตือนนอกกล่องข้อความสนทนาเท่านั้น
     return $$(S.limitNotice).some((el) => {
-      if (el.closest('[data-message-author-role]') || el.closest(S.composer)) return false;
+      if (el.closest('[data-message-author-role], [data-turn-key]') || el.closest(S.composer)) return false;
       if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
       const t = (el.innerText || el.textContent || '').toLowerCase();
       return LIMITS.some((p) => t.includes(p.toLowerCase()));
@@ -869,7 +934,7 @@
       // textContent ไม่บังคับให้เบราว์เซอร์คำนวณ layout ใหม่ ต่างจาก innerText
       // ตัวนี้ถูกเรียกทุกวินาทีระหว่างรอ และบทสนทนายาวได้มาก จึงต้องเบาที่สุด
       const live = (box?.textContent || '').length;
-      return `${live}|${(lastAssistantTurn()?.innerText || '').length}|${$$('img').length}`;
+      return `${live}|${turnText(lastAssistantTurn()).length}|${$$('img').length}`;
     };
     const t0 = Date.now();
     let last = sig();
@@ -1098,7 +1163,9 @@
   const normalizeMessage = (text) => String(text || '').replace(/\s+/g, ' ').trim();
   function userMessageKey(node) {
     return node.getAttribute('data-message-id') ||
-      node.closest('[data-testid^="conversation-turn"]')?.getAttribute('data-testid') || '';
+      node.getAttribute('data-chatgpt-search-message-ids') ||
+      node.closest('[data-testid^="conversation-turn"]')?.getAttribute('data-testid') ||
+      node.closest('[data-turn-key]')?.getAttribute('data-turn-key') || '';
   }
   /**
    * ลำดับของเทิร์นในบทสนทนา — ตัวเลขที่เพิ่มขึ้นเรื่อย ๆ และไม่ย้อนกลับ
@@ -1110,16 +1177,24 @@
   const turnIndexOf = (node) => {
     const id = node?.closest?.('[data-testid^="conversation-turn"]')?.getAttribute('data-testid') || '';
     const m = id.match(/(\d+)\s*$/);
-    return m ? Number(m[1]) : NaN;
+    if (m) return Number(m[1]);
+    // โครงใหม่: "fallback-turn-4" — ต้องมีคำว่า turn- นำหน้า ไม่งั้นท้ายรหัสสุ่มที่บังเอิญเป็นเลขจะถูกอ่านเป็นลำดับ
+    const key = node?.closest?.('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key') || '';
+    const k = key.match(/turn-(\d+)$/);
+    return k ? Number(k[1]) : NaN;
   };
   function userReceiptText(node, itemReceipt = false) {
     // Item repair prompts can have a Pasted text file tile before the actual bubble.
     // Keep the existing matching path for every caller that has not opted in.
-    const body = itemReceipt ? node.querySelector?.('[data-testid="collapsible-user-message-content"]') : null;
+    // โครงใหม่: กล่องข้อความของเรามีปุ่ม (Copy message ฯลฯ) และแผ่นไฟล์แนบอยู่ด้วย ตัวหนังสือจริงอยู่ในฟองข้อความ
+    const body =
+      (itemReceipt ? node.querySelector?.('[data-testid="collapsible-user-message-content"]') : null) ||
+      node.querySelector?.('[data-user-message-bubble]') ||
+      null;
     return normalizeMessage(body ? (body.innerText || body.textContent) : (node.innerText || node.textContent));
   }
   function snapshotUserMessages(itemReceipt = false) {
-    const rows = $$('[data-message-author-role="user"]').map(node => ({
+    const rows = $$(S.userTurn).map(node => ({
       key:userMessageKey(node), text:userReceiptText(node, itemReceipt),
       turn:turnIndexOf(node),
     }));
@@ -1143,7 +1218,7 @@
     const expected = normalizeMessage(prompt);
     const head = expected.slice(0, 120);
     const sameMessage = (text) => text === expected || (!!head && text.startsWith(head));
-    const all = $$('[data-message-author-role="user"]');
+    const all = $$(S.userTurn);
     const matches = all.filter(node =>
       sameMessage(userReceiptText(node, before.itemReceipt === true)));
     const oldKeys = new Set(before.map(row=>row.key).filter(Boolean));
@@ -1291,7 +1366,7 @@
   function setupJson(turn, keys = []) {
     if (!turn || !keys.length) return '';
     const codes = $$(S.codeBlock, turn);
-    const raw = (codes.length ? codes.map(c=>c.textContent).join('\n') : turn.innerText || '').trim();
+    const raw = (codes.length ? codes.map(c=>c.textContent).join('\n') : turnText(turn)).trim();
     try {
       const value = JSON.parse(raw);
       return keys.some(key => Array.isArray(value?.[key]) && value[key].length > 0) ? raw : '';
@@ -1393,7 +1468,7 @@
          * รอต่ออีกเก้าสิบวินาทีจึงเป็นการนั่งดูคำตอบที่อ่านจบไปแล้ว
          */
         if (!turn.querySelector('img')) {
-          const quota = imageQuotaNotice(turn.innerText);
+          const quota = imageQuotaNotice(turnText(turn));
           if (quota) {
             report(turnId, 'received', `ChatGPT แจ้งว่าโควตาสร้างภาพหมด: ${quota}`);
             return finish('rate_limited');
@@ -1411,7 +1486,7 @@
         const placeholderOnly = isThinkingOnly(turn) && !turn.querySelector('img');
         if (placeholderOnly && stopButtonVisible()) return;
 
-        const len = (turn.innerText || '').length;
+        const len = turnText(turn).length;
         const hasImg = !!turn.querySelector('img');
 
         const bar = actionBarFor(turn);
@@ -1523,7 +1598,7 @@
               turnId,
               'received',
               placeholderOnly
-                ? `ChatGPT พ่นจบแล้วแต่เหลือแต่ป้ายบอกสถานะ ไม่ใช่คำตอบ: "${(turn.innerText || '').trim().slice(0, 60)}"`
+                ? `ChatGPT พ่นจบแล้วแต่เหลือแต่ป้ายบอกสถานะ ไม่ใช่คำตอบ: "${turnText(turn).trim().slice(0, 60)}"`
                 : 'ChatGPT พ่นจบแล้วแต่คำตอบว่างเปล่า — ไม่รอต่อจนหมดเพดาน',
             );
             return finish('empty');
@@ -1570,10 +1645,10 @@
         const turn = assistantAfter(anchor);
         return [
           started ? 'เห็นคำตอบใหม่แล้ว' : 'ยังไม่เห็นคำตอบใหม่',
-          `ยาว ${turn ? (turn.innerText || '').length : 0} ตัวอักษร`,
+          `ยาว ${turn ? turnText(turn).length : 0} ตัวอักษร`,
           // ครั้งหน้าที่ค้าง ต้องตอบได้ทันทีว่า "ไม่มีคำตอบเลย" หรือ "มีคำตอบแต่เราจ้องผิดใบ"
           after.length > 1
-            ? `กล่องคำตอบหลังคำสั่ง ${after.length} ใบ [${after.map((t) => (t.innerText || '').length).join(', ')}]`
+            ? `กล่องคำตอบหลังคำสั่ง ${after.length} ใบ [${after.map((t) => turnText(t).length).join(', ')}]`
             : '',
           stopButtonVisible() ? 'ยังพ่นอยู่' : 'หยุดพ่นแล้ว',
           turn && actionBarFor(turn) ? 'เจอแถบปุ่มแล้ว' : 'ยังไม่เจอแถบปุ่ม',
@@ -1610,7 +1685,7 @@
       return { text: codes.map((c) => c.textContent).join('\n'), blocks: codes.length };
     }
     // ไม่มีบล็อกโค้ด — คืนข้อความล้วนให้ชั้นบนตัดสินใจ
-    return { text: turn.innerText || '', blocks: 0 };
+    return { text: turnText(turn), blocks: 0 };
   }
 
   /**
@@ -1650,7 +1725,7 @@
    */
   function scanImages(before = { sources: new Set(), elements: new Set() }, anchor = null) {
     anchor = liveAnchor(anchor);
-    const nextUser = anchor && $$('[data-message-author-role="user"]').find(
+    const nextUser = anchor && $$(S.userTurn).find(
       (node) => node !== anchor && (anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING),
     );
     const beforeSources = before?.sources instanceof Set ? before.sources : before instanceof Set ? before : new Set();
@@ -1678,7 +1753,7 @@
        * ก็จะนับเป็น "อยู่ข้างใน" ไปด้วย แล้วถูกทิ้งทั้งที่เป็นภาพที่เรารออยู่
        * เกณฑ์ที่ตรงกับเจตนาจริงคือดูว่ารูปนั้นอยู่ในข้อความฝั่งผู้ใช้หรือเปล่า ไม่เกี่ยวกับ anchor
        */
-      if (i.closest('[data-message-author-role="user"]')) continue;
+      if (i.closest(S.userTurn)) continue;
       /**
        * เคยเผลอเพิ่ม "ทั้งเทิร์นที่มีข้อความผู้ใช้ = ของที่เราแนบเอง" ตรงนี้ แล้วพังทันที
        *
@@ -1957,7 +2032,7 @@
       }
 
       const turn = assistantAfter(anchor);
-      if (turn && !stopButtonVisible() && GEN_FAILED.test(turn.innerText || '')) {
+      if (turn && !stopButtonVisible() && GEN_FAILED.test(turnText(turn))) {
         return { status: 'generation_failed', seen: scan.seen, errors: lastCaptureErrors };
       }
 
@@ -1973,7 +2048,7 @@
        * ไม่มีสัญญาณว่ายังทำงาน (ปุ่มหยุด · ข้อความกำลังสร้าง/กำลังคิด) ติดต่อกันครบ 30 วินาทีเท่านั้น
        */
       if (errorAfterAnchor()) {
-        const stillWorking = stopButtonVisible() || (turn && IMAGE_IN_PROGRESS.test(turn.innerText || ''));
+        const stillWorking = stopButtonVisible() || (turn && IMAGE_IN_PROGRESS.test(turnText(turn)));
         if (stillWorking) errorQuietSince = 0;
         else if (!errorQuietSince) errorQuietSince = Date.now();
         if (errorQuietSince && Date.now() - errorQuietSince >= ERROR_GRACE_MS) {
@@ -1989,7 +2064,7 @@
       // ลายเซ็นของ "หน้าเว็บกำลังขยับ" ต้องดูที่เนื้อหาจริงเท่านั้น
       // ปุ่มหยุดเป็นแค่ตัวช่วยตัดสินใจ ห้ามให้มันเป็นส่วนหนึ่งของลายเซ็น
       // ไม่งั้นปุ่มที่กะพริบตอน re-render จะรีเซ็ตนาฬิกานิ่งทิ้งเรื่อย ๆ จนไม่มีวันครบเกณฑ์
-      const sig = `${(turn?.innerText || '').length}|${scan.seen.length}`;
+      const sig = `${turnText(turn).length}|${scan.seen.length}`;
       if (sig !== lastSig) {
         lastSig = sig;
         lastChange = Date.now();
@@ -2067,7 +2142,19 @@
     const beforeTurns = $$(S.assistantTurn).length;
 
     const clickNewChat = () => {
-      const btn = $(S.newChatButton);
+      /**
+       * โครงใหม่มีปุ่ม "New chat in <ชื่อโปรเจกต์>" ซ่อนอยู่ในแถบข้างหลายตัว และเข้า selector เดียวกันหมด
+       * ถ้าหยิบผิดตัว ห้องใหม่จะไปเกิดในโปรเจกต์ของผู้ใช้ พร้อมคำสั่งประจำโปรเจกต์นั้นติดมาด้วย
+       * จึงเอาตัวที่ชื่อ "New chat" ตรงตัวและมองเห็นก่อนเสมอ
+       */
+      const all = $$(S.newChatButton);
+      const label = (el) => (el.getAttribute?.('aria-label') || '').trim();
+      const shown = (el) => el.offsetParent !== null;
+      const btn =
+        all.find((el) => /^new chat$/i.test(label(el)) && shown(el)) ||
+        all.find((el) => !/^new chat in /i.test(label(el)) && shown(el)) ||
+        all.find((el) => !/^new chat in /i.test(label(el))) ||
+        null;
       if (btn) {
         btn.click();
         return true;

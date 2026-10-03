@@ -23,7 +23,7 @@ const machine = await readFile(new URL('./machine.js', import.meta.url), 'utf8')
 test('ตัวสแกนกันเฉพาะสิ่งที่แน่นอน ไม่เดาจากตำแหน่งในหน้าเว็บ', () => {
   const scan = adapter.slice(adapter.indexOf('function scanImages('), adapter.indexOf('function readImages('));
   // อยู่ในก้อนข้อความของผู้ใช้ = แน่นอน
-  assert.match(scan, /i\.closest\('\[data-message-author-role="user"\]'\)\) continue;/);
+  assert.match(scan, /i\.closest\(S\.userTurn\)\) continue;/);
   // อยู่ในช่องพิมพ์ = ยังไม่ได้ส่งด้วยซ้ำ แน่นอนเช่นกัน
   assert.match(scan, /i\.closest\('form'\)\?\.contains\(\$\(S\.composer\)\)\) continue;/);
   // ห้ามกันทั้งเทิร์น — กว้างเกินไปและตัดภาพที่เรารออยู่ทิ้ง

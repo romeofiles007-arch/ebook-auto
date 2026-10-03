@@ -411,12 +411,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             target,
             args: [text, !!msg.requireDraft || !!msg.enterOnly],
             func: (expected, requireDraft) => {
-              const box = document.querySelector('#prompt-textarea');
+              const box = document.querySelector('#prompt-textarea, form div.ProseMirror[contenteditable="true"]');
               if (!box) return false;
               if (requireDraft) {
                 const norm = s => String(s || '').replace(/\s+/g,' ').trim();
                 if (norm(box.innerText) !== norm(expected)) return false;
-                const busy = [...document.querySelectorAll('[data-testid="stop-button"]')].some(b => {
+                // หน้า ChatGPT โครงใหม่ไม่มี testid ของปุ่มหยุดแล้ว เหลือแต่ป้ายกำกับ — ตัดปุ่มโหมดเสียงที่ชื่อขึ้นต้นว่า Stop เหมือนกันออก
+                const busy = [...document.querySelectorAll('[data-testid="stop-button"], form button[aria-label*="Stop" i]')].some(b => {
+                  if (/voice|dictat|record|audio/i.test(b.getAttribute?.('aria-label') || '')) return false;
                   // ChatGPT ค้างปุ่มวงกลมชื่อ Stop answering ไว้ได้แม้ภาพเสร็จแล้ว แต่ปุ่มนั้น disabled
                   // ผู้ใช้กด Enter เองส่งต่อได้ตามปกติ จึงนับว่า busy เฉพาะปุ่ม Stop ที่กดได้จริง
                   if (b.disabled || b.getAttribute?.('aria-disabled') === 'true') return false;
@@ -447,7 +449,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             target,
             args: [text, msg.enterOnly ? Number(msg.expectedAttachments || 0) : null],
             func: (expected, expectedAttachments) => {
-              const box = document.querySelector('#prompt-textarea');
+              const box = document.querySelector('#prompt-textarea, form div.ProseMirror[contenteditable="true"]');
               const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
               if (expectedAttachments !== null) {
                 const form = box?.closest('form');

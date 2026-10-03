@@ -21,7 +21,7 @@ test('สัญญาณชีพต้องเห็นตอนที่โ�
   assert.match(fn, /S\.turnContainer/);
   assert.match(fn, /box\?\.textContent/);
   // ยังต้องดูคำตอบกับรูปเหมือนเดิม แค่เพิ่มตัวที่จับ "กำลังคิด" ได้
-  assert.match(fn, /lastAssistantTurn\(\)\?\.innerText/);
+  assert.match(fn, /turnText\(lastAssistantTurn\(\)\)/);
   assert.match(fn, /\$\$\('img'\)\.length/);
 });
 

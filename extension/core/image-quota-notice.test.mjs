@@ -70,7 +70,7 @@ test('คำตอบธรรมดาและคำตอบว่าง ไ�
  * เส้นทางคือ pollForImage → rate_limited → turn() โยน RateLimited → งานหยุดและรอคนสั่งทำต่อ
  */
 test('ทางเดินของการหยุดต่อกันครบ ตั้งแต่หน้าเว็บถึงตัวงาน', async () => {
-  assert.match(src, /const quota = imageQuotaNotice\(turn\.innerText\);[\s\S]{0,300}finish\('rate_limited'\)/);
+  assert.match(src, /const quota = imageQuotaNotice\(turnText\(turn\)\);[\s\S]{0,300}finish\('rate_limited'\)/);
 
   const machine = await readFile(new URL('./machine.js', import.meta.url), 'utf8');
   assert.match(

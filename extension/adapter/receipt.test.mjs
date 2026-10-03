@@ -26,6 +26,7 @@ const msg = (text, turn, id = '') => ({
 function pageWith(nodes) {
   const scope = {
     $$: () => nodes,
+    S: { userTurn: '[data-message-author-role="user"]' },
     Number, String,
     normalizeMessage: (t) => String(t || '').replace(/\s+/g, ' ').trim(),
   };

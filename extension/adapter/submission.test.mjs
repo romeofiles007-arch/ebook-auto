@@ -9,7 +9,7 @@ const constFn=(name)=>{const start=source.indexOf('const '+name+' = ');return so
 const node=(key,text)=>({innerText:text,getAttribute:()=>key,closest:()=>null});
 test('receipt matches prompt and new identity even when a long chat keeps the same DOM count',()=>{
  let rows=[node('old','prompt')];
- const ctx={$$:()=>rows,normalizeMessage:s=>String(s).replace(/\s+/g,' ').trim()};
+ const ctx={$$:()=>rows,S:{},normalizeMessage:s=>String(s).replace(/\s+/g,' ').trim()};
  vm.createContext(ctx);vm.runInContext([constFn('turnIndexOf'),...['userMessageKey','userReceiptText','snapshotUserMessages','findUserReceipt'].map(n=>fn(n))].join('\n'),ctx);
  const before=ctx.snapshotUserMessages();
  rows=[node('old','prompt')];assert.equal(ctx.findUserReceipt('prompt',before),null,'rerender is not a submission');
@@ -66,7 +66,7 @@ test('native fallback refuses a changed draft or an active response before touch
 test('ข้อความยาวที่หน้าเว็บพับท้ายทิ้ง ยังนับเป็นใบเสร็จของเราได้', () => {
   const long = 'คุณคือบรรณาธิการตั้งชื่อหนังสือมืออาชีพ ' + 'ก'.repeat(4000);
   let rows = [];
-  const ctx = { $$: () => rows, normalizeMessage: (s) => String(s).replace(/\s+/g, ' ').trim() };
+  const ctx = { $$: () => rows, S: {}, normalizeMessage: (s) => String(s).replace(/\s+/g, ' ').trim() };
   vm.createContext(ctx);
   vm.runInContext(['userMessageKey', 'userReceiptText', 'snapshotUserMessages', 'findUserReceipt'].map((n) => fn(n)).join('\n'), ctx);
   const before = ctx.snapshotUserMessages();
@@ -77,7 +77,7 @@ test('ข้อความยาวที่หน้าเว็บพับ�
 
 test('ข้อความอื่นที่ขึ้นต้นคนละแบบ ยังไม่ถูกนับเป็นใบเสร็จของเรา', () => {
   let rows = [];
-  const ctx = { $$: () => rows, normalizeMessage: (s) => String(s).replace(/\s+/g, ' ').trim() };
+  const ctx = { $$: () => rows, S: {}, normalizeMessage: (s) => String(s).replace(/\s+/g, ' ').trim() };
   vm.createContext(ctx);
   vm.runInContext(['userMessageKey', 'userReceiptText', 'snapshotUserMessages', 'findUserReceipt'].map((n) => fn(n)).join('\n'), ctx);
   const before = ctx.snapshotUserMessages();
